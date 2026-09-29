@@ -39,6 +39,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Fills are unions of convex pieces (epaint fans closed paths).
+- Colors: a category gives an OKLCH hue, optionally chroma and lightness.
+  Core only carries that. The GUI resolves it with `palette` into a `Swatch`
+  (fill, edge, shadow, highlight, muted, ink) by stepping lightness and chroma,
+  so every category sits at the same perceived lightness; displayed as sRGB.
+  Other consumers choose their own scheme.
 
 ## Deferred
 

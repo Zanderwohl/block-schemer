@@ -4,8 +4,9 @@
 use block_parse::edit::Target;
 use block_parse::language::{LiteralKind, Shape};
 use block_parse::program::BlockId;
-use egui::{Color32, Pos2, Rect};
+use egui::{Pos2, Rect};
 
+use crate::color::Swatch;
 use crate::shape::{BottomEdge, TopEdge};
 
 pub const ROW_HEIGHT: f32 = 40.0;
@@ -46,9 +47,7 @@ pub struct PlacedBlock {
     /// Without hat rise or tab.
     pub rect: Rect,
     pub form: Form,
-    pub fill: Color32,
-    pub outline: Color32,
-    pub ink: Color32,
+    pub swatch: Swatch,
     pub labels: Vec<PlacedLabel>,
     /// Rows and arms, excluding branch mouths.
     pub hit: Vec<Rect>,

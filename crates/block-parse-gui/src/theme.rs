@@ -2,8 +2,11 @@
 
 use egui::Color32;
 
+use crate::color::SwatchRecipe;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
+    pub swatch: SwatchRecipe,
     pub canvas: Color32,
     pub palette: Color32,
     pub palette_heading: Color32,

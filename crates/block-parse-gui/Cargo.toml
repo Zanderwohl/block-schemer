@@ -13,6 +13,7 @@ app = ["dep:eframe"]
 [dependencies]
 block-parse.workspace = true
 egui.workspace = true
+palette.workspace = true
 eframe = { workspace = true, optional = true }
 
 [[bin]]

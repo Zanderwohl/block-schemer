@@ -17,6 +17,6 @@ pub mod value;
 pub use ast::{Ast, Expr, Node, Problem, Stmt};
 pub use debug::{Annotation, DebugView, Pause, RunCommand, RunStatus, Runner};
 pub use edit::{Fragment, Location, Target};
-pub use language::{BlockDef, BlockKind, Language};
+pub use language::{BlockDef, BlockKind, CategoryColor, Language};
 pub use program::{Block, BlockId, Input, Program, Stack};
-pub use value::{Rgb, Value};
+pub use value::Value;

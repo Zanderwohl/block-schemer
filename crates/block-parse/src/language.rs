@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::value::{Rgb, Value};
+use crate::value::Value;
 
 /// Always RON, whatever the file is named.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,8 +47,7 @@ pub struct TypeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CategoryConfig {
     pub name: String,
-    /// `"#rrggbb"`.
-    pub color: String,
+    pub color: CategoryColor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,11 +61,23 @@ pub struct BlockConfig {
     /// `{name:type=default}` is an input, `[name]` a branch, the rest label:
     /// `"if {cond:bool} then [then] else [else]"`.
     pub spec: String,
-    /// `"#rrggbb"`, overriding the category's.
-    #[serde(default)]
-    pub color: Option<String>,
     #[serde(default)]
     pub doc: Option<String>,
+}
+
+/// OKLCH. Only the hue is required; the GUI supplies the rest from its theme
+/// and derives edges, shadows and highlights from it. Checked against these
+/// ranges when compiled.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CategoryColor {
+    /// Degrees, `0.0..360.0`.
+    pub hue: f32,
+    /// `0.0..=0.37`. Many hues leave sRGB above about 0.15.
+    #[serde(default)]
+    pub chroma: Option<f32>,
+    /// `0.0..=1.0`.
+    #[serde(default)]
+    pub lightness: Option<f32>,
 }
 
 /// Outline of a slot and of reporters producing the type.
@@ -129,16 +140,15 @@ pub struct TypeDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Category {
     pub name: String,
-    pub color: Rgb,
+    pub color: CategoryColor,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockDef {
     pub opcode: String,
     pub kind: BlockKind,
+    /// Uncategorized blocks are drawn in the GUI's neutral swatch.
     pub category: Option<usize>,
-    /// The block's own color, else its category's.
-    pub color: Rgb,
     /// The parsed spec, in reading order.
     pub parts: Vec<Part>,
     pub doc: Option<String>,

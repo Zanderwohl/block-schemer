@@ -10,8 +10,3 @@ pub enum Value {
     Number(f64),
     Text(String),
 }
-
-/// sRGB. Kept as a `"#rrggbb"` string in the config until compile, so a bad
-/// color is one more `ConfigProblem` rather than a parse failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Rgb(pub [u8; 3]);

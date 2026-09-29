@@ -2,6 +2,7 @@ use block_parse::ast::Ast;
 use block_parse::debug::RunCommand;
 use block_parse::program::BlockId;
 
+use crate::color::Swatches;
 use crate::interact::{Gesture, LiteralEdit};
 use crate::theme::Theme;
 use crate::view::View;
@@ -14,6 +15,8 @@ pub struct BlockEditor {
     gesture: Gesture,
     edit: Option<LiteralEdit>,
     palette_scroll: f32,
+    /// Resolved when the language changes, not per frame.
+    swatches: Option<Swatches>,
     /// Rebuilt on change, so problems show as you type without re-parsing
     /// every frame.
     ast: Option<Ast>,
