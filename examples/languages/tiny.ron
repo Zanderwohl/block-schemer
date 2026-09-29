@@ -1,0 +1,181 @@
+#![enable(implicit_some)]
+// Tiny: a minimal procedural language. Numbers are f32 at run time; the
+// editor stores literals as f64, so the interpreter narrows them.
+Language(
+    name: "tiny",
+    file: (extension: "tiny", description: "Tiny program"),
+
+    types: {
+        "number": (shape: Round, literal: Number),
+        "text": (shape: Square, literal: Text),
+        "bool": (shape: Hexagon, literal: Bool),
+    },
+
+    categories: [
+        (name: "Events", color: (hue: 95.0)),
+        (name: "Control", color: (hue: 60.0)),
+        (name: "Operators", color: (hue: 145.0)),
+        (name: "Logic", color: (hue: 190.0)),
+        (name: "Variables", color: (hue: 330.0)),
+        (name: "Output", color: (hue: 260.0)),
+    ],
+
+    blocks: [
+        // Events
+        (
+            id: "when_run",
+            name: "When run",
+            category: "Events",
+            kind: Hat,
+            spec: "when program starts",
+            description: "Runs the blocks below it when the program starts.",
+        ),
+
+        // Control
+        (
+            id: "if_else",
+            name: "If / else",
+            category: "Control",
+            spec: "if {condition:bool} then [then] else [else]",
+            tags: ["branching"],
+            description: "Runs the first branch when the condition is true, otherwise the second.",
+        ),
+        (
+            id: "while",
+            name: "While",
+            category: "Control",
+            spec: "while {condition:bool} [body]",
+            tags: ["loop"],
+            description: "Runs its body again and again for as long as the condition is true.",
+        ),
+
+        // Operators
+        (
+            id: "add",
+            name: "Add",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number} + {b:number}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "subtract",
+            name: "Subtract",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number} - {b:number}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "multiply",
+            name: "Multiply",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number} * {b:number}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "divide",
+            name: "Divide",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number} / {b:number}",
+            tags: ["arithmetic"],
+            description: "Dividing by zero gives infinity or NaN, as IEEE floats do.",
+        ),
+        (
+            id: "modulo",
+            name: "Modulo",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number} mod {b:number}",
+            tags: ["arithmetic"],
+            description: "The remainder after dividing a by b.",
+        ),
+        (
+            id: "join",
+            name: "Join text",
+            category: "Operators",
+            kind: Reporter("text"),
+            spec: "join {a:text=hello} {b:text=world}",
+            tags: ["string manipulation"],
+            description: "Puts two pieces of text together, end to end.",
+        ),
+
+        // Logic
+        (
+            id: "less_than",
+            name: "Less than",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number} < {b:number}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "greater_than",
+            name: "Greater than",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number} > {b:number}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "equals",
+            name: "Equals",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number} = {b:number}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "and",
+            name: "And",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:bool} and {b:bool}",
+            tags: ["boolean"],
+        ),
+        (
+            id: "or",
+            name: "Or",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:bool} or {b:bool}",
+            tags: ["boolean"],
+        ),
+        (
+            id: "not",
+            name: "Not",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "not {a:bool}",
+            tags: ["boolean"],
+        ),
+
+        // Variables. Names are typed, since dropdowns of variables are deferred.
+        (
+            id: "set",
+            name: "Set variable",
+            category: "Variables",
+            spec: "set {name:text=x} to {value:any=0}",
+            description: "Stores a value under a name, creating the variable if it is new.",
+        ),
+        (
+            id: "get",
+            name: "Variable",
+            category: "Variables",
+            kind: Reporter("any"),
+            spec: "{name:text=x}",
+            description: "The value last stored under this name.",
+        ),
+
+        // Output
+        (
+            id: "print",
+            name: "Print",
+            category: "Output",
+            spec: "print {value:any=Hello, world!}",
+            description: "Writes a value to the console on a line of its own.",
+        ),
+    ],
+)

@@ -27,6 +27,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe and the `block-parse-editor` binary
   (`cargo editor <language> [program]`).
+- `examples/languages/` — sample language definitions. `tiny.ron` is the
+  small procedural one used for trying things out.
 
 ## Principles
 

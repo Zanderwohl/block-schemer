@@ -10,6 +10,7 @@ use crate::value::Value;
 
 /// Always RON, whatever the file is named.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename = "Language")]
 pub struct LanguageConfig {
     pub name: String,
     pub file: FileConfig,
