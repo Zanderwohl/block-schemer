@@ -31,6 +31,8 @@ pub struct FileConfig {
     pub extension: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub documentation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +56,8 @@ pub struct CategoryConfig {
 pub struct BlockConfig {
     /// The opcode.
     pub id: String,
+    /// For search results and listings; the block itself shows its spec.
+    pub name: String,
     #[serde(default)]
     pub category: Option<String>,
     #[serde(default)]
@@ -65,6 +69,8 @@ pub struct BlockConfig {
     pub tags: Vec<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub documentation: Option<String>,
 }
 
 /// OKLCH. Only the hue is required; the GUI supplies the rest from its theme
@@ -148,6 +154,7 @@ pub struct Category {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockDef {
     pub opcode: String,
+    pub name: String,
     pub kind: BlockKind,
     /// Uncategorized blocks are drawn in the GUI's neutral swatch.
     pub category: Option<usize>,
@@ -158,6 +165,8 @@ pub struct BlockDef {
     pub tags: Vec<String>,
     /// One paragraph, for a tooltip.
     pub description: Option<String>,
+    /// A URL or a relative path; resolving it is the consumer's business.
+    pub documentation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
