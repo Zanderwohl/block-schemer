@@ -1,0 +1,21 @@
+[package]
+name = "block-parse-gui"
+description = "An egui block editor for block-parse languages"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+# The standalone editor window. Off by default so embedding the component never
+# pulls in a windowing backend.
+app = ["dep:eframe"]
+
+[dependencies]
+block-parse.workspace = true
+egui.workspace = true
+eframe = { workspace = true, optional = true }
+
+[[bin]]
+name = "block-parse-editor"
+path = "src/bin/editor.rs"
+required-features = ["app"]

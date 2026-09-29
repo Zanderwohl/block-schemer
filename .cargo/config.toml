@@ -1,0 +1,4 @@
+[alias]
+# The editor needs the `app` feature, which is off by default so that embedding
+# the egui component never drags a windowing backend in with it.
+editor = "run -p block-parse-gui --features app --bin block-parse-editor --"
