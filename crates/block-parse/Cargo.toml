@@ -1,0 +1,9 @@
+[package]
+name = "block-parse"
+description = "Language definitions, programs and ASTs for block-based (Scratch-like) editors"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+ron.workspace = true
