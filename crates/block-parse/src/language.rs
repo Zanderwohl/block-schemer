@@ -62,7 +62,9 @@ pub struct BlockConfig {
     /// `"if {cond:bool} then [then] else [else]"`.
     pub spec: String,
     #[serde(default)]
-    pub doc: Option<String>,
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// OKLCH. Only the hue is required; the GUI supplies the rest from its theme
@@ -151,7 +153,11 @@ pub struct BlockDef {
     pub category: Option<usize>,
     /// The parsed spec, in reading order.
     pub parts: Vec<Part>,
-    pub doc: Option<String>,
+    /// Finer than a category (`"string manipulation"`), for consumers to
+    /// search and sort by. No effect on drawing or rules.
+    pub tags: Vec<String>,
+    /// One paragraph, for a tooltip.
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
