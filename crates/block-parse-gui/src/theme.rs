@@ -1,4 +1,4 @@
-//! Colours that do not come from the language.
+//! Colors that do not come from the language.
 
 use egui::Color32;
 

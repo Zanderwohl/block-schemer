@@ -44,6 +44,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 Runtime-supplied dropdowns (variables, procedures).
 
+## Spelling
+
+American spelling everywhere: code, identifiers, serde field names, comments
+and docs (`color`, `center`, `behavior`).
+
 ## Comments
 
 Comments are a cost. Keep only the why that the code cannot say: constraints,

@@ -48,7 +48,7 @@ pub struct TypeConfig {
 pub struct CategoryConfig {
     pub name: String,
     /// `"#rrggbb"`.
-    pub colour: String,
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ pub struct BlockConfig {
     pub spec: String,
     /// `"#rrggbb"`, overriding the category's.
     #[serde(default)]
-    pub colour: Option<String>,
+    pub color: Option<String>,
     #[serde(default)]
     pub doc: Option<String>,
 }
@@ -129,7 +129,7 @@ pub struct TypeDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Category {
     pub name: String,
-    pub colour: Rgb,
+    pub color: Rgb,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,8 +137,8 @@ pub struct BlockDef {
     pub opcode: String,
     pub kind: BlockKind,
     pub category: Option<usize>,
-    /// The block's own colour, else its category's.
-    pub colour: Rgb,
+    /// The block's own color, else its category's.
+    pub color: Rgb,
     /// The parsed spec, in reading order.
     pub parts: Vec<Part>,
     pub doc: Option<String>,

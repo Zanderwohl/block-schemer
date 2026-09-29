@@ -40,7 +40,7 @@ Read the code until it is either derivable — then cut it — or not.
 ## Scope
 
 State which files before starting, and leave the rest. Two things are out of bounds unless
-asked: code moved verbatim from elsewhere, where the comments travelled with it and the
+asked: code moved verbatim from elsewhere, where the comments traveled with it and the
 verbatim move is the property worth keeping, and anything vendored.
 
 Prefer making the code say it — a named constant, a smaller function, a better type removes the

@@ -80,7 +80,7 @@ pub enum Section {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedLabel {
-    /// Left-centre.
+    /// Left-center.
     pub at: Pos2,
     pub text: String,
 }

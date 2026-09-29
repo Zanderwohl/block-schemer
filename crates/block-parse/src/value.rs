@@ -12,6 +12,6 @@ pub enum Value {
 }
 
 /// sRGB. Kept as a `"#rrggbb"` string in the config until compile, so a bad
-/// colour is one more `ConfigProblem` rather than a parse failure.
+/// color is one more `ConfigProblem` rather than a parse failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb(pub [u8; 3]);
