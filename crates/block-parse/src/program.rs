@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::value::Value;
-
 pub const FORMAT_VERSION: u32 = 1;
 
 /// Only stack positions are stored; block positions are derived, so a language
@@ -51,8 +49,9 @@ pub struct Block {
 /// The literal stays under a plugged reporter and returns when it is removed.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Input {
+    /// As typed, valid or not; parsed when the AST is built.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub literal: Option<Value>,
+    pub literal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Box<Block>>,
 }

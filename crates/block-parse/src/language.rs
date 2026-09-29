@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::value::Value;
+use crate::literal::Validators;
 
 /// Always RON, whatever the file is named.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ use crate::value::Value;
 pub struct LanguageConfig {
     pub name: String,
     pub file: FileConfig,
-    /// `any` is built in.
+    /// No types are built in.
     #[serde(default)]
     pub types: BTreeMap<String, TypeConfig>,
     /// Palette order.
@@ -32,8 +32,6 @@ pub struct FileConfig {
     pub extension: String,
     #[serde(default)]
     pub description: Option<String>,
-    #[serde(default)]
-    pub documentation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,9 +40,24 @@ pub struct TypeConfig {
     pub shape: Shape,
     #[serde(default)]
     pub literal: LiteralKind,
-    /// Other types whose reporters fit this type's slots.
+    /// Reporters this type's slots take besides its own.
     #[serde(default)]
-    pub accepts: Vec<String>,
+    pub accepts: TypeSet,
+    /// Slots this type's reporters go into besides its own. `All` is for
+    /// values typed only at run time, such as a variable getter's.
+    #[serde(default)]
+    pub fits: TypeSet,
+}
+
+/// One side of type compatibility. A reporter fits a slot when the types are
+/// equal, the slot `accepts` it or the reporter `fits` the slot; the last two
+/// put an `Expr::Convert` in the AST so the consumer decides what that means.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TypeSet {
+    #[default]
+    Exactly,
+    Types(Vec<String>),
+    All,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,16 +111,24 @@ pub enum Shape {
     Square,
 }
 
-/// What may be typed into an empty slot.
+/// What may be typed into an empty slot, and how it is checked. See
+/// [`literal`](crate::literal).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub enum LiteralKind {
     /// A reporter must be plugged in; an empty slot is a `Problem`.
     #[default]
     None,
-    Number,
+    /// f64, e-notation included; rejects `inf` and `NaN`.
+    Float,
+    /// i64.
+    Integer,
+    /// Anything.
     Text,
+    /// A checkbox, stored as `"true"` or `"false"`.
     Bool,
     Choice(Vec<String>),
+    /// A validator the consumer registers under this name before compiling.
+    Custom(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -130,6 +151,8 @@ pub struct Language {
     categories: Vec<Category>,
     blocks: Vec<BlockDef>,
     by_opcode: HashMap<String, usize>,
+    /// Every `Custom` literal is resolved here, or the language fails to compile.
+    validators: Validators,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +166,8 @@ pub struct TypeDef {
     pub name: String,
     pub shape: Shape,
     pub literal: LiteralKind,
-    pub accepts: Vec<String>,
+    pub accepts: TypeSet,
+    pub fits: TypeSet,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -182,8 +206,8 @@ pub enum Part {
 pub struct InputDef {
     pub name: String,
     pub ty: String,
-    /// Checked against the type's literal kind. `None` uses the type's default.
-    pub default: Option<Value>,
+    /// Source text, already validated. `None` leaves the slot empty.
+    pub default: Option<String>,
 }
 
 #[derive(Debug)]

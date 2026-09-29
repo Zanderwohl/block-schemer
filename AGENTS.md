@@ -13,7 +13,15 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     blocks are Hat / Statement / Cap / Reporter(type); a spec string like
     `"repeat {times:number=10} [body]"` gives inputs and C-block branches.
     `file.extension` names the language's program files (RON inside,
-    whatever the extension) so consumers can bind file types.
+    whatever the extension) so consumers can bind file types. No types are
+    built in. A reporter fits a slot on an exact type match, or when the
+    slot's type `accepts` it or the reporter's type `fits` the slot; the last
+    two appear in the AST as `Expr::Convert`, and converting is the consumer's
+    job.
+  - `literal`: literals are stored as typed and parsed when the AST is built,
+    so invalid text stays in the program and shows as a problem. Built-in
+    kinds (Float with e-notation, Integer, Text, Bool, Choice) plus
+    consumer-registered `LiteralValidator`s for `Custom(name)`.
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant.
@@ -27,8 +35,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe and the `block-parse-editor` binary
   (`cargo editor <language> [program]`).
-- `examples/languages/` — sample language definitions. `tiny.ron` is the
-  small procedural one used for trying things out.
+- `examples/languages/` — sample language definitions: `tiny.ron` (loose,
+  Scratch-style typing) and `strict_tiny.ron` (the same language with exact
+  types and explicit conversions).
 
 ## Principles
 

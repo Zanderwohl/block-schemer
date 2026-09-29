@@ -1,20 +1,18 @@
 #![enable(implicit_some)]
-// Tiny: a minimal procedural language, typed loosely in the Scratch style.
-// Text slots take any reporter and variables fit any slot; the interpreter
-// converts at run time. See strict_tiny.ron for the same language typed
-// strictly. Numbers are f32 at run time; the interpreter narrows them.
+// Strict Tiny: Tiny with exact types. A slot takes only reporters of its own
+// type, so text is made from numbers and bools with explicit conversion blocks,
+// and each variable type has its own getter and setter. See tiny.ron for the
+// loose version. Numbers are f32 at run time; the interpreter narrows them.
 Language(
-    name: "tiny",
-    file: (extension: "tiny", description: "Tiny program"),
+    name: "strict_tiny",
+    file: (extension: "stiny", description: "Strict Tiny program"),
 
     types: {
         "number": (shape: Round, literal: Float),
-        "text": (shape: Round, literal: Text, accepts: All),
+        "text": (shape: Round, literal: Text),
         "bool": (shape: Hexagon, literal: Bool),
         // Variable names: typed only, so no reporter can compute one.
         "name": (shape: Square, literal: Text),
-        // Whatever a variable holds, known only at run time.
-        "value": (shape: Round, literal: Text, accepts: All, fits: All),
     },
 
     categories: [
@@ -23,6 +21,7 @@ Language(
         (name: "Operators", color: (hue: 145.0)),
         (name: "Logic", color: (hue: 190.0)),
         (name: "Variables", color: (hue: 330.0)),
+        (name: "Conversion", color: (hue: 20.0)),
         (name: "Output", color: (hue: 260.0)),
     ],
 
@@ -160,19 +159,75 @@ Language(
 
         // Variables. Names are typed, since dropdowns of variables are deferred.
         (
-            id: "set",
-            name: "Set variable",
+            id: "set_number",
+            name: "Set number variable",
             category: "Variables",
-            spec: "set {name:name=x} to {value:value=0}",
-            description: "Stores a value under a name, creating the variable if it is new.",
+            spec: "set number {name:name=x} to {value:number=0}",
         ),
         (
-            id: "get",
-            name: "Variable",
+            id: "get_number",
+            name: "Number variable",
             category: "Variables",
-            kind: Reporter("value"),
-            spec: "var {name:name=x}",
-            description: "The value last stored under this name.",
+            kind: Reporter("number"),
+            spec: "number {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+        (
+            id: "set_text",
+            name: "Set text variable",
+            category: "Variables",
+            spec: "set text {name:name=x} to {value:text}",
+        ),
+        (
+            id: "get_text",
+            name: "Text variable",
+            category: "Variables",
+            kind: Reporter("text"),
+            spec: "text {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+        (
+            id: "set_bool",
+            name: "Set bool variable",
+            category: "Variables",
+            spec: "set bool {name:name=x} to {value:bool}",
+        ),
+        (
+            id: "get_bool",
+            name: "Bool variable",
+            category: "Variables",
+            kind: Reporter("bool"),
+            spec: "bool {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+
+        // Conversion
+        (
+            id: "number_to_text",
+            name: "Number to text",
+            category: "Conversion",
+            kind: Reporter("text"),
+            spec: "str {value:number=0}",
+            tags: ["conversion"],
+            description: "The number written out as text.",
+        ),
+        (
+            id: "bool_to_text",
+            name: "Bool to text",
+            category: "Conversion",
+            kind: Reporter("text"),
+            spec: "str {value:bool}",
+            tags: ["conversion"],
+            description: "The word true or false.",
+        ),
+        (
+            id: "text_to_number",
+            name: "Text to number",
+            category: "Conversion",
+            kind: Reporter("number"),
+            spec: "float {value:text=0}",
+            tags: ["conversion"],
+            description: "Text that is not a number is a run-time error.",
         ),
 
         // Output
@@ -181,7 +236,7 @@ Language(
             name: "Print",
             category: "Output",
             spec: "print {value:text=Hello, world!}",
-            description: "Writes a value to the console on a line of its own.",
+            description: "Writes text to the console on a line of its own.",
         ),
     ],
 )

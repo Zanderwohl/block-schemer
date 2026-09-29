@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// A literal typed into a slot. Untagged so files read `10`, not `Number(10)`.
+/// A parsed literal. Untagged so serialized ASTs read `10`, not `Number(10)`.
 /// A dropdown choice is `Text`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
