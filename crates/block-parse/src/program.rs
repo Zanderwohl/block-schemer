@@ -83,7 +83,6 @@ pub enum ProgramError {
 pub enum LoadWarning {
     Extension { expected: String, found: Option<String> },
     Language { expected: String, found: String },
-    /// Newer than this crate's format.
     Version { found: u32 },
 }
 
@@ -232,7 +231,7 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// Writes typed text into a slot. False if the block is gone.
+    /// False if the block is gone.
     pub fn set_literal(&mut self, block: BlockId, input: &str, text: String) -> bool {
         let Some(block) = self.find_mut(block) else {
             return false;

@@ -96,9 +96,7 @@ pub struct BlockConfig {
     pub documentation: Option<String>,
 }
 
-/// OKLCH. Only the hue is required; the GUI supplies the rest from its theme
-/// and derives edges, shadows and highlights from it. Checked against these
-/// ranges when compiled.
+/// OKLCH. Only the hue is required; the GUI supplies the rest from its theme.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CategoryColor {
     /// Degrees, `0.0..360.0`.
@@ -127,16 +125,13 @@ pub enum LiteralKind {
     /// A reporter must be plugged in; an empty slot is a `Problem`.
     #[default]
     None,
-    /// `Value::Float`. Decimal with optional e-notation (`1.5`, `.5`, `1e3`).
-    /// Must be finite: `inf`, `NaN` and overflow such as `1e999` are
-    /// invalid. Surrounding whitespace is ignored; empty text is invalid.
+    /// `Value::Float`, e-notation allowed. Must be finite: `inf`, `NaN` and
+    /// `1e999` are invalid.
     Float,
     /// `Value::Integer`.
     Integer,
-    /// A JavaScript-like number where the back end chooses promotion: an
-    /// integer written without `.` or `e` that fits an i64 is
-    /// `Value::Integer`, otherwise as `Float` (same grammar, same rejects).
-    /// No hex, no `Infinity`.
+    /// `Value::Integer` if written without `.` or `e` and it fits an i64,
+    /// otherwise as `Float`, so the back end chooses promotion.
     Number,
     /// `Value::Currency` in minor units. No decimal places or exactly two:
     /// `12` and `12.30` are 1230; `12.3` is invalid.
@@ -146,8 +141,8 @@ pub enum LiteralKind {
     /// `Value::Unsigned`. `ff`, `0xff` or `#ff`, either case.
     Hex,
     Text,
-    /// A checkbox, stored as `"true"` or `"false"`. A slot with no default
-    /// starts as `"false"`, since a checkbox has no empty state.
+    /// A checkbox, stored as `"true"` or `"false"`; `"false"` when the spec
+    /// gives no default.
     Bool,
     Choice(Vec<String>),
     /// A validator the consumer registers under this name before compiling.
@@ -355,7 +350,6 @@ impl Language {
         if accepts || fits { Fit::Convert } else { Fit::No }
     }
 
-    /// Parses a literal typed into a slot of type `ty`.
     pub fn parse_literal(&self, ty: &str, text: &str) -> Result<Value, String> {
         let ty = self.ty(ty).ok_or_else(|| format!("unknown type `{ty}`"))?;
         literal::parse(&ty.literal, text, &self.validators)
@@ -367,8 +361,6 @@ pub(crate) fn ron_options() -> ron::Options {
     ron::Options::default().with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
 }
 
-/// Printable ASCII without spaces. Names that sit inside specs also exclude
-/// the spec's delimiters.
 fn is_name(name: &str, in_spec: bool) -> bool {
     !name.is_empty()
         && name
@@ -377,7 +369,6 @@ fn is_name(name: &str, in_spec: bool) -> bool {
 }
 
 impl LanguageConfig {
-    /// Checks everything and reports every problem found.
     pub fn compile(self, validators: &Validators) -> Result<Language, LanguageError> {
         let mut problems = Vec::new();
         let mut problem = |block: Option<&str>, message: String| {

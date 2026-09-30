@@ -219,8 +219,7 @@ impl BlockEditor {
                     self.gesture = Gesture::Dragging(drag);
                 } else if input.at.is_some_and(|at| palette_rect.contains(at)) {
                     // Checked before the snap, so dragging out to delete never
-                    // catches a seam on the way. A palette block dropped back
-                    // on the palette changes nothing.
+                    // catches a seam on the way.
                     output.changed |= drag.from_canvas;
                 } else {
                     drop_run(language, program, drag);
@@ -378,8 +377,8 @@ impl BlockEditor {
         }
     }
 
-    /// The pointer has moved far enough for a press to be a drag. Offsets are
-    /// taken from the press, so the run does not jump by the threshold.
+    /// Offsets are taken from the press, so the run does not jump by the
+    /// threshold.
     fn start_drag(
         &self,
         press: Press,
@@ -476,7 +475,7 @@ impl BlockEditor {
         }
     }
 
-    /// Puts a live widget over one literal slot. True if the program changed.
+    /// True if the program changed.
     #[allow(clippy::too_many_arguments)]
     fn literal_field(
         &mut self,
@@ -546,7 +545,6 @@ impl BlockEditor {
     }
 }
 
-/// The best connection within reach for the run in hand, if any.
 fn find_snap(
     language: &Language,
     program: &Program,
@@ -609,8 +607,7 @@ fn find_snap(
     best.map(|(_, target, mark)| (target, mark))
 }
 
-/// Releases a run: where it snapped, else free where it hangs. A reporter
-/// pushed out of a slot lands just below it.
+/// A reporter pushed out of a slot lands just below it.
 fn drop_run(language: &Language, program: &mut Program, drag: Drag) {
     let head = [drag.head.x, drag.head.y];
     let (target, eject) = match drag.snap {

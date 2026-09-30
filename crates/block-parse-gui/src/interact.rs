@@ -34,7 +34,7 @@ pub enum Pressed {
     Block { id: BlockId, top_left: Pos2 },
 }
 
-/// The fragment is taken out of the program on press, so palette and canvas
+/// The fragment is out of the program while dragged, so palette and canvas
 /// drags land through the same code and a drop on the palette deletes.
 #[derive(Debug, Clone)]
 pub struct Drag {

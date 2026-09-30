@@ -106,8 +106,7 @@ pub enum SlotContent {
     Literal {
         kind: LiteralKind,
         text: String,
-        /// The validator's message; drawn as a tag under the slot, which
-        /// takes the theme's error color.
+        /// The validator's message; `None` while the field has focus.
         error: Option<String>,
     },
     /// Needs a reporter.
@@ -300,7 +299,7 @@ impl Layout<'_> {
         }
     }
 
-    /// Lays `blocks` top to bottom from `origin`; returns the total height.
+    /// Returns the total height.
     fn place_sequence(&self, blocks: &[Block], origin: Pos2, depth: u16, scene: &mut Scene) -> f32 {
         let mut y = origin.y;
         for block in blocks {

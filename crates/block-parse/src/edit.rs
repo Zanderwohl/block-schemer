@@ -58,8 +58,7 @@ impl Fragment {
 }
 
 impl Program {
-    /// Takes a block out: a statement with everything below it, or a lone
-    /// reporter. An emptied top-level stack is removed.
+    /// An emptied top-level stack is removed.
     pub fn detach(&mut self, id: BlockId) -> Option<Fragment> {
         let blocks = self.take_run(id)?;
         self.reserve_ids(&blocks);
@@ -196,9 +195,8 @@ impl Program {
         Ok(())
     }
 
-    /// Puts a fragment back into the program. On success, any reporter pushed
-    /// out of an occupied slot is returned for the caller to drop somewhere.
-    /// On failure the fragment is handed back untouched.
+    /// Returns any reporter pushed out of an occupied slot, for the caller to
+    /// drop somewhere. On failure the fragment is handed back untouched.
     pub fn attach(
         &mut self,
         language: &Language,

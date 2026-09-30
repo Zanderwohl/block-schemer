@@ -37,7 +37,6 @@ impl Validators {
     }
 }
 
-/// Parses `text` as `kind`. `Custom` kinds need their validator in `validators`.
 pub fn parse(kind: &LiteralKind, text: &str, validators: &Validators) -> Result<Value, String> {
     match kind {
         LiteralKind::None => Err("takes no typed value".into()),
