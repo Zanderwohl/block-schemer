@@ -1,4 +1,4 @@
-use block_parse::debug::RunCommand;
+use block_parse::host::{Overlay, RunCommand};
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, LiteralKind};
 use block_parse::program::{BlockId, Program};
@@ -58,7 +58,7 @@ pub struct EditorOutput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorEvent {
-    /// A request; the consumer's next `DebugView` has the answer.
+    /// A request; the host's next `Overlay` has the answer.
     ToggleBreakpoint(BlockId),
     /// Clicked, not dragged.
     BlockClicked(BlockId),
@@ -100,6 +100,17 @@ impl BlockEditor {
 
     /// Fills the rest of `ui` with a palette on the left and the canvas.
     pub fn show(&mut self, ui: &mut egui::Ui, language: &Language, program: &mut Program) -> EditorOutput {
+        self.show_with(ui, language, program, &Overlay::default())
+    }
+
+    /// As [`show`](Self::show), drawing the host's `overlay` over the blocks.
+    pub fn show_with(
+        &mut self,
+        ui: &mut egui::Ui,
+        language: &Language,
+        program: &mut Program,
+        overlay: &Overlay,
+    ) -> EditorOutput {
         let mut output = EditorOutput::default();
         let bounds = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(bounds, Sense::click_and_drag());
@@ -255,18 +266,19 @@ impl BlockEditor {
                 theme.palette_heading,
             );
         }
-        paint::scene(&painter, &palette.scene, palette_t, &theme, false);
+        paint::scene(&painter, &palette.scene, palette_t, &theme, false, &Overlay::default());
 
         let canvas = ui.painter_at(canvas_rect);
         canvas.rect_filled(canvas_rect, 0.0, theme.canvas);
         grid(&canvas, canvas_rect, t, theme.grid);
-        paint::scene(&canvas, &scene, t, &theme, !read_only);
+        paint::scene(&canvas, &scene, t, &theme, !read_only, overlay);
         if let Gesture::Dragging(drag) = &self.gesture
             && let Some((_, mark)) = &drag.snap
         {
             paint::snap_mark(&canvas, mark, t, &theme);
         }
         paint::error_tags(&canvas, &scene, t, &theme);
+        paint::markers(&canvas, &scene, t, &theme, overlay);
 
         if !read_only {
             let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
@@ -288,7 +300,7 @@ impl BlockEditor {
             // palette on the way to being deleted.
             let floating = ctx.layer_painter(LayerId::new(Order::Foreground, self.id.with("drag")));
             let run = layout.run(&drag.fragment.blocks, drag.head);
-            paint::scene(&floating, &run.scene, t, &theme, false);
+            paint::scene(&floating, &run.scene, t, &theme, false, &Overlay::default());
             ctx.set_cursor_icon(CursorIcon::Grabbing);
         } else if let Some(at) = over {
             let on_palette = palette_rect.contains(at);
@@ -462,6 +474,10 @@ impl BlockEditor {
                 self.menu = None;
                 ui.close();
             }
+        }
+        if ui.button("Toggle breakpoint").clicked() {
+            output.events.push(EditorEvent::ToggleBreakpoint(id));
+            ui.close();
         }
         if let Some(def) = def
             && let Some(link) = &def.documentation
@@ -669,5 +685,19 @@ impl Measure for EguiMeasure<'_> {
                 .size()
                 .x
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn send_and_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn the_editor_and_what_it_edits_can_live_in_a_bevy_resource() {
+        send_and_sync::<BlockEditor>();
+        send_and_sync::<Language>();
+        send_and_sync::<Program>();
     }
 }

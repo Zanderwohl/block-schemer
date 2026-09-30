@@ -1,12 +1,16 @@
 //! Scene to egui shapes. Everything is laid out in canvas units and mapped
 //! through a [`Transform`] here, fonts included.
 
+use std::collections::HashMap;
+
+use block_parse::host::{Highlight, Overlay};
 use block_parse::language::{LiteralKind, Shape};
+use block_parse::program::BlockId;
 use egui::epaint::Mesh;
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 
 use crate::interact::SnapMark;
-use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, PlacedBlock, PlacedSlot, Scene, SlotContent};
+use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
 use crate::theme::Theme;
 
@@ -35,12 +39,72 @@ impl Transform {
     }
 }
 
+const ACCENT_WIDTH: f32 = 3.0;
+/// Under every accent, so it never depends on contrast with the block.
+const HALO_WIDTH: f32 = ACCENT_WIDTH + 2.5;
+
 /// `live` marks literals that real widgets will cover: only their backgrounds
 /// are painted, or the text would show twice.
-pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live: bool) {
+pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live: bool, overlay: &Overlay) {
+    let highlights = by_block(overlay);
     for block in &scene.blocks {
-        paint_block(painter, block, t, theme, live);
+        let accent = highlights.get(&block.id).map(|h| theme.highlight(h.style));
+        let muted = overlay.muted.contains(&block.id);
+        paint_block(painter, block, t, theme, live, accent, muted);
     }
+}
+
+/// Breakpoints, highlight labels and annotations, drawn over every block.
+pub fn markers(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, overlay: &Overlay) {
+    let highlights = by_block(overlay);
+    for block in &scene.blocks {
+        let row = pos2(block.rect.max.x, first_row_center(block));
+        let mut tags = 0.0;
+        if overlay.breakpoints.contains(&block.id) {
+            let at = t.pos(pos2(block.rect.min.x, row.y)) - vec2(8.0 * t.zoom, 0.0);
+            painter.circle(at, 5.0 * t.zoom, theme.breakpoint, Stroke::new(1.5 * t.zoom, theme.halo));
+        }
+        if let Some(highlight) = highlights.get(&block.id)
+            && let Some(label) = &highlight.label
+        {
+            let fill = theme.highlight(highlight.style);
+            tag(painter, t.pos(row) + vec2(6.0 * t.zoom, 0.0), label, fill, theme.literal_ink, t.zoom);
+            tags += 1.0;
+        }
+        for annotation in overlay.annotations.iter().filter(|a| a.block == block.id) {
+            let fill = match annotation.severity {
+                block_parse::ast::Severity::Error => theme.error,
+                block_parse::ast::Severity::Warning => theme.warning,
+            };
+            let at = t.pos(row) + vec2(6.0, 18.0 * tags) * t.zoom;
+            tag(painter, at, &annotation.message, fill, Color32::WHITE, t.zoom);
+            tags += 1.0;
+        }
+    }
+}
+
+/// Where one block has several highlights, the last wins.
+fn by_block(overlay: &Overlay) -> HashMap<BlockId, &Highlight> {
+    overlay.highlights.iter().map(|highlight| (highlight.block, highlight)).collect()
+}
+
+fn first_row_center(block: &PlacedBlock) -> f32 {
+    match &block.form {
+        Form::Stack(form) => match form.sections.first() {
+            Some(Section::Row { top, bottom } | Section::Branch { top, bottom }) => (top + bottom) / 2.0,
+            None => block.rect.center().y,
+        },
+        Form::Reporter(_) => block.rect.center().y,
+    }
+}
+
+/// A small label, its left edge vertically centered on `left_center`.
+fn tag(painter: &Painter, left_center: Pos2, text: &str, fill: Color32, ink: Color32, zoom: f32) {
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(11.0 * zoom), ink);
+    let size = galley.size() + vec2(8.0, 4.0) * zoom;
+    let rect = Rect::from_min_size(left_center - vec2(0.0, size.y / 2.0), size);
+    painter.rect_filled(rect, radius(3.0 * zoom), fill);
+    painter.galley(rect.min + vec2(4.0, 2.0) * zoom, galley, ink);
 }
 
 pub fn error_tags(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme) {
@@ -73,16 +137,37 @@ pub fn snap_mark(painter: &Painter, mark: &SnapMark, t: Transform, theme: &Theme
     }
 }
 
-fn paint_block(painter: &Painter, block: &PlacedBlock, t: Transform, theme: &Theme, live: bool) {
+/// An `accent` replaces the block's own edge, so a highlighted block keeps its
+/// shape and size.
+fn paint_block(
+    painter: &Painter,
+    block: &PlacedBlock,
+    t: Transform,
+    theme: &Theme,
+    live: bool,
+    accent: Option<Color32>,
+    muted: bool,
+) {
     let swatch = block.swatch;
-    let edge = Stroke::new((1.0 * t.zoom).max(1.0), swatch.edge);
+    let (body, edge_color) = if muted {
+        (swatch.muted, swatch.muted_edge)
+    } else {
+        (swatch.fill, swatch.edge)
+    };
+    let edge = Stroke::new((1.0 * t.zoom).max(1.0), edge_color);
+    let strokes = |accent: Color32| {
+        [
+            Stroke::new(HALO_WIDTH * t.zoom, theme.halo),
+            Stroke::new(ACCENT_WIDTH * t.zoom, accent),
+        ]
+    };
     match &block.form {
         Form::Stack(form) => {
             let mut mesh = Mesh::default();
             for piece in shape::stack_fill(block.rect, form) {
                 let base = mesh.vertices.len() as u32;
                 for point in &piece {
-                    mesh.colored_vertex(t.pos(*point), swatch.fill);
+                    mesh.colored_vertex(t.pos(*point), body);
                 }
                 for i in 1..piece.len() as u32 - 1 {
                     mesh.add_triangle(base, base + i, base + i + 1);
@@ -90,9 +175,26 @@ fn paint_block(painter: &Painter, block: &PlacedBlock, t: Transform, theme: &The
             }
             painter.add(egui::Shape::mesh(mesh));
             let outline = t.points(shape::stack_outline(block.rect, form));
-            painter.add(egui::Shape::closed_line(outline, edge));
+            match accent {
+                Some(accent) => {
+                    for stroke in strokes(accent) {
+                        painter.add(egui::Shape::closed_line(outline.clone(), stroke));
+                    }
+                }
+                None => {
+                    painter.add(egui::Shape::closed_line(outline, edge));
+                }
+            }
         }
-        Form::Reporter(shape) => fill(painter, *shape, t.rect(block.rect), swatch.fill, edge, t.zoom),
+        Form::Reporter(shape) => {
+            let rect = t.rect(block.rect);
+            fill(painter, *shape, rect, body, edge, t.zoom);
+            if let Some(accent) = accent {
+                for stroke in strokes(accent) {
+                    outline(painter, *shape, rect, stroke, t.zoom);
+                }
+            }
+        }
     }
 
     let font = FontId::proportional(LABEL_SIZE * t.zoom);

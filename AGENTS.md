@@ -31,8 +31,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `ast`: always a whole tree. Faults become `Problem` nodes in place (in
     `Stmt` or `Expr`), keeping what could be parsed in `recovered`. Only
     unreadable RON is fatal.
-  - `debug`: `RunCommand`, `RunStatus`, `DebugView`, `trait Runner`. In core so
-    interpreters need not depend on egui.
+  - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks),
+    `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
+    depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only) and the
   `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
@@ -47,10 +48,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 - `BlockId` is the only handle the outside world has on a block: AST nodes,
   problems, breakpoints and pauses all use it.
-- The editor runs nothing and stores no run state. Status, breakpoints, pauses
-  and annotations come from the consumer each frame. Commands go out either as
-  a polled list in `EditorOutput` or through a `Runner`. Breakpoints are
-  requests; the consumer owns them and their persistence.
+- The editor runs nothing and stores no host state. Breakpoints, highlights
+  (semantic styles the theme colors; pauses are `Active`), annotations and
+  muted blocks come from the host each frame as an `Overlay`. Commands and
+  events go out either as a polled list in `EditorOutput` or through a
+  `Runner`. Breakpoints are requests; the host owns them and their
+  persistence.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Opcodes, type names, input and branch names are printable ASCII without
@@ -72,8 +75,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 ## Deferred
 
 - AST building (`Program::ast`), including `TooDeep` problems on load.
-- The debug overlay (breakpoints, pauses, annotations), `RunToolbar`,
-  `Runner` dispatch and `EditorOptions::toolbar`.
+- `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
 - Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.

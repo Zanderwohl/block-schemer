@@ -13,8 +13,9 @@ pub struct Swatch {
     pub edge: Color32,
     pub shadow: Color32,
     pub highlight: Color32,
-    /// Inactive blocks: same lightness as `fill`, so they keep their weight.
+    /// Muted blocks: same lightness as `fill`, so they keep their weight.
     pub muted: Color32,
+    pub muted_edge: Color32,
     /// Black or white, whichever contrasts with `fill`.
     pub ink: Color32,
 }
@@ -86,6 +87,11 @@ impl SwatchRecipe {
             shadow: step(self.shadow),
             highlight: step(self.highlight),
             muted: step(self.muted),
+            muted_edge: srgb(
+                lightness + self.edge.lightness + self.muted.lightness,
+                chroma * self.edge.chroma * self.muted.chroma,
+                hue,
+            ),
             ink: if lightness > 0.75 {
                 Color32::from_gray(24)
             } else {

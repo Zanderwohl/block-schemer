@@ -1,6 +1,6 @@
 //! Separate from the editor so the host can place it.
 
-use block_parse::debug::{RunCommand, RunStatus};
+use block_parse::host::{RunCommand, RunStatus};
 
 /// Emits commands; runs nothing.
 pub struct RunToolbar<'a> {
