@@ -29,9 +29,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     stack are derived, never stored. Loading is tolerant.
   - `edit`: tree operations by id (`detach`, `can_attach`, `attach`). All
     connection rules live here so GUI and headless tools agree.
-  - `ast`: always a whole tree. Faults become `Problem` nodes in place (in
-    `Stmt` or `Expr`), keeping what could be parsed in `recovered`. Only
-    unreadable RON is fatal.
+  - `ast` (built by `Program::ast`): always a whole tree. Faults become
+    `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
+    parsed in `recovered`. Only unreadable RON is fatal. A stack of one
+    reporter is a loose expression, not a problem; warnings (unknown inputs
+    and branches) leave `is_clean` true.
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui.
@@ -75,7 +77,6 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 ## Deferred
 
-- AST building (`Program::ast`), including `TooDeep` problems on load.
 - `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
 - Undo and redo (the Edit menu items are there, disabled).

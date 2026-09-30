@@ -8,6 +8,7 @@
 //! No geometry here: only stack positions are stored.
 
 pub mod ast;
+mod build;
 pub mod edit;
 pub mod host;
 pub mod language;
