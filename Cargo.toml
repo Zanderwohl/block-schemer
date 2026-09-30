@@ -14,5 +14,8 @@ egui = "0.36"
 eframe = "0.36"
 clap = { version = "4", features = ["derive"] }
 rfd = "0.17"
+# Only for its offscreen wgpu renderer.
+egui_kittest = { version = "0.36", features = ["wgpu"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 winit = "0.30"
 palette = { version = "0.7", default-features = false, features = ["std"] }

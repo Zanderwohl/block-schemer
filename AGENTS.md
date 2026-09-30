@@ -42,9 +42,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only) and the
   `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
-  File/Edit menus are egui for
-  now; `--no-menu-bar` hides them for when native menus arrive. On macOS it
-  turns off winit's default menu, whose Quit would skip the save prompt.
+  File/Edit menus are egui for now; `--no-menu-bar` hides them for when
+  native menus arrive. On macOS it turns off winit's default menu, whose Quit
+  would skip the save prompt. Feature `snapshot` (off by default) renders
+  programs to images offscreen through egui_kittest's wgpu renderer; with it,
+  `--command snapshot` (`cargo snapshot -l <language> <out.png>`) writes
+  `Layout::grid`, every block in a column per category, instead of opening
+  the window.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing) and `strict_tiny.ron` (the same language with exact
   types and explicit conversions).
@@ -89,6 +93,14 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   (fill, edge, shadow, highlight, muted, ink) by stepping lightness and chroma,
   so every category sits at the same perceived lightness; displayed as sRGB.
   Other consumers choose their own scheme.
+
+## Seeing the blocks
+
+To check a drawing change without opening a window, render every block of a
+language and look at the image:
+`cargo snapshot -l examples/languages/tiny.ron <scratch>/tiny.png`
+(`--scale` sets pixels per canvas unit, default 2). For a particular program,
+call `block_parse_gui::snapshot::program`.
 
 ## Deferred
 
