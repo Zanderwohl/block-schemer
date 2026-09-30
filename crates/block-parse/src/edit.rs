@@ -289,7 +289,8 @@ impl Program {
 
     /// Where a run detached at `id` would go to be put back as it was: after
     /// the block above it, at the start of its branch, into its slot, or as
-    /// its whole stack where the stack was.
+    /// its whole stack at its old position. A whole stack comes back last in
+    /// stack order, which changes drawing and script order but nothing else.
     pub fn home_of(&self, id: BlockId) -> Option<Target> {
         Some(match self.locate(id)? {
             Location::Stack { stack, index: 0 } => Target::Free {
@@ -603,6 +604,7 @@ mod tests {
         let language = tiny();
         let mut program = Program::new(&language);
         let ids = stack(&mut program, &language, &["when_run", "while", "print"]);
+        let other = stack(&mut program, &language, &["print"]);
         let inner = program.instantiate(&language, "set").unwrap();
         let join = program.instantiate(&language, "join").unwrap();
         let (inner_id, join_id) = (inner.id, join.id);
@@ -611,11 +613,16 @@ mod tests {
         program.find_mut(ids[2]).unwrap().inputs.get_mut("value").unwrap().block = Some(Box::new(join));
         let before = program.stacks.clone();
 
-        for id in [ids[0], ids[1], ids[2], inner_id, join_id] {
+        let sorted = |stacks: &[Stack]| {
+            let mut stacks = stacks.to_vec();
+            stacks.sort_by_key(|stack| stack.blocks[0].id);
+            stacks
+        };
+        for id in [ids[0], ids[1], ids[2], inner_id, join_id, other[0]] {
             let home = program.home_of(id).unwrap();
             let run = program.detach(id).unwrap();
             program.attach(&language, run, home).unwrap();
-            assert_eq!(program.stacks, before, "{id:?} did not go back as it was");
+            assert_eq!(sorted(&program.stacks), sorted(&before), "{id:?} did not go back as it was");
         }
     }
 

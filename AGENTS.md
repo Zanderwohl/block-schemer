@@ -34,7 +34,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     parsed in `recovered`. Only unreadable RON is fatal. A stack of one
     reporter is a loose expression, not a problem; warnings (unknown inputs
     and branches) leave `is_clean` true.
-  - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks),
+  - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
+    switch states),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off

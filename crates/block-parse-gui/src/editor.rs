@@ -293,11 +293,7 @@ impl BlockEditor {
             };
             let rect = t.rect(rect);
             let mut value = on;
-            if canvas_rect.intersects(rect)
-                && fields
-                    .put(Rect::from_center_size(rect.center(), Vec2::splat(18.0)), egui::Checkbox::without_text(&mut value))
-                    .changed()
-            {
+            if canvas_rect.intersects(rect) && checkbox(&mut fields, rect.center(), t.zoom, &mut value).changed() {
                 output.events.push(EditorEvent::Switched(block.id, value));
             }
         }
@@ -312,6 +308,9 @@ impl BlockEditor {
                     }
                 }
             }
+        }
+        if self.settle_edit(&ctx, language, program) {
+            output.changed = true;
         }
 
         if let Gesture::Dragging(drag) = &self.gesture {
@@ -464,7 +463,9 @@ impl BlockEditor {
 
     /// Puts a run in hand back where it was picked up; a block from the
     /// palette is dropped. For hosts that stop showing the editor, or switch
-    /// program, mid-drag. True if the program changed.
+    /// program, mid-drag. `program` must be the one the drag came from, and
+    /// this must run before switching: ids are only unique within a program.
+    /// True if the program changed.
     pub fn cancel_drag(&mut self, language: &Language, program: &mut Program) -> bool {
         let Gesture::Dragging(drag) = std::mem::take(&mut self.gesture) else {
             return false;
@@ -547,6 +548,33 @@ impl BlockEditor {
         }
     }
 
+    /// Normalizes a literal that lost focus without its field being drawn,
+    /// such as one panned off the canvas or left when the editor went
+    /// read-only. True if the program changed.
+    fn settle_edit(&mut self, ctx: &egui::Context, language: &Language, program: &mut Program) -> bool {
+        let Some(edit) = self.edit.clone() else {
+            return false;
+        };
+        let id = self.id.with((edit.block, edit.input.as_str()));
+        if ctx.memory(|memory| memory.has_focus(id)) {
+            return false;
+        }
+        self.edit = None;
+        let Some(block) = program.find(edit.block) else {
+            return false;
+        };
+        let ty = language
+            .block(&block.opcode)
+            .and_then(|def| def.input(&edit.input))
+            .map(|input| input.ty.clone());
+        let text = block.inputs.get(&edit.input).and_then(|input| input.literal.clone());
+        let (Some(ty), Some(text)) = (ty, text) else {
+            return false;
+        };
+        let tidied = language.normalize_literal(&ty, &text);
+        tidied != text && program.set_literal(edit.block, &edit.input, tidied)
+    }
+
     /// True if the program changed.
     #[allow(clippy::too_many_arguments)]
     fn literal_field(
@@ -565,8 +593,7 @@ impl BlockEditor {
         match kind {
             LiteralKind::Bool => {
                 let mut on = text == "true";
-                let area = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
-                if ui.put(area, egui::Checkbox::without_text(&mut on)).changed() {
+                if checkbox(ui, rect.center(), zoom, &mut on).changed() {
                     return program.set_literal(slot.parent, &slot.input, on.to_string());
                 }
                 false
@@ -614,9 +641,7 @@ impl BlockEditor {
                 }
                 if response.lost_focus() {
                     let tidied = language.normalize_literal(&slot.ty, &buffer);
-                    if tidied != text {
-                        return program.set_literal(slot.parent, &slot.input, tidied);
-                    }
+                    return tidied != text && program.set_literal(slot.parent, &slot.input, tidied);
                 }
                 response.changed() && program.set_literal(slot.parent, &slot.input, buffer)
             }
@@ -684,6 +709,18 @@ fn find_snap(
         }
     }
     best.map(|(_, target, mark)| (target, mark))
+}
+
+/// A checkbox sized to the zoom, like the disabled one painted in its place.
+fn checkbox(ui: &mut egui::Ui, center: Pos2, zoom: f32, value: &mut bool) -> egui::Response {
+    let size = 14.0 * zoom;
+    ui.scope(|ui| {
+        let spacing = ui.spacing_mut();
+        spacing.icon_width = size;
+        spacing.icon_width_inner = size * 0.55;
+        ui.put(Rect::from_center_size(center, Vec2::splat(size)), egui::Checkbox::without_text(value))
+    })
+    .inner
 }
 
 /// A switch the host has given state, so a live checkbox covers it.
@@ -805,6 +842,50 @@ mod tests {
         assert_eq!(program.stacks, before);
         assert!(!editor.is_dragging());
         assert!(!editor.cancel_drag(&language, &mut program), "nothing left to cancel");
+    }
+
+    #[test]
+    fn a_field_left_without_being_drawn_is_still_normalized() {
+        #[derive(Debug)]
+        struct Upper;
+        impl block_parse::LiteralValidator for Upper {
+            fn validate(&self, text: &str) -> Result<block_parse::Value, String> {
+                Ok(block_parse::Value::Text(text.into()))
+            }
+            fn normalize(&self, text: &str) -> String {
+                text.to_ascii_uppercase()
+            }
+        }
+        let mut validators = block_parse::Validators::new();
+        validators.insert("upper", std::sync::Arc::new(Upper));
+        let language = Language::from_ron(
+            r#"Language(
+                name: "codes",
+                file: (extension: "c"),
+                types: { "code": (literal: Custom("upper")) },
+                blocks: [(id: "start", name: "Start", spec: "start {code:code}")],
+            )"#,
+            &validators,
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let start = program.instantiate(&language, "start").unwrap();
+        let id = start.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![start],
+        });
+        program.set_literal(id, "code", "ab".into());
+
+        let mut editor = BlockEditor::default();
+        editor.edit = Some(LiteralEdit {
+            block: id,
+            input: "code".into(),
+        });
+        // A fresh context has nothing focused, as after the field went away.
+        assert!(editor.settle_edit(&egui::Context::default(), &language, &mut program));
+        assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
+        assert!(editor.edit.is_none());
     }
 
     #[test]

@@ -51,6 +51,13 @@ impl Builder<'_> {
         let mut body = Vec::with_capacity(blocks.len());
         for (index, block) in blocks.iter().enumerate() {
             let kind = self.kind(block).cloned();
+            // Tracked before parsing, so a block that fails parsing still
+            // takes the "first after a cap" place, and a failed cap still ends
+            // the reachable run.
+            let first_after_cap = std::mem::take(&mut after_cap);
+            if kind == Some(BlockKind::Cap) {
+                after_cap = true;
+            }
             let node = match self.block(block, depth) {
                 Ok(node) => node,
                 Err(problem) => {
@@ -59,9 +66,8 @@ impl Builder<'_> {
                 }
             };
             let name = self.name(block);
-            let fault = if after_cap {
-                // Only the first: the rest are unreachable for the same reason.
-                after_cap = false;
+            // Only the first: the rest are unreachable for the same reason.
+            let fault = if first_after_cap {
                 Some((ProblemCode::AfterCap, format!("nothing can follow a cap, but `{name}` does")))
             } else {
                 match &kind {
@@ -76,9 +82,6 @@ impl Builder<'_> {
                     _ => None,
                 }
             };
-            if kind == Some(BlockKind::Cap) {
-                after_cap = true;
-            }
             body.push(match fault {
                 Some((code, message)) => Stmt::Problem(Problem {
                     block: Some(block.id),
@@ -146,6 +149,10 @@ impl Builder<'_> {
                 continue;
             }
             let recovered = stored.block.as_deref().and_then(|inner| self.recover(inner, depth + 1));
+            let literal = match &stored.literal {
+                Some(text) => format!(" (it held {text:?})"),
+                None => String::new(),
+            };
             args.push(Arg {
                 name: name.clone(),
                 value: Expr::Problem(Box::new(Problem {
@@ -153,7 +160,7 @@ impl Builder<'_> {
                     slot: Some((block.id, name.clone())),
                     code: ProblemCode::UnknownInput,
                     severity: Severity::Warning,
-                    message: format!("`{}` has no input `{name}`", def.name),
+                    message: format!("`{}` has no input `{name}`{literal}", def.name),
                     recovered: recovered.map(Box::new),
                 })),
             });
@@ -452,6 +459,28 @@ mod tests {
             [ProblemCode::HatNotAtTop, ProblemCode::AfterCap, ProblemCode::ReporterAsStatement]
         );
         assert!(ast.problems().iter().all(|problem| problem.recovered.is_some()));
+    }
+
+    #[test]
+    fn a_block_that_fails_after_a_cap_still_takes_the_first_place() {
+        let language = language();
+        let mut scratch = Program::new(&language);
+        let mystery = Block {
+            opcode: "teleport".into(),
+            ..block(&mut scratch, &language, "wait")
+        };
+        let blocks = vec![block(&mut scratch, &language, "end"), mystery, block(&mut scratch, &language, "wait")];
+
+        let ast = one_stack(blocks).ast(&language);
+        assert_eq!(codes(&ast), [ProblemCode::UnknownOpcode], "the wait is not the first after the cap");
+
+        // A cap that fails parsing still ends the run.
+        let mut end = block(&mut scratch, &language, "end");
+        let wait = block(&mut scratch, &language, "wait");
+        end.id = wait.id;
+        let after = block(&mut scratch, &language, "say");
+        let ast = one_stack(vec![wait, end, after]).ast(&language);
+        assert_eq!(codes(&ast), [ProblemCode::DuplicateId, ProblemCode::AfterCap]);
     }
 
     #[test]
