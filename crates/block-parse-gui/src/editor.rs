@@ -4,8 +4,8 @@ use block_parse::language::{Fit, LiteralKind};
 use block_parse::program::{BlockId, Program};
 use block_parse::Language;
 use egui::{
-    Align, Align2, Color32, ComboBox, CursorIcon, FontId, Frame, LayerId, Margin, Order, Pos2, Rect,
-    RichText, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Color32, CursorIcon, FontId, Frame, Key, LayerId, Margin, Modifiers, Order, Pos2,
+    Rect, RichText, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 
 use crate::color::{SwatchRecipe, Swatches};
@@ -15,7 +15,10 @@ type SwatchKey = (
     Vec<block_parse::CategoryColor>,
     Vec<Option<block_parse::CategoryColor>>,
 );
-use crate::interact::{DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, Press, Pressed, SnapMark};
+use crate::dropdown::Menu;
+use crate::interact::{
+    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, SnapMark,
+};
 use crate::layout::{
     Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
 };
@@ -30,6 +33,7 @@ pub struct BlockEditor {
     pub view: View,
     gesture: Gesture,
     edit: Option<LiteralEdit>,
+    choice: Option<OpenChoice>,
     palette_scroll: f32,
     /// Resolved when the recipe or the category colors change, not per frame.
     swatches: Option<(SwatchKey, Swatches)>,
@@ -114,6 +118,7 @@ impl BlockEditor {
             view: View::default(),
             gesture: Gesture::Idle,
             edit: None,
+            choice: None,
             palette_scroll: 0.0,
             swatches: None,
             menu: None,
@@ -229,6 +234,23 @@ impl BlockEditor {
         }
         layout.lifted = self.lifted();
         let mut scene = layout.program(program);
+
+        if read_only || self.is_dragging() {
+            self.choice = None;
+        }
+        // Its field's own click closes it, so a press there must not.
+        if input.pressed
+            && let Some(open) = &self.choice
+        {
+            let on_menu = input.at.is_some_and(|at| ctx.layer_id_at(at) == Some(self.menu_layer()));
+            let on_field = over
+                .filter(|at| canvas_rect.contains(*at))
+                .and_then(|at| scene.slot_at(t.canvas(at)))
+                .is_some_and(|slot| open.is(slot.parent, &slot.input));
+            if !on_menu && !on_field {
+                self.choice = None;
+            }
+        }
 
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
@@ -349,6 +371,9 @@ impl BlockEditor {
             }
         }
         if self.settle_edit(&ctx, language, program) {
+            output.changed = true;
+        }
+        if self.choice_menu(&ctx, &scene, canvas_rect, t, &theme, overlay, program) {
             output.changed = true;
         }
 
@@ -579,6 +604,70 @@ impl BlockEditor {
         self.settle_edit(ctx, language, program)
     }
 
+    /// The open choice's menu, also its layer's id.
+    fn menu_id(&self) -> egui::Id {
+        self.id.with("choice")
+    }
+
+    fn menu_layer(&self) -> LayerId {
+        LayerId::new(Order::Foreground, self.menu_id())
+    }
+
+    /// Shows the open choice's menu, closing it if its field has gone or
+    /// scrolled away. True if the program changed.
+    #[allow(clippy::too_many_arguments)]
+    fn choice_menu(
+        &mut self,
+        ctx: &egui::Context,
+        scene: &Scene,
+        canvas_rect: Rect,
+        t: Transform,
+        theme: &Theme,
+        overlay: &Overlay,
+        program: &mut Program,
+    ) -> bool {
+        let id = self.menu_id();
+        let Some(open) = &mut self.choice else {
+            return false;
+        };
+        let field = scene
+            .slots()
+            .find(|slot| open.is(slot.parent, &slot.input))
+            .filter(|slot| canvas_rect.intersects(t.rect(slot.rect)))
+            .and_then(|slot| match &slot.content {
+                SlotContent::Literal {
+                    kind: LiteralKind::Choice(options),
+                    text,
+                    ..
+                } => Some((slot, options, text)),
+                _ => None,
+            });
+        let escape = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
+        let Some((slot, options, text)) = field.filter(|_| !escape) else {
+            self.choice = None;
+            return false;
+        };
+        let mut swatch = slot.swatch;
+        if overlay.muted.contains(&slot.parent) {
+            swatch.fill = swatch.muted;
+            swatch.edge = swatch.muted_edge;
+        }
+        let menu = Menu {
+            id,
+            options,
+            selected: text,
+            swatch,
+            shadow: theme.halo,
+            // Readable however far out the canvas is zoomed.
+            scale: t.zoom.max(1.0),
+        };
+        let Some(index) = menu.show(ctx, t.rect(slot.rect), &mut open.scroll) else {
+            return false;
+        };
+        self.choice = None;
+        options[index] != *text && program.set_literal(slot.parent, &slot.input, options[index].clone())
+    }
+
     fn field_id(&self, block: BlockId, input: &str) -> egui::Id {
         self.id.with((block, input))
     }
@@ -633,19 +722,16 @@ impl BlockEditor {
                 }
                 false
             }
-            LiteralKind::Choice(options) => {
-                let mut chosen = text.to_owned();
-                ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
-                    ComboBox::from_id_salt(id)
-                        .selected_text(RichText::new(text).size(LITERAL_SIZE * zoom))
-                        .width(rect.width() - 8.0)
-                        .show_ui(ui, |ui| {
-                            for option in options {
-                                ui.selectable_value(&mut chosen, option.clone(), option);
-                            }
-                        });
-                });
-                chosen != text && program.set_literal(slot.parent, &slot.input, chosen)
+            LiteralKind::Choice(_) => {
+                if ui.interact(rect, id, Sense::click()).clicked() {
+                    let open = self.choice.as_ref().is_some_and(|open| open.is(slot.parent, &slot.input));
+                    self.choice = (!open).then(|| OpenChoice {
+                        block: slot.parent,
+                        input: slot.input.clone(),
+                        scroll: 0.0,
+                    });
+                }
+                false
             }
             _ => {
                 let mut buffer = text.to_owned();
@@ -857,6 +943,7 @@ impl Measure for EguiMeasure<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dropdown;
 
     fn send_and_sync<T: Send + Sync>() {}
 
@@ -1174,6 +1261,103 @@ mod tests {
         let mut live = hinted.clone();
         live.switches.insert(codon, true);
         assert!(!hover(switch, &live), "a live switch needs no excuse");
+    }
+
+    /// A block with a choice of "red", "green" and "blue" at the canvas origin,
+    /// a context with fonts, and the screen rect of its field.
+    fn paint_on_canvas() -> (Language, Program, egui::Context, Rect) {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "paints",
+                file: (extension: "p"),
+                types: { "hue": (literal: Choice(["red", "green", "blue"])) },
+                blocks: [(id: "paint", name: "Paint", spec: "paint {hue:hue}")],
+            )"#,
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let paint = program.instantiate(&language, "paint").unwrap();
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![paint],
+        });
+
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        }
+        .program(&program);
+        let field = scene.slots().next().unwrap().rect.translate(editor.view.pan);
+        (language, program, ctx, field)
+    }
+
+    fn click(at: Pos2) -> Vec<Vec<egui::Event>> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        vec![vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)], vec![]]
+    }
+
+    #[test]
+    fn a_choice_opens_its_own_menu_and_sets_what_is_picked() {
+        let (language, mut program, ctx, field) = paint_on_canvas();
+        let paint = program.stacks[0].blocks[0].id;
+        let hue = |program: &Program| program.find(paint).unwrap().inputs["hue"].literal.clone();
+        let mut editor = codon_editor();
+        let mut texts = Vec::new();
+        for events in click(field.center()) {
+            texts = frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")));
+        for option in ["green", "blue"] {
+            assert!(texts.iter().any(|text| text == option), "{option} is not shown: {texts:?}");
+        }
+        assert!(!editor.is_dragging());
+
+        // Room below, so the menu hangs there; its third row is "blue".
+        let body_top = field.max.y + dropdown::POINTER + dropdown::GAP;
+        let blue = pos2(field.center().x, body_top + dropdown::INSET + 2.5 * dropdown::ROW_HEIGHT);
+        for events in click(blue) {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert_eq!(hue(&program).as_deref(), Some("blue"));
+        assert!(editor.choice.is_none(), "picking closes the menu");
+
+        for events in click(field.center()) {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
+        let escape = egui::Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![escape]);
+        assert!(editor.choice.is_none(), "Escape closes the menu");
+
+        for events in click(field.center()) {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
+        for events in click(pos2(700.0, 500.0)) {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(editor.choice.is_none(), "a press elsewhere closes the menu");
+        assert_eq!(hue(&program).as_deref(), Some("blue"));
     }
 
     #[test]

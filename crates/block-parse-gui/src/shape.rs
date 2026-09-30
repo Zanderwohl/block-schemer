@@ -144,6 +144,30 @@ pub fn hexagon(rect: Rect) -> Vec<Pos2> {
     ]
 }
 
+/// A menu body with a pointer out to `tip`, from the top edge when `tip` is
+/// above the body and the bottom otherwise. Clockwise from the top-left.
+pub fn callout_outline(body: Rect, tip: Pos2, half_base: f32) -> Vec<Pos2> {
+    let (left, right) = (tip.x - half_base, tip.x + half_base);
+    let [tl, tr, br, bl] = corners(body);
+    if tip.y < body.min.y {
+        vec![tl, pos2(left, body.min.y), tip, pos2(right, body.min.y), tr, br, bl]
+    } else {
+        vec![tl, tr, br, pos2(right, body.max.y), tip, pos2(left, body.max.y), bl]
+    }
+}
+
+pub fn callout_fill(body: Rect, tip: Pos2, half_base: f32) -> Vec<ConvexPiece> {
+    let edge = if tip.y < body.min.y { body.min.y } else { body.max.y };
+    vec![
+        corners(body).to_vec(),
+        vec![pos2(tip.x - half_base, edge), tip, pos2(tip.x + half_base, edge)],
+    ]
+}
+
+fn corners(rect: Rect) -> [Pos2; 4] {
+    [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()]
+}
+
 /// Shared by outline and fill so the two cannot drift apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Notch {
@@ -289,6 +313,20 @@ mod tests {
                 .map(|piece| shoelace(piece).abs())
                 .sum();
             assert!((outline - pieces).abs() < 0.05, "{form:?}: {outline} vs {pieces}");
+        }
+    }
+
+    #[test]
+    fn a_callout_fill_covers_its_outline_either_way_up() {
+        let body = Rect::from_min_size(pos2(10.0, 20.0), vec2(80.0, 50.0));
+        for tip in [pos2(40.0, 12.0), pos2(40.0, 78.0)] {
+            let outline = shoelace(&callout_outline(body, tip, 7.0)).abs();
+            let pieces: f32 = callout_fill(body, tip, 7.0)
+                .iter()
+                .map(|piece| shoelace(piece).abs())
+                .sum();
+            assert!((outline - pieces).abs() < 0.05, "{tip:?}: {outline} vs {pieces}");
+            assert!(outline > shoelace(&corners(body)).abs(), "{tip:?}: the pointer adds area");
         }
     }
 

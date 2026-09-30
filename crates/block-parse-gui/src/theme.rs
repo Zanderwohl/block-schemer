@@ -14,7 +14,8 @@ pub struct Theme {
     pub palette: Color32,
     pub palette_heading: Color32,
     pub snap: Color32,
-    /// Drawn under accents so they never depend on contrast with the block.
+    /// Drawn under accents so they never depend on contrast with the block,
+    /// and as the shadow of a choice's menu.
     pub halo: Color32,
     pub breakpoint: Color32,
     pub selected: Color32,
