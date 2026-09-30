@@ -10,9 +10,11 @@ use crate::literal::Validators;
 
 /// Always RON, whatever the file is named.
 ///
-/// Opcodes, type names, input names and branch names must be ASCII
-/// identifiers (`[A-Za-z_][A-Za-z0-9_]*`), so none can hide control or
-/// bidirectional characters. Labels and descriptions are free text.
+/// Opcodes, type names, input names and branch names are non-empty printable
+/// ASCII without spaces (`!` to `~`), so none can hide control or
+/// bidirectional characters. Type, input and branch names also exclude
+/// `{ } [ ] : =`, which delimit them in specs. Labels and descriptions are
+/// free text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "Language")]
 pub struct LanguageConfig {
