@@ -58,7 +58,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   muted blocks and switch states come from the host each frame as an
   `Overlay`. A block with `switch: true` shows a checkbox whose state is the
   host's, never saved; clicking requests `EditorEvent::Switched`, even in
-  read-only mode, and a switch with no state is drawn disabled. Commands and
+  read-only mode, and a switch with no state is drawn disabled; pressing
+  one does nothing rather than grabbing its block. Commands and
   events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.

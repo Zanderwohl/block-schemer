@@ -354,7 +354,10 @@ impl BlockEditor {
                     SlotContent::Literal { kind, .. } => Some(kind),
                     SlotContent::Empty | SlotContent::Plugged(_) => None,
                 });
-            let on_switch = !on_palette && live_switch_at(&scene, overlay, t.canvas(at)).is_some();
+            let on_switch = (!on_palette)
+                .then(|| switch_at(&scene, overlay, t.canvas(at)))
+                .flatten()
+                .map(|(_, live)| live);
             let on_block = if on_palette {
                 palette.entry_at(palette_t.canvas(at)).is_some()
             } else {
@@ -362,7 +365,8 @@ impl BlockEditor {
             };
             // Set after the fields have drawn, so this decides for all of them.
             match field {
-                _ if on_switch => ctx.set_cursor_icon(CursorIcon::PointingHand),
+                _ if on_switch == Some(true) => ctx.set_cursor_icon(CursorIcon::PointingHand),
+                _ if on_switch == Some(false) => ctx.set_cursor_icon(CursorIcon::NotAllowed),
                 Some(LiteralKind::Bool | LiteralKind::Choice(_)) => {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
@@ -416,7 +420,10 @@ impl BlockEditor {
         }
 
         let point = t.canvas(at);
-        if live_switch_at(scene, overlay, point).is_some() {
+        // A switch is never a handle on its block, live or not: one without
+        // state is drawn as a checkbox, and grabbing the block instead would
+        // read as the checkbox being broken.
+        if switch_at(scene, overlay, point).is_some() {
             return Gesture::Idle;
         }
         // A press on a field belongs to its widget.
@@ -738,16 +745,15 @@ fn checkbox(ui: &mut egui::Ui, center: Pos2, zoom: f32, value: &mut bool) -> egu
     .inner
 }
 
-/// A switch the host has given state, so a live checkbox covers it.
-fn live_switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<BlockId> {
+/// The switch under `point`, and whether the host has given it state, so a
+/// live checkbox covers it.
+fn switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<(BlockId, bool)> {
     scene
         .blocks
         .iter()
         .rev()
-        .find(|block| {
-            block.switch.is_some_and(|rect| rect.contains(point)) && overlay.switches.contains_key(&block.id)
-        })
-        .map(|block| block.id)
+        .find(|block| block.switch.is_some_and(|rect| rect.contains(point)))
+        .map(|block| (block.id, overlay.switches.contains_key(&block.id)))
 }
 
 /// A reporter pushed out of a slot lands just below it.
@@ -1007,6 +1013,105 @@ mod tests {
         assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
         assert!(!ctx.memory(|memory| memory.has_focus(field)));
         assert!(editor.edit.is_none());
+    }
+
+    /// One frame of `editor` over `program` with `events`, on a screen whose
+    /// canvas starts at the left edge.
+    fn frame(
+        ctx: &egui::Context,
+        editor: &mut BlockEditor,
+        language: &Language,
+        program: &mut Program,
+        overlay: &Overlay,
+        events: Vec<egui::Event>,
+    ) {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            editor.show_with(ui, language, program, overlay);
+        });
+        out.textures_delta.clear();
+    }
+
+    /// Presses at `at` and drags well past the threshold, holding on.
+    fn press_and_drag(
+        ctx: &egui::Context,
+        editor: &mut BlockEditor,
+        language: &Language,
+        program: &mut Program,
+        overlay: &Overlay,
+        at: Pos2,
+    ) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let away = at + vec2(60.0, 40.0);
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![button(true)],
+            vec![egui::Event::PointerMoved(away)],
+            vec![egui::Event::PointerMoved(away + vec2(5.0, 0.0))],
+        ] {
+            frame(ctx, editor, language, program, overlay, events);
+        }
+    }
+
+    #[test]
+    fn a_switch_without_state_is_not_a_handle_on_its_block() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "codons",
+                file: (extension: "c"),
+                blocks: [(id: "start", name: "Start", spec: "start codon", switch: true)],
+            )"#,
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let start = program.instantiate(&language, "start").unwrap();
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![start],
+        });
+
+        let fresh = || {
+            let mut editor = BlockEditor::default();
+            editor.options.palette_width = Some(0.0);
+            editor
+        };
+        let ctx = egui::Context::default();
+        let mut editor = fresh();
+        // Once, so fonts exist to lay the block out with.
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        }
+        .program(&program);
+        let placed = &scene.blocks[0];
+        let to_screen = |point: Pos2| point + editor.view.pan;
+        let switch = to_screen(placed.switch.expect("the language gives it a switch").center());
+        let label = to_screen(placed.rect.left_center() + vec2(8.0, 0.0));
+
+        let no_state = Overlay::default();
+        let mut editor = fresh();
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &no_state, switch);
+        assert!(!editor.is_dragging(), "a press on the switch picked the block up");
+
+        let mut editor = fresh();
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &no_state, label);
+        assert!(editor.is_dragging(), "the same gesture on the label should drag");
     }
 
     #[test]
