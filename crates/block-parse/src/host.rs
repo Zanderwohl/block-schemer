@@ -4,7 +4,7 @@
 //! The editor runs nothing and keeps no host state: the host supplies an
 //! [`Overlay`] every frame, and requests go back out as events and commands.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Ast, Severity};
 use crate::program::{BlockId, Program};
@@ -41,6 +41,9 @@ pub struct Overlay {
     /// Drawn drained of color: blocks that do not apply in the host's
     /// current context.
     pub muted: HashSet<BlockId>,
+    /// State for blocks whose language gives them a `switch`. A switchable
+    /// block missing here is drawn disabled.
+    pub switches: HashMap<BlockId, bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

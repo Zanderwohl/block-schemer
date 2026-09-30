@@ -65,6 +65,10 @@ pub enum EditorEvent {
     /// The user asked for a block's `documentation`. The editor never opens
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
+    /// A request to set a block's switch; the host's next `Overlay` has the
+    /// answer. Sent even in read-only mode, since switches are not program
+    /// data.
+    Switched(BlockId, bool),
 }
 
 impl Default for BlockEditor {
@@ -203,7 +207,7 @@ impl BlockEditor {
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
                 if let Some(at) = over.filter(|_| input.pressed) {
-                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t);
+                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
                 }
             }
             Gesture::Pressed(press) => {
@@ -280,9 +284,24 @@ impl BlockEditor {
         paint::error_tags(&canvas, &scene, t, &theme);
         paint::markers(&canvas, &scene, t, &theme, overlay);
 
+        let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
+        fields.set_clip_rect(canvas_rect);
+        // Live even when read-only: switches are the host's, not program data.
+        for block in &scene.blocks {
+            let (Some(rect), Some(&on)) = (block.switch, overlay.switches.get(&block.id)) else {
+                continue;
+            };
+            let rect = t.rect(rect);
+            let mut value = on;
+            if canvas_rect.intersects(rect)
+                && fields
+                    .put(Rect::from_center_size(rect.center(), Vec2::splat(18.0)), egui::Checkbox::without_text(&mut value))
+                    .changed()
+            {
+                output.events.push(EditorEvent::Switched(block.id, value));
+            }
+        }
         if !read_only {
-            let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
-            fields.set_clip_rect(canvas_rect);
             for slot in scene.slots() {
                 if let SlotContent::Literal { kind, text, .. } = &slot.content {
                     let rect = t.rect(slot.rect);
@@ -311,6 +330,7 @@ impl BlockEditor {
                     SlotContent::Literal { kind, .. } => Some(kind),
                     SlotContent::Empty | SlotContent::Plugged(_) => None,
                 });
+            let on_switch = !on_palette && live_switch_at(&scene, overlay, t.canvas(at)).is_some();
             let on_block = if on_palette {
                 palette.entry_at(palette_t.canvas(at)).is_some()
             } else {
@@ -318,6 +338,7 @@ impl BlockEditor {
             };
             // Set after the fields have drawn, so this decides for all of them.
             match field {
+                _ if on_switch => ctx.set_cursor_icon(CursorIcon::PointingHand),
                 Some(LiteralKind::Bool | LiteralKind::Choice(_)) => {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
@@ -345,6 +366,7 @@ impl BlockEditor {
     }
 
     /// What a press on `at` would pick up, without picking it up yet.
+    #[allow(clippy::too_many_arguments)]
     fn press(
         &self,
         at: Pos2,
@@ -353,6 +375,7 @@ impl BlockEditor {
         palette_rect: Rect,
         palette_t: Transform,
         t: Transform,
+        overlay: &Overlay,
     ) -> Gesture {
         let read_only = self.options.read_only;
         if palette_rect.contains(at) {
@@ -369,6 +392,9 @@ impl BlockEditor {
         }
 
         let point = t.canvas(at);
+        if live_switch_at(scene, overlay, point).is_some() {
+            return Gesture::Idle;
+        }
         // A press on a field belongs to its widget.
         let on_field = !read_only
             && scene
@@ -658,6 +684,18 @@ fn find_snap(
         }
     }
     best.map(|(_, target, mark)| (target, mark))
+}
+
+/// A switch the host has given state, so a live checkbox covers it.
+fn live_switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<BlockId> {
+    scene
+        .blocks
+        .iter()
+        .rev()
+        .find(|block| {
+            block.switch.is_some_and(|rect| rect.contains(point)) && overlay.switches.contains_key(&block.id)
+        })
+        .map(|block| block.id)
 }
 
 /// A reporter pushed out of a slot lands just below it.

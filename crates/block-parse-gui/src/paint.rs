@@ -51,6 +51,20 @@ pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live
         let accent = highlights.get(&block.id).map(|h| theme.highlight(h.style));
         let muted = overlay.muted.contains(&block.id);
         paint_block(painter, block, t, theme, live, accent, muted);
+        // A switch with host state gets a live checkbox; one without is
+        // drawn disabled.
+        if let Some(rect) = block.switch
+            && !overlay.switches.contains_key(&block.id)
+        {
+            let check = Rect::from_center_size(t.pos(rect.center()), vec2(14.0, 14.0) * t.zoom);
+            painter.rect(
+                check,
+                radius(2.0 * t.zoom),
+                block.swatch.shadow,
+                Stroke::new(t.zoom, block.swatch.edge),
+                StrokeKind::Inside,
+            );
+        }
     }
 }
 
