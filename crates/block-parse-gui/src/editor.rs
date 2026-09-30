@@ -457,7 +457,10 @@ impl BlockEditor {
                         .margin(Margin::ZERO)
                         .font(FontId::proportional(LITERAL_SIZE * zoom))
                         .text_color(theme.literal_ink)
-                        .horizontal_align(Align::Center),
+                        .horizontal_align(Align::Center)
+                        // `put` stretches the field to the slot's height, and
+                        // the static painting centers; this keeps them level.
+                        .vertical_align(Align::Center),
                 );
                 if response.gained_focus() {
                     select_all(ui.ctx(), id, buffer.chars().count());
