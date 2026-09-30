@@ -232,7 +232,6 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     if error.is_some() {
         outline(painter, slot.shape, rect, Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
     }
-    // A choice has no widget over it; its menu opens beside it.
     if live && !matches!(kind, LiteralKind::Choice(_)) {
         return;
     }
@@ -279,7 +278,6 @@ pub fn fill_pieces(painter: &Painter, pieces: impl IntoIterator<Item = Vec<Pos2>
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// The mark of a chosen option or a set bool, in a `size` square.
 pub fn tick(painter: &Painter, center: Pos2, size: f32, stroke: Stroke) {
     let check = Rect::from_center_size(center, vec2(size, size));
     let inset = size * 3.0 / 14.0;

@@ -1,5 +1,5 @@
 //! The menu of a choice literal, drawn with the geometry and swatch of its
-//! block rather than as an egui combo box. Sizes here are at scale 1.
+//! block. Sizes here are at scale 1.
 
 use egui::{Align2, Area, Color32, CornerRadius, CursorIcon, FontId, Order, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};
 
@@ -9,7 +9,6 @@ use crate::paint;
 use crate::shape;
 
 pub const ROW_HEIGHT: f32 = 24.0;
-/// Above the first row and below the last.
 pub const INSET: f32 = 4.0;
 pub const TEXT_INSET: f32 = 10.0;
 /// Reserved on every row, so text stays put when the selection moves.
@@ -32,12 +31,11 @@ pub struct Placement {
     pub side: Side,
     pub body: Rect,
     pub tip: Pos2,
-    /// How much of the list the body cannot show, and so how far it scrolls.
+    /// List the body cannot show: the scroll range.
     pub overflow: f32,
 }
 
 impl Placement {
-    /// The body and the pointer.
     pub fn outer(&self) -> Rect {
         self.body.union(Rect::from_min_max(self.tip, self.tip))
     }
@@ -85,7 +83,6 @@ pub fn size(widest_text: f32, options: usize, anchor_width: f32, scale: f32) -> 
     )
 }
 
-/// Screen rect of row `index`, for a list scrolled by `scroll` pixels.
 pub fn row(body: Rect, index: usize, scroll: f32, scale: f32) -> Rect {
     let top = body.min.y + (INSET + index as f32 * ROW_HEIGHT) * scale - scroll;
     Rect::from_min_size(pos2(body.min.x, top), vec2(body.width(), ROW_HEIGHT * scale))
@@ -227,7 +224,7 @@ mod tests {
         assert_eq!(placed.body.max.x, SCREEN.max.x);
         assert_eq!(placed.tip.x, anchor.center().x);
 
-        // So far right the pointer would sit on the corner: held clear of it.
+        // The pointer stops short of the corner.
         let edge = Rect::from_min_size(pos2(790.0, 100.0), vec2(10.0, 22.0));
         let placed = place(edge, vec2(200.0, 100.0), SCREEN, 1.0);
         assert_eq!(placed.tip.x, placed.body.max.x - 2.0 * POINTER);
