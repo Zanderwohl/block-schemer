@@ -453,7 +453,7 @@ impl BlockEditor {
             }
             // Read-only blocks cannot move, so dragging one pans instead.
             Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
-            Pressed::Block { id, top_left } => match program.clone().detach(id) {
+            Pressed::Block { id, top_left } => match program.run_at(id) {
                 Some(fragment) => Gesture::Dragging(Drag {
                     fragment,
                     source: DragSource::Canvas { head: id },
@@ -858,7 +858,7 @@ mod tests {
         });
         let editor = BlockEditor {
             gesture: Gesture::Dragging(Drag {
-                fragment: program.clone().detach(second).unwrap(),
+                fragment: program.run_at(second).unwrap(),
                 source: DragSource::Canvas { head: second },
                 grab_offset: Vec2::ZERO,
                 head: pos2(400.0, 300.0),

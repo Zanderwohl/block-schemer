@@ -115,16 +115,12 @@ impl Program {
         let Some(head) = fragment.blocks.first() else {
             return Err(AttachError::WrongKind);
         };
-        let anchor = match target {
-            Target::Free { .. } => return Ok(()),
-            Target::After(id) => *id,
-            Target::BranchStart { parent, .. } | Target::Input { parent, .. } => *parent,
-            Target::Above { head, .. } => *head,
-        };
-        if lifted.is_some() && find_in(&fragment.blocks, anchor).is_some() {
-            return Err(AttachError::NoSuchBlock(anchor));
+        if matches!(target, Target::Free { .. }) {
+            return Ok(());
         }
         let is_lifted = |block: &Block| Some(block.id) == lifted;
+        let gone = |id: BlockId| lifted.is_some() && find_in(&fragment.blocks, id).is_some();
+        let find = |id: BlockId| self.find(id).filter(|_| !gone(id));
         let def = language
             .block(&head.opcode)
             .ok_or_else(|| AttachError::UnknownOpcode(head.opcode.clone()))?;
@@ -146,7 +142,7 @@ impl Program {
                 if fragment.blocks.len() != 1 {
                     return Err(AttachError::WrongKind);
                 }
-                let owner = self.find(*parent).ok_or(AttachError::NoSuchBlock(*parent))?;
+                let owner = find(*parent).ok_or(AttachError::NoSuchBlock(*parent))?;
                 let slot = language
                     .block(&owner.opcode)
                     .and_then(|def| def.input(input))
@@ -164,6 +160,9 @@ impl Program {
             }
             Target::After(id) => {
                 statement()?;
+                if gone(*id) {
+                    return Err(AttachError::NoSuchBlock(*id));
+                }
                 let (seq, index) = self
                     .sequence_of(*id)
                     .ok_or(if self.find(*id).is_some() {
@@ -184,7 +183,7 @@ impl Program {
             }
             Target::BranchStart { parent, branch } => {
                 statement()?;
-                let owner = self.find(*parent).ok_or(AttachError::NoSuchBlock(*parent))?;
+                let owner = find(*parent).ok_or(AttachError::NoSuchBlock(*parent))?;
                 let has_branch = language
                     .block(&owner.opcode)
                     .is_some_and(|def| def.has_branch(branch));
@@ -212,6 +211,7 @@ impl Program {
                     .stacks
                     .iter()
                     .find(|stack| stack.blocks.first().is_some_and(|b| b.id == *below))
+                    .filter(|_| !gone(*below))
                     .ok_or(AttachError::NoSuchBlock(*below))?;
                 match kind_of(&stack.blocks[0]) {
                     Some(BlockKind::Hat) => return Err(AttachError::HatNotAtTop),
@@ -281,13 +281,20 @@ impl Program {
     /// A copy of a block and, for a statement, everything below it, with
     /// fresh ids throughout. The program is unchanged.
     pub fn duplicate(&mut self, id: BlockId) -> Option<Fragment> {
-        let mut blocks = match self.sequence_of(id) {
+        let mut fragment = self.run_at(id)?;
+        for block in &mut fragment.blocks {
+            self.renumber(block);
+        }
+        Some(fragment)
+    }
+
+    /// A copy of what [`detach`](Self::detach) would take at `id`, ids and
+    /// all. The program is unchanged.
+    pub fn run_at(&self, id: BlockId) -> Option<Fragment> {
+        let blocks = match self.sequence_of(id) {
             Some((seq, index)) => seq[index..].to_vec(),
             None => vec![self.find(id)?.clone()],
         };
-        for block in &mut blocks {
-            self.renumber(block);
-        }
         Some(Fragment { blocks })
     }
 
@@ -551,6 +558,17 @@ mod tests {
             assert_eq!(program.can_move(&language, &run, &target), Ok(()));
         }
 
+        // Blocks that stay put still count.
+        let tail = program.clone().detach(ids[2]).unwrap();
+        assert_eq!(
+            program.can_move(&language, &tail, &Target::After(ids[0])),
+            Err(AttachError::CapWouldOrphan)
+        );
+        assert_eq!(
+            program.can_move(&language, &tail, &body),
+            Err(AttachError::CapWouldOrphan)
+        );
+
         let run = program.clone().detach(ids[1]).unwrap();
         assert_eq!(
             program.can_move(&language, &run, &body),
@@ -565,6 +583,24 @@ mod tests {
             program.can_move(&language, &whole, &above),
             Err(AttachError::NoSuchBlock(ids[0]))
         );
+
+        let all = [ids[0], ids[1], ids[2], inner_id];
+        let targets: Vec<Target> = all
+            .iter()
+            .map(|id| Target::After(*id))
+            .chain([body, above])
+            .collect();
+        for id in all {
+            let mut detached = program.clone();
+            let run = detached.detach(id).unwrap();
+            for target in &targets {
+                assert_eq!(
+                    program.can_move(&language, &run, target),
+                    detached.can_attach(&language, &run, target),
+                    "{id:?} to {target:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -724,6 +760,23 @@ mod tests {
 
         program.remove(ids[1]).unwrap();
         assert_eq!(opcodes(&program.stacks[0].blocks), ["when_run", "set"]);
+    }
+
+    #[test]
+    fn a_run_copied_in_place_is_what_detaching_takes() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["when_run", "while", "print"]);
+        let inner = program.instantiate(&language, "set").unwrap();
+        let join = program.instantiate(&language, "join").unwrap();
+        let (inner_id, join_id) = (inner.id, join.id);
+        program.find_mut(ids[1]).unwrap().branches.get_mut("body").unwrap().push(inner);
+        program.find_mut(ids[2]).unwrap().inputs.get_mut("value").unwrap().block = Some(Box::new(join));
+
+        for id in [ids[0], ids[1], ids[2], inner_id, join_id] {
+            assert_eq!(program.run_at(id), program.clone().detach(id), "{id:?}");
+        }
+        assert_eq!(program.run_at(BlockId(9999)), None);
     }
 
     #[test]
