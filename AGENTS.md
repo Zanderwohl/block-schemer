@@ -20,7 +20,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     job.
   - `literal`: literals are stored as typed and parsed when the AST is built,
     so invalid text stays in the program and shows as a problem. Built-in
-    kinds (Float with e-notation, Integer, Text, Bool, Choice) plus
+    kinds (Float with e-notation, Integer, Number as an i64|f64 union,
+    Currency in minor units, Text, Bool, Choice) plus
     consumer-registered `LiteralValidator`s for `Custom(name)`.
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a

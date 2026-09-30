@@ -118,10 +118,17 @@ pub enum LiteralKind {
     /// A reporter must be plugged in; an empty slot is a `Problem`.
     #[default]
     None,
-    /// f64, e-notation included; rejects `inf` and `NaN`.
+    /// `Value::Float`, e-notation included; rejects `inf` and `NaN`.
     Float,
-    /// i64.
+    /// `Value::Integer`.
     Integer,
+    /// Like a JavaScript number, but the back end chooses promotion: an
+    /// integer written without `.` or `e` that fits an i64 is
+    /// `Value::Integer`, anything else numeric is `Value::Float`.
+    Number,
+    /// `Value::Currency` in minor units. At most two decimal places;
+    /// `12`, `12.3` and `12.30` are all 1230.
+    Currency,
     /// Anything.
     Text,
     /// A checkbox, stored as `"true"` or `"false"`.
