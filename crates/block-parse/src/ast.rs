@@ -28,6 +28,14 @@ pub enum Stmt {
 pub enum Expr {
     Literal(Value),
     Node(Box<Node>),
+    /// A reporter in a slot of another type, allowed by `accepts` or `fits`.
+    /// Never produced for an exact match. What conversion means is the
+    /// consumer's call.
+    Convert {
+        from: String,
+        to: String,
+        value: Box<Expr>,
+    },
     Problem(Box<Problem>),
 }
 
@@ -72,7 +80,7 @@ pub enum ProblemCode {
     /// Neither a reporter nor a literal.
     MissingInput,
     TypeMismatch,
-    /// A literal the slot's type cannot hold; only a hand-edited file has one.
+    /// Rejected by the slot type's validator; the message is the validator's.
     InvalidLiteral,
     UnknownInput,
     UnknownBranch,
@@ -82,6 +90,9 @@ pub enum ProblemCode {
     AfterCap,
     /// Reported on the second block.
     DuplicateId,
+    /// Nested past `MAX_DEPTH`. Replaces the block at the limit; nothing
+    /// below it is parsed.
+    TooDeep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

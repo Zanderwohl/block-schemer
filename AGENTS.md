@@ -13,7 +13,16 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     blocks are Hat / Statement / Cap / Reporter(type); a spec string like
     `"repeat {times:number=10} [body]"` gives inputs and C-block branches.
     `file.extension` names the language's program files (RON inside,
-    whatever the extension) so consumers can bind file types.
+    whatever the extension) so consumers can bind file types. No types are
+    built in. A reporter fits a slot on an exact type match, or when the
+    slot's type `accepts` it or the reporter's type `fits` the slot; the last
+    two appear in the AST as `Expr::Convert`, and converting is the consumer's
+    job.
+  - `literal`: literals are stored as typed and parsed when the AST is built,
+    so invalid text stays in the program and shows as a problem. Built-in
+    kinds (Float with e-notation, Integer, Number as an i64|f64 union,
+    Currency in minor units, Binary, Hex, Text, Bool, Choice) plus
+    consumer-registered `LiteralValidator`s for `Custom(name)`.
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant.
@@ -27,6 +36,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe and the `block-parse-editor` binary
   (`cargo editor <language> [program]`).
+- `examples/languages/` — sample language definitions: `tiny.ron` (loose,
+  Scratch-style typing) and `strict_tiny.ron` (the same language with exact
+  types and explicit conversions).
 
 ## Principles
 
@@ -38,6 +50,15 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   requests; the consumer owns them and their persistence.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
+- Opcodes, type names, input and branch names are printable ASCII without
+  spaces; names used in specs also exclude `{ } [ ] : =`.
+- Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
+  problems and attaching checks the combined depth. Program loads raise RON's
+  recursion limit to `RON_RECURSION_LIMIT` (RON spends ~4 levels per block);
+  only nesting past that is a fatal syntax error.
+- The editor never opens documentation links; it emits
+  `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
+  risk, and escaping text for code generation is the back end's job.
 - Fills are unions of convex pieces (epaint fans closed paths).
 - Colors: a category gives an OKLCH hue, optionally chroma and lightness.
   Core only carries that. The GUI resolves it with `palette` into a `Swatch`
@@ -47,7 +68,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 ## Deferred
 
-Runtime-supplied dropdowns (variables, procedures).
+- The crates are types and doc comments only. Language compiling (including
+  the name and range checks), program load/save, AST building, literal
+  parsing, the `Validators` registration API, attach checks and all GUI
+  drawing and interaction are specified in docs but not implemented. When
+  language compiling lands, add a test that compiles every file in
+  `examples/languages/`.
+- Runtime-supplied dropdowns (variables, procedures).
 
 ## Spelling
 

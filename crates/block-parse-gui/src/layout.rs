@@ -96,7 +96,13 @@ pub struct PlacedSlot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SlotContent {
-    Literal { kind: LiteralKind, text: String },
+    Literal {
+        kind: LiteralKind,
+        text: String,
+        /// The validator's message; drawn as a tag under the slot, which
+        /// takes the theme's error color.
+        error: Option<String>,
+    },
     /// Needs a reporter.
     Empty,
     Plugged(BlockId),

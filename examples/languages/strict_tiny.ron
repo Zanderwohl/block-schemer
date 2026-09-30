@@ -1,0 +1,242 @@
+#![enable(implicit_some)]
+// Strict Tiny: Tiny with exact types. A slot takes only reporters of its own
+// type, so text is made from numbers and bools with explicit conversion blocks,
+// and each variable type has its own getter and setter. See tiny.ron for the
+// loose version. Numbers are f32 at run time; the interpreter narrows them.
+Language(
+    name: "strict_tiny",
+    file: (extension: "stiny", description: "Strict Tiny program"),
+
+    types: {
+        "number": (shape: Round, literal: Float),
+        "text": (shape: Round, literal: Text),
+        "bool": (shape: Hexagon, literal: Bool),
+        // Variable names: typed only, so no reporter can compute one.
+        "name": (shape: Square, literal: Text),
+    },
+
+    categories: [
+        (name: "Events", color: (hue: 95.0)),
+        (name: "Control", color: (hue: 60.0)),
+        (name: "Operators", color: (hue: 145.0)),
+        (name: "Logic", color: (hue: 190.0)),
+        (name: "Variables", color: (hue: 330.0)),
+        (name: "Conversion", color: (hue: 20.0)),
+        (name: "Output", color: (hue: 260.0)),
+    ],
+
+    blocks: [
+        // Events
+        (
+            id: "when_run",
+            name: "When run",
+            category: "Events",
+            kind: Hat,
+            spec: "when program starts",
+            description: "Runs the blocks below it when the program starts.",
+        ),
+
+        // Control
+        (
+            id: "if_else",
+            name: "If / else",
+            category: "Control",
+            spec: "if {condition:bool} then [then] else [else]",
+            tags: ["branching"],
+            description: "Runs the first branch when the condition is true, otherwise the second.",
+        ),
+        (
+            id: "while",
+            name: "While",
+            category: "Control",
+            spec: "while {condition:bool} [body]",
+            tags: ["loop"],
+            description: "Runs its body again and again for as long as the condition is true.",
+        ),
+
+        // Operators
+        (
+            id: "add",
+            name: "Add",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number=0} + {b:number=0}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "subtract",
+            name: "Subtract",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number=0} - {b:number=0}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "multiply",
+            name: "Multiply",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number=0} * {b:number=0}",
+            tags: ["arithmetic"],
+        ),
+        (
+            id: "divide",
+            name: "Divide",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number=0} / {b:number=0}",
+            tags: ["arithmetic"],
+            description: "Dividing by zero gives infinity or NaN, as IEEE floats do.",
+        ),
+        (
+            id: "modulo",
+            name: "Modulo",
+            category: "Operators",
+            kind: Reporter("number"),
+            spec: "{a:number=0} mod {b:number=0}",
+            tags: ["arithmetic"],
+            description: "The remainder after dividing a by b.",
+        ),
+        (
+            id: "join",
+            name: "Join text",
+            category: "Operators",
+            kind: Reporter("text"),
+            spec: "join {a:text=hello} {b:text=world}",
+            tags: ["string manipulation"],
+            description: "Puts two pieces of text together, end to end.",
+        ),
+
+        // Logic
+        (
+            id: "less_than",
+            name: "Less than",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number=0} < {b:number=0}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "greater_than",
+            name: "Greater than",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number=0} > {b:number=0}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "equals",
+            name: "Equals",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:number=0} = {b:number=0}",
+            tags: ["comparison"],
+        ),
+        (
+            id: "and",
+            name: "And",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:bool} and {b:bool}",
+            tags: ["boolean"],
+        ),
+        (
+            id: "or",
+            name: "Or",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "{a:bool} or {b:bool}",
+            tags: ["boolean"],
+        ),
+        (
+            id: "not",
+            name: "Not",
+            category: "Logic",
+            kind: Reporter("bool"),
+            spec: "not {a:bool}",
+            tags: ["boolean"],
+        ),
+
+        // Variables. Names are typed, since dropdowns of variables are deferred.
+        (
+            id: "set_number",
+            name: "Set number variable",
+            category: "Variables",
+            spec: "set number {name:name=x} to {value:number=0}",
+        ),
+        (
+            id: "get_number",
+            name: "Number variable",
+            category: "Variables",
+            kind: Reporter("number"),
+            spec: "number {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+        (
+            id: "set_text",
+            name: "Set text variable",
+            category: "Variables",
+            spec: "set text {name:name=x} to {value:text}",
+        ),
+        (
+            id: "get_text",
+            name: "Text variable",
+            category: "Variables",
+            kind: Reporter("text"),
+            spec: "text {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+        (
+            id: "set_bool",
+            name: "Set bool variable",
+            category: "Variables",
+            spec: "set bool {name:name=x} to {value:bool}",
+        ),
+        (
+            id: "get_bool",
+            name: "Bool variable",
+            category: "Variables",
+            kind: Reporter("bool"),
+            spec: "bool {name:name=x}",
+            description: "Reading a variable that holds another type is a run-time error.",
+        ),
+
+        // Conversion
+        (
+            id: "number_to_text",
+            name: "Number to text",
+            category: "Conversion",
+            kind: Reporter("text"),
+            spec: "str {value:number=0}",
+            tags: ["conversion"],
+            description: "The number written out as text.",
+        ),
+        (
+            id: "bool_to_text",
+            name: "Bool to text",
+            category: "Conversion",
+            kind: Reporter("text"),
+            spec: "str {value:bool}",
+            tags: ["conversion"],
+            description: "The word true or false.",
+        ),
+        (
+            id: "text_to_number",
+            name: "Text to number",
+            category: "Conversion",
+            kind: Reporter("number"),
+            spec: "float {value:text=0}",
+            tags: ["conversion"],
+            description: "Text that is not a number is a run-time error.",
+        ),
+
+        // Output
+        (
+            id: "print",
+            name: "Print",
+            category: "Output",
+            spec: "print {value:text=Hello, world!}",
+            description: "Writes text to the console on a line of its own.",
+        ),
+    ],
+)

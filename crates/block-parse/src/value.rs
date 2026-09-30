@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-/// A literal typed into a slot. Untagged so files read `10`, not `Number(10)`.
-/// A dropdown choice is `Text`.
+/// A parsed literal. Which variant comes out depends on the slot type's
+/// literal kind; arithmetic and promotion between them are the back end's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
 pub enum Value {
-    // Untagged tries variants in order; `true` must hit `Bool` first.
     Bool(bool),
-    Number(f64),
+    Integer(i64),
+    /// From binary and hex literals.
+    Unsigned(u64),
+    Float(f64),
+    /// Minor units: `12.34` is `Currency(1234)`.
+    Currency(i64),
+    /// Includes dropdown choices.
     Text(String),
 }

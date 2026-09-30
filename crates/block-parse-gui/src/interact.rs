@@ -33,11 +33,10 @@ pub enum DragSource {
     Canvas { from: Location },
 }
 
-/// Half-typed text (`"-"`) is not a value yet, so it waits here until blur or
-/// escape. Keyed by id so it survives other blocks moving.
+/// The literal with keyboard focus. Edits write straight into the program,
+/// valid or not. Keyed by id so it survives other blocks moving.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiteralEdit {
     pub block: BlockId,
     pub input: String,
-    pub buffer: String,
 }
