@@ -90,6 +90,9 @@ pub enum ProblemCode {
     AfterCap,
     /// Reported on the second block.
     DuplicateId,
+    /// Nested past `MAX_DEPTH`. Replaces the block at the limit; nothing
+    /// below it is parsed.
+    TooDeep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

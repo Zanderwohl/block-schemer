@@ -50,4 +50,7 @@ pub enum EditorEvent {
     ToggleBreakpoint(BlockId),
     /// Clicked, not dragged.
     BlockClicked(BlockId),
+    /// The user asked for a block's `documentation`. The editor never opens
+    /// links itself; this is the consumer's hook to open, resolve or refuse.
+    OpenDocumentation { opcode: String, link: String },
 }

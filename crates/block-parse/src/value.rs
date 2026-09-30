@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum Value {
     Bool(bool),
     Integer(i64),
+    /// From binary and hex literals: a bit pattern, never negative.
+    Unsigned(u64),
     Float(f64),
     /// Minor units: `12.34` is `Currency(1234)`.
     Currency(i64),

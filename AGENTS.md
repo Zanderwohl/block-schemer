@@ -21,7 +21,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `literal`: literals are stored as typed and parsed when the AST is built,
     so invalid text stays in the program and shows as a problem. Built-in
     kinds (Float with e-notation, Integer, Number as an i64|f64 union,
-    Currency in minor units, Text, Bool, Choice) plus
+    Currency in minor units, Binary, Hex, Text, Bool, Choice) plus
     consumer-registered `LiteralValidator`s for `Custom(name)`.
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
@@ -50,6 +50,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   requests; the consumer owns them and their persistence.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
+- Opcodes, type names, input and branch names are ASCII identifiers.
+- Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
+  problems and attaching checks the combined depth. The loader raises RON's
+  own recursion limit (128 by default) to reach it.
+- The editor never opens documentation links; it emits
+  `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
+  risk, and escaping text for code generation is the back end's job.
 - Fills are unions of convex pieces (epaint fans closed paths).
 - Colors: a category gives an OKLCH hue, optionally chroma and lightness.
   Core only carries that. The GUI resolves it with `palette` into a `Swatch`

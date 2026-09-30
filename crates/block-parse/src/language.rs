@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::literal::Validators;
 
 /// Always RON, whatever the file is named.
+///
+/// Opcodes, type names, input names and branch names must be ASCII
+/// identifiers (`[A-Za-z_][A-Za-z0-9_]*`), so none can hide control or
+/// bidirectional characters. Labels and descriptions are free text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "Language")]
 pub struct LanguageConfig {
@@ -126,9 +130,13 @@ pub enum LiteralKind {
     /// integer written without `.` or `e` that fits an i64 is
     /// `Value::Integer`, anything else numeric is `Value::Float`.
     Number,
-    /// `Value::Currency` in minor units. At most two decimal places;
-    /// `12`, `12.3` and `12.30` are all 1230.
+    /// `Value::Currency` in minor units. No decimal places or exactly two:
+    /// `12` and `12.30` are 1230; `12.3` is invalid.
     Currency,
+    /// `Value::Unsigned`. `101` or `0b101`.
+    Binary,
+    /// `Value::Unsigned`. `ff`, `0xff` or `#ff`, either case.
+    Hex,
     /// Anything.
     Text,
     /// A checkbox, stored as `"true"` or `"false"`.
