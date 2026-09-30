@@ -216,8 +216,7 @@ impl BlockEditor {
             };
             self.gesture = self.start_drag(press, language, program, t);
         }
-        // Locked mid-drag, as when a run starts: let the run go rather than
-        // drop it into a program the host has made read-only.
+        // A drop now would edit a program the host has locked.
         if read_only {
             self.cancel_drag();
         }
@@ -481,10 +480,8 @@ impl BlockEditor {
         Some(lifted)
     }
 
-    /// Lets go of any run in hand, leaving the program untouched. Hosts
-    /// switching programs mid-drag call this, since ids are only unique within
-    /// a program and a drop would otherwise land in the new one. True if a run
-    /// was in hand.
+    /// Hosts switching programs mid-drag call this: ids are only unique within
+    /// a program, so a drop would land in the new one. True if a run was in hand.
     pub fn cancel_drag(&mut self) -> bool {
         matches!(std::mem::take(&mut self.gesture), Gesture::Dragging(_))
     }
