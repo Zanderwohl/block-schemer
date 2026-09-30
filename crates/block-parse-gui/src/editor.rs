@@ -268,13 +268,27 @@ impl BlockEditor {
             paint::scene(&floating, &run.scene, t, &theme, false);
             ctx.set_cursor_icon(CursorIcon::Grabbing);
         } else if let Some(at) = over {
-            let on_block = if palette_rect.contains(at) {
+            let on_palette = palette_rect.contains(at);
+            let field = scene
+                .slot_at(t.canvas(at))
+                .filter(|_| !on_palette && !read_only)
+                .and_then(|slot| match &slot.content {
+                    SlotContent::Literal { kind, .. } => Some(kind),
+                    SlotContent::Empty | SlotContent::Plugged(_) => None,
+                });
+            let on_block = if on_palette {
                 palette.entry_at(palette_t.canvas(at)).is_some()
             } else {
                 scene.hit(t.canvas(at)).is_some()
             };
-            if on_block && !read_only {
-                ctx.set_cursor_icon(CursorIcon::Grab);
+            // Set after the fields have drawn, so this decides for all of them.
+            match field {
+                Some(LiteralKind::Bool | LiteralKind::Choice(_)) => {
+                    ctx.set_cursor_icon(CursorIcon::PointingHand);
+                }
+                Some(_) => ctx.set_cursor_icon(CursorIcon::Text),
+                None if on_block && !read_only => ctx.set_cursor_icon(CursorIcon::Grab),
+                None => {}
             }
             if palette_rect.contains(at)
                 && let Some(entry) = palette.entry_at(palette_t.canvas(at))
