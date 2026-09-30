@@ -27,8 +27,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant.
-  - `edit`: tree operations by id (`detach`, `can_attach`, `attach`). All
-    connection rules live here so GUI and headless tools agree.
+  - `edit`: tree operations by id (`detach`, `run_at`, `can_attach`,
+    `can_move`, `attach`). All connection rules live here so GUI and
+    headless tools agree.
   - `ast` (built by `Program::ast`): always a whole tree. Faults become
     `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
     parsed in `recovered`. Only unreadable RON is fatal. A stack of one
@@ -62,10 +63,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
 - A run in hand stays in the program until dropped, so the program is always
-  whole and saving mid-drag is safe. A drop lands in whichever program is
-  shown on release if it still holds the run unchanged; a host switching
-  programs mid-drag calls `cancel_drag`. Going read-only mid-drag lets the run
-  go without dropping it.
+  whole and saving mid-drag is safe. Layout (`Layout::lifted`) and snapping
+  (`can_move`) skip it rather than copy the program. A drop lands in
+  whichever program is shown on release if it still holds the run unchanged;
+  a host switching programs mid-drag calls `cancel_drag`. Going read-only
+  mid-drag lets the run go without dropping it.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Opcodes, type names, input and branch names are printable ASCII without
@@ -91,10 +93,6 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
-- Laying out a drag without cloning the program. The lifted copy costs about
-  0.23 ms a frame at 2000 blocks (release build), against a layout that
-  already walks the whole program every frame. Caching it would still need a
-  whole-program comparison each frame, since hosts may edit mid-drag.
 
 ## Spelling
 

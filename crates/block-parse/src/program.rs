@@ -294,7 +294,7 @@ pub(crate) fn walk<'a>(blocks: &'a [Block], visit: &mut impl FnMut(&'a Block)) {
     }
 }
 
-fn find_in(blocks: &[Block], id: BlockId) -> Option<&Block> {
+pub(crate) fn find_in(blocks: &[Block], id: BlockId) -> Option<&Block> {
     blocks.iter().find_map(|block| find_block(block, id))
 }
 
