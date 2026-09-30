@@ -7,10 +7,12 @@ pub const FORMAT_VERSION: u32 = 1;
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
 /// cannot be attached. Kept under 128 to leave room for later nesting.
-///
-/// RON spends several levels of its own recursion limit on each block, so the
-/// program loader must raise that limit to reach this depth.
 pub const MAX_DEPTH: usize = 120;
+
+/// RON's recursion limit for program loads. Each block level costs RON about
+/// four (block, map, input, block), so its default of 128 would stop loads
+/// near depth 30. Only a file nested past this is a fatal syntax error.
+pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 5 + 16;
 
 /// Only stack positions are stored; block positions are derived, so a language
 /// whose labels change width re-flows old files instead of overlapping them.

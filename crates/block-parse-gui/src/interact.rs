@@ -33,9 +33,8 @@ pub enum DragSource {
     Canvas { from: Location },
 }
 
-/// The literal with keyboard focus. Text goes straight into the program on
-/// every edit, invalid or not, so there is no buffer to commit. Keyed by id so
-/// it survives other blocks moving.
+/// The literal with keyboard focus. Edits write straight into the program,
+/// valid or not. Keyed by id so it survives other blocks moving.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiteralEdit {
     pub block: BlockId,

@@ -124,13 +124,16 @@ pub enum LiteralKind {
     /// A reporter must be plugged in; an empty slot is a `Problem`.
     #[default]
     None,
-    /// `Value::Float`, e-notation included; rejects `inf` and `NaN`.
+    /// `Value::Float`. Decimal with optional e-notation (`1.5`, `.5`, `1e3`).
+    /// Must be finite: `inf`, `NaN` and overflow such as `1e999` are
+    /// invalid. Surrounding whitespace is ignored; empty text is invalid.
     Float,
     /// `Value::Integer`.
     Integer,
-    /// Like a JavaScript number, but the back end chooses promotion: an
+    /// A JavaScript-like number where the back end chooses promotion: an
     /// integer written without `.` or `e` that fits an i64 is
-    /// `Value::Integer`, anything else numeric is `Value::Float`.
+    /// `Value::Integer`, otherwise as `Float` (same grammar, same rejects).
+    /// No hex, no `Infinity`.
     Number,
     /// `Value::Currency` in minor units. No decimal places or exactly two:
     /// `12` and `12.30` are 1230; `12.3` is invalid.
@@ -139,9 +142,9 @@ pub enum LiteralKind {
     Binary,
     /// `Value::Unsigned`. `ff`, `0xff` or `#ff`, either case.
     Hex,
-    /// Anything.
     Text,
-    /// A checkbox, stored as `"true"` or `"false"`.
+    /// A checkbox, stored as `"true"` or `"false"`. A slot with no default
+    /// starts as `"false"`, since a checkbox has no empty state.
     Bool,
     Choice(Vec<String>),
     /// A validator the consumer registers under this name before compiling.

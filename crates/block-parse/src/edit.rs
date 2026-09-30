@@ -44,6 +44,7 @@ pub enum AttachError {
     TypeMismatch { slot: String, output: String },
     /// Unknown opcodes may only be dropped free.
     UnknownOpcode(String),
-    /// The fragment's own nesting plus the target's would pass `MAX_DEPTH`.
+    /// `depth` is what the fragment's deepest block would reach, past
+    /// `MAX_DEPTH`.
     TooDeep { depth: usize },
 }

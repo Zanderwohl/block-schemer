@@ -53,8 +53,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Opcodes, type names, input and branch names are printable ASCII without
   spaces; names used in specs also exclude `{ } [ ] : =`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
-  problems and attaching checks the combined depth. The loader raises RON's
-  own recursion limit (128 by default) to reach it.
+  problems and attaching checks the combined depth. Program loads raise RON's
+  recursion limit to `RON_RECURSION_LIMIT` (RON spends ~4 levels per block);
+  only nesting past that is a fatal syntax error.
 - The editor never opens documentation links; it emits
   `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
   risk, and escaping text for code generation is the back end's job.
@@ -67,7 +68,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 ## Deferred
 
-Runtime-supplied dropdowns (variables, procedures).
+- The crates are types and doc comments only. Language compiling (including
+  the name and range checks), program load/save, AST building, literal
+  parsing, the `Validators` registration API, attach checks and all GUI
+  drawing and interaction are specified in docs but not implemented. When
+  language compiling lands, add a test that compiles every file in
+  `examples/languages/`.
+- Runtime-supplied dropdowns (variables, procedures).
 
 ## Spelling
 
