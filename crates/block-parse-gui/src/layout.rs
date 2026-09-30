@@ -40,7 +40,7 @@ pub enum Font {
 }
 
 /// Canvas units.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
     /// Draw order: parents first.
     pub blocks: Vec<PlacedBlock>,
@@ -49,7 +49,7 @@ pub struct Scene {
     pub bounds: Rect,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlacedBlock {
     pub id: BlockId,
     /// Includes a hat's rise, not the tab.
@@ -911,12 +911,7 @@ mod tests {
                 lifted: Some(id),
             }
             .program(&program);
-            // Scenes hold floats and no `PartialEq`; their debug text is exact.
-            assert_eq!(
-                format!("{lifted:?}"),
-                format!("{:?}", scene_of(&language, &detached)),
-                "{id:?}"
-            );
+            assert_eq!(lifted, scene_of(&language, &detached), "{id:?}");
         }
     }
 
