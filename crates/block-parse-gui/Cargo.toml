@@ -8,13 +8,14 @@ edition.workspace = true
 default = []
 # The standalone editor window. Off by default so embedding the component never
 # pulls in a windowing backend.
-app = ["dep:eframe"]
+app = ["dep:eframe", "dep:clap"]
 
 [dependencies]
 block-parse.workspace = true
 egui.workspace = true
 palette.workspace = true
 eframe = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
 
 [[bin]]
 name = "block-parse-editor"

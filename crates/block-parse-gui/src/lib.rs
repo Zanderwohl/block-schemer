@@ -5,6 +5,7 @@ pub mod color;
 pub mod editor;
 pub mod interact;
 pub mod layout;
+pub mod paint;
 pub mod shape;
 pub mod theme;
 pub mod toolbar;
