@@ -2,11 +2,14 @@
 //! only on bad syntax. It compiles into [`Language`], which is fully checked;
 //! nothing downstream re-validates.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::literal::Validators;
+use crate::literal::{self, Validators};
+use crate::spec::{self, SpecPart};
+use crate::value::Value;
 
 /// Always RON, whatever the file is named.
 ///
@@ -93,9 +96,7 @@ pub struct BlockConfig {
     pub documentation: Option<String>,
 }
 
-/// OKLCH. Only the hue is required; the GUI supplies the rest from its theme
-/// and derives edges, shadows and highlights from it. Checked against these
-/// ranges when compiled.
+/// OKLCH. Only the hue is required; the GUI supplies the rest from its theme.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CategoryColor {
     /// Degrees, `0.0..360.0`.
@@ -124,16 +125,13 @@ pub enum LiteralKind {
     /// A reporter must be plugged in; an empty slot is a `Problem`.
     #[default]
     None,
-    /// `Value::Float`. Decimal with optional e-notation (`1.5`, `.5`, `1e3`).
-    /// Must be finite: `inf`, `NaN` and overflow such as `1e999` are
-    /// invalid. Surrounding whitespace is ignored; empty text is invalid.
+    /// `Value::Float`, e-notation allowed. Must be finite: `inf`, `NaN` and
+    /// `1e999` are invalid.
     Float,
     /// `Value::Integer`.
     Integer,
-    /// A JavaScript-like number where the back end chooses promotion: an
-    /// integer written without `.` or `e` that fits an i64 is
-    /// `Value::Integer`, otherwise as `Float` (same grammar, same rejects).
-    /// No hex, no `Infinity`.
+    /// `Value::Integer` if written without `.` or `e` and it fits an i64,
+    /// otherwise as `Float`, so the back end chooses promotion.
     Number,
     /// `Value::Currency` in minor units. No decimal places or exactly two:
     /// `12` and `12.30` are 1230; `12.3` is invalid.
@@ -143,8 +141,8 @@ pub enum LiteralKind {
     /// `Value::Unsigned`. `ff`, `0xff` or `#ff`, either case.
     Hex,
     Text,
-    /// A checkbox, stored as `"true"` or `"false"`. A slot with no default
-    /// starts as `"false"`, since a checkbox has no empty state.
+    /// A checkbox, stored as `"true"` or `"false"`; `"false"` when the spec
+    /// gives no default.
     Bool,
     Choice(Vec<String>),
     /// A validator the consumer registers under this name before compiling.
@@ -226,7 +224,8 @@ pub enum Part {
 pub struct InputDef {
     pub name: String,
     pub ty: String,
-    /// Source text, already validated. `None` leaves the slot empty.
+    /// Source text, already validated: the spec's default, else the literal
+    /// kind's blank. `None` only for types that take no literal.
     pub default: Option<String>,
 }
 
@@ -243,4 +242,451 @@ pub struct ConfigProblem {
     /// Opcode of the block at fault, if any.
     pub block: Option<String>,
     pub message: String,
+}
+
+/// How a reporter's output relates to a slot's type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    Exact,
+    /// Allowed by `accepts` or `fits`; becomes `Expr::Convert`.
+    Convert,
+    No,
+}
+
+impl TypeSet {
+    fn includes(&self, name: &str) -> bool {
+        match self {
+            Self::Exactly => false,
+            Self::Types(names) => names.iter().any(|n| n == name),
+            Self::All => true,
+        }
+    }
+
+    fn names(&self) -> &[String] {
+        match self {
+            Self::Types(names) => names,
+            Self::Exactly | Self::All => &[],
+        }
+    }
+}
+
+impl BlockKind {
+    pub fn output(&self) -> Option<&str> {
+        match self {
+            Self::Reporter(ty) => Some(ty),
+            Self::Hat | Self::Statement | Self::Cap => None,
+        }
+    }
+}
+
+impl BlockDef {
+    pub fn inputs(&self) -> impl Iterator<Item = &InputDef> {
+        self.parts.iter().filter_map(|part| match part {
+            Part::Input(input) => Some(input),
+            Part::Label(_) | Part::Branch(_) => None,
+        })
+    }
+
+    pub fn input(&self, name: &str) -> Option<&InputDef> {
+        self.inputs().find(|input| input.name == name)
+    }
+
+    pub fn branches(&self) -> impl Iterator<Item = &str> {
+        self.parts.iter().filter_map(|part| match part {
+            Part::Branch(name) => Some(name.as_str()),
+            Part::Label(_) | Part::Input(_) => None,
+        })
+    }
+
+    pub fn has_branch(&self, name: &str) -> bool {
+        self.branches().any(|branch| branch == name)
+    }
+}
+
+impl Language {
+    pub fn from_ron(text: &str, validators: &Validators) -> Result<Self, LanguageError> {
+        let config: LanguageConfig = ron_options()
+            .from_str(text)
+            .map_err(LanguageError::Syntax)?;
+        config.compile(validators)
+    }
+
+    pub fn load(path: impl AsRef<Path>, validators: &Validators) -> Result<Self, LanguageError> {
+        let text = std::fs::read_to_string(path).map_err(LanguageError::Io)?;
+        Self::from_ron(&text, validators)
+    }
+
+    pub fn ty(&self, name: &str) -> Option<&TypeDef> {
+        self.types.get(name)
+    }
+
+    pub fn types(&self) -> impl Iterator<Item = &TypeDef> {
+        self.types.values()
+    }
+
+    pub fn categories(&self) -> &[Category] {
+        &self.categories
+    }
+
+    /// Palette order.
+    pub fn blocks(&self) -> &[BlockDef] {
+        &self.blocks
+    }
+
+    pub fn block(&self, opcode: &str) -> Option<&BlockDef> {
+        self.by_opcode.get(opcode).map(|&index| &self.blocks[index])
+    }
+
+    pub fn validators(&self) -> &Validators {
+        &self.validators
+    }
+
+    pub fn fit(&self, output: &str, slot: &str) -> Fit {
+        if output == slot {
+            return Fit::Exact;
+        }
+        let accepts = self.ty(slot).is_some_and(|ty| ty.accepts.includes(output));
+        let fits = self.ty(output).is_some_and(|ty| ty.fits.includes(slot));
+        if accepts || fits { Fit::Convert } else { Fit::No }
+    }
+
+    pub fn parse_literal(&self, ty: &str, text: &str) -> Result<Value, String> {
+        let ty = self.ty(ty).ok_or_else(|| format!("unknown type `{ty}`"))?;
+        literal::parse(&ty.literal, text, &self.validators)
+    }
+}
+
+/// RON as language and program files are read: `Some` may be left implicit.
+pub(crate) fn ron_options() -> ron::Options {
+    ron::Options::default().with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+}
+
+fn is_name(name: &str, in_spec: bool) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| (0x21..=0x7e).contains(&b) && !(in_spec && b"{}[]:=".contains(&b)))
+}
+
+impl LanguageConfig {
+    pub fn compile(self, validators: &Validators) -> Result<Language, LanguageError> {
+        let mut problems = Vec::new();
+        let mut problem = |block: Option<&str>, message: String| {
+            problems.push(ConfigProblem {
+                block: block.map(Into::into),
+                message,
+            })
+        };
+
+        if self.name.trim().is_empty() {
+            problem(None, "the language needs a name".into());
+        }
+        if !is_name(&self.file.extension, false) || self.file.extension.starts_with('.') {
+            problem(
+                None,
+                format!(
+                    "file extension `{}` must be printable ASCII without spaces or a leading dot",
+                    self.file.extension
+                ),
+            );
+        }
+
+        let mut types = BTreeMap::new();
+        for (name, config) in &self.types {
+            if !is_name(name, true) {
+                problem(None, format!("type name `{name}` is not a valid name"));
+            }
+            for other in config.accepts.names().iter().chain(config.fits.names()) {
+                if !self.types.contains_key(other) {
+                    problem(None, format!("type `{name}` refers to unknown type `{other}`"));
+                }
+            }
+            match &config.literal {
+                LiteralKind::Custom(validator) if validators.get(validator).is_none() => problem(
+                    None,
+                    format!("type `{name}` uses validator `{validator}`, which is not registered"),
+                ),
+                LiteralKind::Choice(options) if options.is_empty() => {
+                    problem(None, format!("type `{name}` offers no choices"))
+                }
+                _ => {}
+            }
+            types.insert(
+                name.clone(),
+                TypeDef {
+                    name: name.clone(),
+                    shape: config.shape,
+                    literal: config.literal.clone(),
+                    accepts: config.accepts.clone(),
+                    fits: config.fits.clone(),
+                },
+            );
+        }
+
+        let mut categories = Vec::new();
+        let mut category_index = HashMap::new();
+        for config in &self.categories {
+            if category_index
+                .insert(config.name.clone(), categories.len())
+                .is_some()
+            {
+                problem(None, format!("category `{}` is declared twice", config.name));
+            }
+            let CategoryColor { hue, chroma, lightness } = config.color;
+            let in_range = |value: f32, range: std::ops::RangeInclusive<f32>| {
+                value.is_finite() && range.contains(&value)
+            };
+            if !(in_range(hue, 0.0..=360.0) && hue < 360.0)
+                || !chroma.is_none_or(|c| in_range(c, 0.0..=0.37))
+                || !lightness.is_none_or(|l| in_range(l, 0.0..=1.0))
+            {
+                problem(
+                    None,
+                    format!(
+                        "category `{}` color is out of range (hue 0..360, chroma 0..=0.37, lightness 0..=1)",
+                        config.name
+                    ),
+                );
+            }
+            categories.push(Category {
+                name: config.name.clone(),
+                color: config.color,
+            });
+        }
+
+        let parse_default = |ty: &TypeDef, text: &str| literal::parse(&ty.literal, text, validators);
+
+        let mut blocks = Vec::new();
+        let mut by_opcode = HashMap::new();
+        for config in self.blocks {
+            let opcode = config.id.as_str();
+            let at = Some(opcode);
+            if !is_name(opcode, false) {
+                problem(at, format!("opcode `{opcode}` is not a valid name"));
+            }
+            if by_opcode.insert(config.id.clone(), blocks.len()).is_some() {
+                problem(at, format!("opcode `{opcode}` is declared twice"));
+            }
+            if config.name.trim().is_empty() {
+                problem(at, "the block needs a name".into());
+            }
+            let category = match &config.category {
+                Some(name) => {
+                    let index = category_index.get(name).copied();
+                    if index.is_none() {
+                        problem(at, format!("unknown category `{name}`"));
+                    }
+                    index
+                }
+                None => None,
+            };
+            if let Some(output) = config.kind.output()
+                && !types.contains_key(output)
+            {
+                problem(at, format!("reports unknown type `{output}`"));
+            }
+
+            let spec_parts = match spec::parse(&config.spec) {
+                Ok(parts) => parts,
+                Err(message) => {
+                    problem(at, format!("spec: {message}"));
+                    Vec::new()
+                }
+            };
+            if spec_parts.is_empty() {
+                problem(at, "spec is empty".into());
+            }
+
+            let mut names = HashSet::new();
+            let mut parts = Vec::new();
+            for part in spec_parts {
+                match part {
+                    SpecPart::Label(text) => parts.push(Part::Label(text)),
+                    SpecPart::Branch(name) => {
+                        if !is_name(&name, true) {
+                            problem(at, format!("branch name `{name}` is not a valid name"));
+                        }
+                        if !names.insert(name.clone()) {
+                            problem(at, format!("`{name}` is used twice in the spec"));
+                        }
+                        if matches!(config.kind, BlockKind::Hat | BlockKind::Reporter(_)) {
+                            problem(at, "hats and reporters cannot have branches".into());
+                        }
+                        parts.push(Part::Branch(name));
+                    }
+                    SpecPart::Input { name, ty, default } => {
+                        if !is_name(&name, true) {
+                            problem(at, format!("input name `{name}` is not a valid name"));
+                        }
+                        if !names.insert(name.clone()) {
+                            problem(at, format!("`{name}` is used twice in the spec"));
+                        }
+                        let default = match types.get(&ty) {
+                            None => {
+                                problem(at, format!("input `{name}` has unknown type `{ty}`"));
+                                None
+                            }
+                            Some(def) => match (&def.literal, default) {
+                                (LiteralKind::None, Some(_)) => {
+                                    problem(
+                                        at,
+                                        format!("input `{name}` has a default, but `{ty}` takes no typed value"),
+                                    );
+                                    None
+                                }
+                                (kind, None) => literal::blank(kind),
+                                (_, Some(text)) => {
+                                    if let Err(message) = parse_default(def, &text) {
+                                        problem(at, format!("default for `{name}`: {message}"));
+                                    }
+                                    Some(text)
+                                }
+                            },
+                        };
+                        parts.push(Part::Input(InputDef { name, ty, default }));
+                    }
+                }
+            }
+
+            blocks.push(BlockDef {
+                opcode: config.id,
+                name: config.name,
+                kind: config.kind,
+                category,
+                parts,
+                tags: config.tags,
+                description: config.description,
+                documentation: config.documentation,
+            });
+        }
+
+        if !problems.is_empty() {
+            return Err(LanguageError::Invalid(problems));
+        }
+        Ok(Language {
+            name: self.name,
+            file: FileBinding {
+                description: self
+                    .file
+                    .description
+                    .unwrap_or_else(|| format!("{} program", self.file.extension)),
+                extension: self.file.extension,
+            },
+            types,
+            categories,
+            blocks,
+            by_opcode,
+            validators: validators.clone(),
+        })
+    }
+}
+
+impl std::fmt::Display for LanguageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Syntax(error) => write!(f, "{error}"),
+            Self::Io(error) => write!(f, "{error}"),
+            Self::Invalid(problems) => {
+                for (index, problem) in problems.iter().enumerate() {
+                    if index > 0 {
+                        writeln!(f)?;
+                    }
+                    match &problem.block {
+                        Some(block) => write!(f, "block `{block}`: {}", problem.message)?,
+                        None => write!(f, "{}", problem.message)?,
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for LanguageError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn compile(text: &str) -> Result<Language, Vec<String>> {
+        Language::from_ron(text, &Validators::new()).map_err(|error| match error {
+            LanguageError::Invalid(problems) => problems.into_iter().map(|p| p.message).collect(),
+            other => vec![other.to_string()],
+        })
+    }
+
+    #[test]
+    fn every_example_language_compiles() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/languages");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(dir).expect("the examples directory") {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "ron") {
+                if let Err(error) = Language::load(&path, &Validators::new()) {
+                    panic!("{}:\n{error}", path.display());
+                }
+                seen += 1;
+            }
+        }
+        assert!(seen >= 2, "found only {seen} example languages");
+    }
+
+    const MINIMAL: &str = r#"Language(
+        name: "t",
+        file: (extension: "t"),
+        types: { "number": (literal: Float), "bool": (shape: Hexagon, literal: Bool) },
+        categories: [(name: "C", color: (hue: 10.0))],
+        blocks: [
+            (id: "go", name: "Go", category: "C", kind: Hat, spec: "go"),
+            (id: "if", name: "If", spec: "if {c:bool} [then]"),
+            (id: "add", name: "Add", kind: Reporter("number"), spec: "{a:number=1} + {b:number}"),
+        ],
+    )"#;
+
+    #[test]
+    fn defaults_fall_back_to_the_literal_kinds_blank() {
+        let language = compile(MINIMAL).unwrap();
+        let add = language.block("add").unwrap();
+        assert_eq!(add.input("a").unwrap().default.as_deref(), Some("1"));
+        assert_eq!(add.input("b").unwrap().default.as_deref(), Some(""));
+        let branch = language.block("if").unwrap();
+        assert_eq!(branch.input("c").unwrap().default.as_deref(), Some("false"));
+        assert!(branch.has_branch("then"));
+    }
+
+    #[test]
+    fn every_problem_is_reported_not_just_the_first() {
+        let text = MINIMAL
+            .replace(r#"category: "C", kind: Hat"#, r#"category: "Nope", kind: Hat"#)
+            .replace("{a:number=1}", "{a:number=one}")
+            .replace(r#"id: "if""#, r#"id: "i f""#)
+            .replace("hue: 10.0", "hue: 400.0");
+        let problems = compile(&text).unwrap_err();
+        assert_eq!(problems.len(), 4, "{problems:#?}");
+    }
+
+    #[test]
+    fn names_in_specs_may_not_hold_delimiters() {
+        assert!(is_name("a:b.c,d-e", false));
+        assert!(!is_name("a:b", true));
+        assert!(!is_name("a b", false));
+        assert!(!is_name("a\u{7}", false));
+        assert!(!is_name("", false));
+        let problems = compile(&MINIMAL.replace("{a:number=1}", "{a:b:c}")).unwrap_err();
+        assert!(problems.iter().any(|p| p.contains("b:c")), "{problems:#?}");
+    }
+
+    #[test]
+    fn accepts_and_fits_decide_conversions() {
+        let text = MINIMAL.replace(
+            r#""number": (literal: Float)"#,
+            r#""number": (literal: Float), "text": (literal: Text, accepts: All), "value": (fits: Types(["bool"]))"#,
+        );
+        let language = compile(&text).unwrap();
+        assert_eq!(language.fit("number", "number"), Fit::Exact);
+        assert_eq!(language.fit("number", "text"), Fit::Convert);
+        assert_eq!(language.fit("text", "number"), Fit::No);
+        assert_eq!(language.fit("value", "bool"), Fit::Convert);
+        assert_eq!(language.fit("value", "number"), Fit::No);
+    }
 }

@@ -34,8 +34,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `debug`: `RunCommand`, `RunStatus`, `DebugView`, `trait Runner`. In core so
     interpreters need not depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe and the `block-parse-editor` binary
-  (`cargo editor <language> [program]`).
+  by default) adds eframe, clap, rfd, winit (macOS only) and the
+  `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
+  File/Edit menus are egui for
+  now; `--no-menu-bar` hides them for when native menus arrive. On macOS it
+  turns off winit's default menu, whose Quit would skip the save prompt.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing) and `strict_tiny.ron` (the same language with exact
   types and explicit conversions).
@@ -54,7 +57,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   spaces; names used in specs also exclude `{ } [ ] : =`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
   problems and attaching checks the combined depth. Program loads raise RON's
-  recursion limit to `RON_RECURSION_LIMIT` (RON spends ~4 levels per block);
+  recursion limit to `RON_RECURSION_LIMIT` (RON spends 6–7 levels per block);
   only nesting past that is a fatal syntax error.
 - The editor never opens documentation links; it emits
   `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
@@ -68,12 +71,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 ## Deferred
 
-- The crates are types and doc comments only. Language compiling (including
-  the name and range checks), program load/save, AST building, literal
-  parsing, the `Validators` registration API, attach checks and all GUI
-  drawing and interaction are specified in docs but not implemented. When
-  language compiling lands, add a test that compiles every file in
-  `examples/languages/`.
+- AST building (`Program::ast`), including `TooDeep` problems on load.
+- The debug overlay (breakpoints, pauses, annotations), `RunToolbar`,
+  `Runner` dispatch and `EditorOptions::toolbar`.
+- Other ways for the editor binary to choose a language than `--language`.
+- Undo and redo (the Edit menu items are there, disabled).
+- Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
 
 ## Spelling

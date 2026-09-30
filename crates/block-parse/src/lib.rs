@@ -13,12 +13,13 @@ pub mod edit;
 pub mod language;
 pub mod literal;
 pub mod program;
+mod spec;
 pub mod value;
 
 pub use ast::{Ast, Expr, Node, Problem, Stmt};
 pub use debug::{Annotation, DebugView, Pause, RunCommand, RunStatus, Runner};
 pub use edit::{Fragment, Location, Target};
-pub use language::{BlockDef, BlockKind, CategoryColor, Language};
+pub use language::{BlockDef, BlockKind, CategoryColor, Fit, Language};
 pub use literal::{LiteralValidator, Validators};
 pub use program::{Block, BlockId, Input, Program, Stack};
 pub use value::Value;
