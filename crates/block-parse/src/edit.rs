@@ -91,10 +91,9 @@ impl Program {
         self.check_attach(language, fragment, target, None)
     }
 
-    /// [`can_attach`](Self::can_attach) for a run still in the program, with
-    /// `fragment` its copy, judged as if it were already detached. Spares a
-    /// drag copying the program to ask. A fragment whose head is not in the
-    /// program is judged as by `can_attach`.
+    /// [`can_attach`](Self::can_attach) as if the run `fragment` copies were
+    /// already detached, so a drag need not copy the program. A head not in
+    /// the program is judged as by `can_attach`.
     pub fn can_move(
         &self,
         language: &Language,
@@ -288,8 +287,7 @@ impl Program {
         Some(fragment)
     }
 
-    /// A copy of what [`detach`](Self::detach) would take at `id`, ids and
-    /// all. The program is unchanged.
+    /// A copy of what [`detach`](Self::detach) would take at `id`, ids and all.
     pub fn run_at(&self, id: BlockId) -> Option<Fragment> {
         let blocks = match self.sequence_of(id) {
             Some((seq, index)) => seq[index..].to_vec(),
@@ -519,7 +517,7 @@ mod tests {
         );
     }
 
-    /// A cap is what makes a run's own place matter to where it may go.
+    /// Tiny has no cap, and a cap is what makes where a run came from matter.
     fn with_cap() -> Language {
         Language::from_ron(
             r#"Language(

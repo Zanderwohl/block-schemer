@@ -466,8 +466,7 @@ impl BlockEditor {
         }
     }
 
-    /// The head of the run in hand, which the program is laid out and snapped
-    /// against as if it were already detached.
+    /// Head of the run in hand.
     fn lifted(&self) -> Option<BlockId> {
         match &self.gesture {
             Gesture::Dragging(Drag {
@@ -673,8 +672,7 @@ fn find_snap(
     let mut consider = |distance: f32, target: Target, mark: SnapMark| {
         if distance <= SNAP_RADIUS
             && best.as_ref().is_none_or(|(nearest, ..)| distance < *nearest)
-            // A palette block's fresh id is in no program, so this is
-            // `can_attach` for it.
+            // A palette block's fresh id is in no program: `can_attach` for it.
             && program.can_move(language, fragment, &target).is_ok()
         {
             best = Some((distance, target, mark));
