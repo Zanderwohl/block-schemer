@@ -18,9 +18,8 @@ pub trait LiteralValidator: Debug + Send + Sync {
     /// `Err` is a short message for the tag under the slot.
     fn validate(&self, text: &str) -> Result<Value, String>;
 
-    /// Tidies typed text when the editor lets go of it (on blur), such as
-    /// uppercasing, dropping stray characters or padding to a width. Not
-    /// applied while typing, so the cursor never jumps.
+    /// Tidies typed text on blur. Never applied while typing, so the cursor
+    /// never jumps.
     fn normalize(&self, text: &str) -> String {
         text.to_owned()
     }

@@ -66,8 +66,7 @@ pub enum EditorEvent {
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
     /// A request to set a block's switch; the host's next `Overlay` has the
-    /// answer. Sent even in read-only mode, since switches are not program
-    /// data.
+    /// answer. Sent in read-only mode too.
     Switched(BlockId, bool),
 }
 
@@ -461,11 +460,9 @@ impl BlockEditor {
         }
     }
 
-    /// Puts a run in hand back where it was picked up; a block from the
-    /// palette is dropped. For hosts that stop showing the editor, or switch
-    /// program, mid-drag. `program` must be the one the drag came from, and
-    /// this must run before switching: ids are only unique within a program.
-    /// True if the program changed.
+    /// Puts a run in hand back where it was picked up; a palette block is
+    /// dropped. `program` must be the one the drag came from, before any
+    /// switch: ids are only unique within a program. True if it changed.
     pub fn cancel_drag(&mut self, language: &Language, program: &mut Program) -> bool {
         let Gesture::Dragging(drag) = std::mem::take(&mut self.gesture) else {
             return false;

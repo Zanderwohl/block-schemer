@@ -51,9 +51,8 @@ impl Builder<'_> {
         let mut body = Vec::with_capacity(blocks.len());
         for (index, block) in blocks.iter().enumerate() {
             let kind = self.kind(block).cloned();
-            // Tracked before parsing, so a block that fails parsing still
-            // takes the "first after a cap" place, and a failed cap still ends
-            // the reachable run.
+            // Before parsing, so a block that fails still takes the first place
+            // after a cap, and a cap that fails still ends the run.
             let first_after_cap = std::mem::take(&mut after_cap);
             if kind == Some(BlockKind::Cap) {
                 after_cap = true;

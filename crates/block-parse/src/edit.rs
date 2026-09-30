@@ -287,10 +287,8 @@ impl Program {
         Some(removed)
     }
 
-    /// Where a run detached at `id` would go to be put back as it was: after
-    /// the block above it, at the start of its branch, into its slot, or as
-    /// its whole stack at its old position. A whole stack comes back last in
-    /// stack order, which changes drawing and script order but nothing else.
+    /// Where a run detached at `id` goes to be put back as it was. A whole
+    /// stack returns to its position but last in stack order.
     pub fn home_of(&self, id: BlockId) -> Option<Target> {
         Some(match self.locate(id)? {
             Location::Stack { stack, index: 0 } => Target::Free {
