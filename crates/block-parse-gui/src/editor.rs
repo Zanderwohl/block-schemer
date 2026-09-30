@@ -11,7 +11,7 @@ use egui::{
 use crate::color::{SwatchRecipe, Swatches};
 
 type SwatchKey = (SwatchRecipe, Vec<block_parse::CategoryColor>);
-use crate::interact::{DRAG_THRESHOLD, Drag, Gesture, LiteralEdit, Press, Pressed, SnapMark};
+use crate::interact::{DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, Press, Pressed, SnapMark};
 use crate::layout::{
     Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
 };
@@ -34,7 +34,7 @@ pub struct BlockEditor {
     id: egui::Id,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EditorOptions {
     /// Blocks cannot be moved, added or typed into; the canvas still pans.
     pub read_only: bool,
@@ -42,9 +42,24 @@ pub struct EditorOptions {
     pub toolbar: bool,
     /// Allow Start while there are error-level problems.
     pub start_with_problems: bool,
+    /// Offer "Toggle breakpoint" in a block's context menu.
+    pub breakpoints: bool,
     /// `None` fits the widest block.
     pub palette_width: Option<f32>,
     pub theme: Theme,
+}
+
+impl Default for EditorOptions {
+    fn default() -> Self {
+        Self {
+            read_only: false,
+            toolbar: false,
+            start_with_problems: false,
+            breakpoints: true,
+            palette_width: None,
+            theme: Theme::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -191,8 +206,6 @@ impl BlockEditor {
             editing: edit.as_ref().map(|edit| (edit.block, edit.input.as_str())),
             validate: true,
         };
-        let mut scene = layout.program(program);
-
         if let Gesture::Pressed(press) = &self.gesture
             && input.down
             && input.at.is_some_and(|at| at.distance(press.at) > DRAG_THRESHOLD)
@@ -200,8 +213,10 @@ impl BlockEditor {
             let Gesture::Pressed(press) = std::mem::take(&mut self.gesture) else {
                 unreachable!()
             };
-            self.gesture = self.start_drag(press, language, program, t, &mut output);
+            self.gesture = self.start_drag(press, language, program, t);
         }
+        let lifted = self.lifted(program);
+        let mut scene = layout.program(lifted.as_ref().unwrap_or(program));
 
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
@@ -228,16 +243,15 @@ impl BlockEditor {
                 }
                 // Every frame, release included, so a quick flick still snaps.
                 let run = layout.run(&drag.fragment.blocks, drag.head);
-                drag.snap = find_snap(language, program, &scene, &drag.fragment, &run);
+                let shown = lifted.as_ref().unwrap_or(program);
+                drag.snap = find_snap(language, shown, &scene, &drag.fragment, &run);
                 if input.down {
                     self.gesture = Gesture::Dragging(drag);
-                } else if input.at.is_some_and(|at| palette_rect.contains(at)) {
+                } else {
                     // Checked before the snap, so dragging out to delete never
                     // catches a seam on the way.
-                    output.changed |= drag.from_canvas;
-                } else {
-                    drop_run(language, program, drag);
-                    output.changed = true;
+                    let delete = input.at.is_some_and(|at| palette_rect.contains(at));
+                    output.changed |= drop_run(language, program, drag, delete);
                 }
             }
         }
@@ -255,7 +269,8 @@ impl BlockEditor {
         }
 
         if output.changed {
-            scene = layout.program(program);
+            let lifted = self.lifted(program);
+            scene = layout.program(lifted.as_ref().unwrap_or(program));
         }
 
         let painter = ui.painter_at(palette_rect);
@@ -415,14 +430,7 @@ impl BlockEditor {
 
     /// Offsets are taken from the press, so the run does not jump by the
     /// threshold.
-    fn start_drag(
-        &self,
-        press: Press,
-        language: &Language,
-        program: &mut Program,
-        t: Transform,
-        output: &mut EditorOutput,
-    ) -> Gesture {
+    fn start_drag(&self, press: Press, language: &Language, program: &mut Program, t: Transform) -> Gesture {
         match press.on {
             Pressed::Palette { opcode, top_left } => {
                 let Some(block) = program.instantiate(language, &opcode) else {
@@ -431,8 +439,7 @@ impl BlockEditor {
                 let grab_offset = (press.at - top_left) / t.zoom;
                 Gesture::Dragging(Drag {
                     fragment: Fragment { blocks: vec![block] },
-                    from_canvas: false,
-                    home: None,
+                    source: DragSource::Palette { opcode },
                     grab_offset,
                     head: t.canvas(press.at) - grab_offset,
                     snap: None,
@@ -440,53 +447,42 @@ impl BlockEditor {
             }
             // Read-only blocks cannot move, so dragging one pans instead.
             Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
-            Pressed::Block { id, top_left } => {
-                let home = program.home_of(id);
-                match program.detach(id) {
-                    Some(fragment) => {
-                        output.changed = true;
-                        Gesture::Dragging(Drag {
-                            fragment,
-                            from_canvas: true,
-                            home,
-                            grab_offset: t.canvas(press.at) - top_left,
-                            head: top_left,
-                            snap: None,
-                        })
-                    }
-                    None => Gesture::Idle,
-                }
-            }
+            Pressed::Block { id, top_left } => match program.clone().detach(id) {
+                Some(fragment) => Gesture::Dragging(Drag {
+                    fragment,
+                    source: DragSource::Canvas { head: id },
+                    grab_offset: t.canvas(press.at) - top_left,
+                    head: top_left,
+                    snap: None,
+                }),
+                None => Gesture::Idle,
+            },
         }
     }
 
-    /// Puts a run in hand back where it was picked up; a palette block is
-    /// dropped. `program` must be the one the drag came from, before any
-    /// switch: ids are only unique within a program. True if it changed.
-    pub fn cancel_drag(&mut self, language: &Language, program: &mut Program) -> bool {
-        let Gesture::Dragging(drag) = std::mem::take(&mut self.gesture) else {
-            return false;
+    /// `program` without the run in hand, which is how it is laid out and
+    /// snapped against while dragging.
+    fn lifted(&self, program: &Program) -> Option<Program> {
+        let Gesture::Dragging(Drag {
+            source: DragSource::Canvas { head },
+            ..
+        }) = &self.gesture
+        else {
+            return None;
         };
-        let Some(home) = drag.home else {
-            return false;
-        };
-        let head = [drag.head.x, drag.head.y];
-        match program.attach(language, drag.fragment, home) {
-            Ok(ejected) => {
-                if let Some(ejected) = ejected {
-                    let _ = program.attach(language, ejected, Target::Free { pos: head });
-                }
-            }
-            // Its home is gone, say the host edited the program meanwhile.
-            Err((_, fragment)) => {
-                let _ = program.attach(language, fragment, Target::Free { pos: head });
-            }
-        }
-        true
+        let mut lifted = program.clone();
+        lifted.detach(*head)?;
+        Some(lifted)
     }
 
-    /// True while a run is in hand. It is out of the program until dropped,
-    /// so hosts should not save meanwhile.
+    /// Lets go of any run in hand, leaving it where it was. The program is
+    /// untouched, so this is safe after the host has switched programs.
+    /// True if a run was in hand.
+    pub fn cancel_drag(&mut self) -> bool {
+        matches!(std::mem::take(&mut self.gesture), Gesture::Dragging(_))
+    }
+
+    /// True while a run is in hand.
     pub fn is_dragging(&self) -> bool {
         matches!(self.gesture, Gesture::Dragging(_))
     }
@@ -529,7 +525,7 @@ impl BlockEditor {
                 ui.close();
             }
         }
-        if ui.button("Toggle breakpoint").clicked() {
+        if self.options.breakpoints && ui.button("Toggle breakpoint").clicked() {
             output.events.push(EditorEvent::ToggleBreakpoint(id));
             ui.close();
         }
@@ -545,6 +541,21 @@ impl BlockEditor {
         }
     }
 
+    /// Ends any literal edit now, normalizing its text, rather than when the
+    /// field is next drawn. Call before the program is locked, as when a run
+    /// starts, so nothing depends on draw order. True if the program changed.
+    pub fn commit_edit(&mut self, ctx: &egui::Context, language: &Language, program: &mut Program) -> bool {
+        if let Some(edit) = &self.edit {
+            let id = self.field_id(edit.block, &edit.input);
+            ctx.memory_mut(|memory| memory.surrender_focus(id));
+        }
+        self.settle_edit(ctx, language, program)
+    }
+
+    fn field_id(&self, block: BlockId, input: &str) -> egui::Id {
+        self.id.with((block, input))
+    }
+
     /// Normalizes a literal that lost focus without its field being drawn,
     /// such as one panned off the canvas or left when the editor went
     /// read-only. True if the program changed.
@@ -552,7 +563,7 @@ impl BlockEditor {
         let Some(edit) = self.edit.clone() else {
             return false;
         };
-        let id = self.id.with((edit.block, edit.input.as_str()));
+        let id = self.field_id(edit.block, &edit.input);
         if ctx.memory(|memory| memory.has_focus(id)) {
             return false;
         }
@@ -586,7 +597,7 @@ impl BlockEditor {
         zoom: f32,
         theme: &Theme,
     ) -> bool {
-        let id = self.id.with((slot.parent, slot.input.as_str()));
+        let id = self.field_id(slot.parent, &slot.input);
         match kind {
             LiteralKind::Bool => {
                 let mut on = text == "true";
@@ -733,22 +744,41 @@ fn live_switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<Block
 }
 
 /// A reporter pushed out of a slot lands just below it.
-fn drop_run(language: &Language, program: &mut Program, drag: Drag) {
-    let head = [drag.head.x, drag.head.y];
-    let (target, eject) = match drag.snap {
-        Some((target, SnapMark::Slot { rect, .. })) => (target, rect.min + vec2(16.0, 40.0)),
-        Some((target, SnapMark::Seam { .. })) => (target, drag.head),
-        None => (Target::Free { pos: head }, drag.head),
+/// Delete drops the run instead of placing it. A canvas run that no longer
+/// matches the program, as when the host switched programs mid-drag, is left
+/// alone. True if the program changed.
+fn drop_run(language: &Language, program: &mut Program, drag: Drag, delete: bool) -> bool {
+    let mut next = program.clone();
+    let fragment = match &drag.source {
+        DragSource::Canvas { head } => match next.detach(*head) {
+            Some(fragment) if fragment == drag.fragment => fragment,
+            _ => return false,
+        },
+        _ if delete => return false,
+        DragSource::Palette { opcode } => match next.instantiate(language, opcode) {
+            Some(block) => Fragment { blocks: vec![block] },
+            None => return false,
+        },
     };
-    match program.attach(language, drag.fragment, target) {
-        Ok(Some(ejected)) => {
-            let _ = program.attach(language, ejected, Target::Free { pos: [eject.x, eject.y] });
-        }
-        Ok(None) => {}
-        Err((_, fragment)) => {
-            let _ = program.attach(language, fragment, Target::Free { pos: head });
+    if !delete {
+        let head = [drag.head.x, drag.head.y];
+        let (target, eject) = match drag.snap {
+            Some((target, SnapMark::Slot { rect, .. })) => (target, rect.min + vec2(16.0, 40.0)),
+            Some((target, SnapMark::Seam { .. })) => (target, drag.head),
+            None => (Target::Free { pos: head }, drag.head),
+        };
+        match next.attach(language, fragment, target) {
+            Ok(Some(ejected)) => {
+                let _ = next.attach(language, ejected, Target::Free { pos: [eject.x, eject.y] });
+            }
+            Ok(None) => {}
+            Err((_, fragment)) => {
+                let _ = next.attach(language, fragment, Target::Free { pos: head });
+            }
         }
     }
+    *program = next;
+    true
 }
 
 fn grid(painter: &egui::Painter, area: Rect, t: Transform, color: Color32) {
@@ -811,8 +841,9 @@ mod tests {
         .unwrap()
     }
 
-    #[test]
-    fn a_canceled_drag_puts_the_run_back() {
+    /// A stack of `when_run`, `print`, `print` at (10, 10), with the second
+    /// block's run in hand.
+    fn dragging_the_tail() -> (Language, Program, BlockEditor) {
         let language = tiny();
         let mut program = Program::new(&language);
         let blocks = ["when_run", "print", "print"].map(|op| program.instantiate(&language, op).unwrap());
@@ -821,28 +852,62 @@ mod tests {
             pos: [10.0, 10.0],
             blocks: blocks.to_vec(),
         });
-        let before = program.stacks.clone();
-
-        let mut editor = BlockEditor::default();
-        let home = program.home_of(second);
-        let fragment = program.detach(second).unwrap();
-        editor.gesture = Gesture::Dragging(Drag {
-            fragment,
-            from_canvas: true,
-            home,
-            grab_offset: Vec2::ZERO,
-            head: pos2(400.0, 300.0),
-            snap: None,
-        });
-
-        assert!(editor.cancel_drag(&language, &mut program));
-        assert_eq!(program.stacks, before);
-        assert!(!editor.is_dragging());
-        assert!(!editor.cancel_drag(&language, &mut program), "nothing left to cancel");
+        let editor = BlockEditor {
+            gesture: Gesture::Dragging(Drag {
+                fragment: program.clone().detach(second).unwrap(),
+                source: DragSource::Canvas { head: second },
+                grab_offset: Vec2::ZERO,
+                head: pos2(400.0, 300.0),
+                snap: None,
+            }),
+            ..BlockEditor::default()
+        };
+        (language, program, editor)
     }
 
     #[test]
-    fn a_field_left_without_being_drawn_is_still_normalized() {
+    fn a_run_in_hand_stays_in_the_program_until_dropped() {
+        let (language, mut program, mut editor) = dragging_the_tail();
+        assert_eq!(program.stacks[0].blocks.len(), 3);
+        assert_eq!(editor.lifted(&program).unwrap().stacks[0].blocks.len(), 1);
+
+        let Gesture::Dragging(drag) = std::mem::take(&mut editor.gesture) else {
+            unreachable!()
+        };
+        assert!(drop_run(&language, &mut program, drag, false));
+        let lengths: Vec<_> = program.stacks.iter().map(|stack| stack.blocks.len()).collect();
+        assert_eq!(lengths, [1, 2]);
+        assert_eq!(program.stacks[1].pos, [400.0, 300.0]);
+    }
+
+    #[test]
+    fn canceling_a_drag_leaves_the_program_as_it_was() {
+        let (_, program, mut editor) = dragging_the_tail();
+        let before = program.stacks.clone();
+        assert!(editor.cancel_drag());
+        assert!(!editor.is_dragging());
+        assert!(!editor.cancel_drag(), "nothing left to cancel");
+        assert_eq!(program.stacks, before);
+    }
+
+    #[test]
+    fn a_run_dropped_into_another_program_is_let_go() {
+        let (language, _, mut editor) = dragging_the_tail();
+        let (_, mut other, _) = dragging_the_tail();
+        let second = other.stacks[0].blocks[1].id;
+        other.set_literal(second, "value", "another creature".into());
+        let before = other.stacks.clone();
+
+        let Gesture::Dragging(drag) = std::mem::take(&mut editor.gesture) else {
+            unreachable!()
+        };
+        assert!(!drop_run(&language, &mut other, drag, false));
+        assert_eq!(other.stacks, before);
+    }
+
+    /// A "codes" language whose one literal normalizes to upper case, holding
+    /// "ab" in a field the editor is editing.
+    fn editing_a_code() -> (Language, Program, BlockId, BlockEditor) {
         #[derive(Debug)]
         struct Upper;
         impl block_parse::LiteralValidator for Upper {
@@ -874,16 +939,36 @@ mod tests {
         });
         program.set_literal(id, "code", "ab".into());
 
-        let mut editor = BlockEditor {
+        let editor = BlockEditor {
             edit: Some(LiteralEdit {
                 block: id,
                 input: "code".into(),
             }),
             ..BlockEditor::default()
         };
+        (language, program, id, editor)
+    }
+
+    #[test]
+    fn a_field_left_without_being_drawn_is_still_normalized() {
+        let (language, mut program, id, mut editor) = editing_a_code();
         // A fresh context has nothing focused, as after the field went away.
         assert!(editor.settle_edit(&egui::Context::default(), &language, &mut program));
         assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
+        assert!(editor.edit.is_none());
+    }
+
+    #[test]
+    fn committing_normalizes_a_field_that_still_has_focus() {
+        let (language, mut program, id, mut editor) = editing_a_code();
+        let ctx = egui::Context::default();
+        let field = editor.field_id(id, "code");
+        ctx.memory_mut(|memory| memory.request_focus(field));
+
+        assert!(!editor.settle_edit(&ctx, &language, &mut program), "still being typed into");
+        assert!(editor.commit_edit(&ctx, &language, &mut program));
+        assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
+        assert!(!ctx.memory(|memory| memory.has_focus(field)));
         assert!(editor.edit.is_none());
     }
 

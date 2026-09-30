@@ -34,16 +34,13 @@ pub enum Pressed {
     Block { id: BlockId, top_left: Pos2 },
 }
 
-/// The fragment is out of the program while dragged, so palette and canvas
-/// drags land through the same code and a drop on the palette deletes.
+/// A canvas run stays in the program until dropped, so the program is always
+/// whole and canceling needs nothing from it.
 #[derive(Debug, Clone)]
 pub struct Drag {
+    /// A copy of the run in hand, for drawing and snapping.
     pub fragment: Fragment,
-    /// Dropping a canvas run on the palette deletes it; a palette block
-    /// dropped back there changes nothing.
-    pub from_canvas: bool,
-    /// Where a canceled drag puts the run back; `None` for a palette block.
-    pub home: Option<Target>,
+    pub source: DragSource,
     /// Pointer minus head top-left at the grab, canvas units, so the run does
     /// not jump.
     pub grab_offset: Vec2,
@@ -51,6 +48,14 @@ pub struct Drag {
     pub head: Pos2,
     /// Computed once per frame so the highlight and the drop agree.
     pub snap: Option<(Target, SnapMark)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DragSource {
+    /// Instantiated afresh on drop, so its ids come from the program it lands in.
+    Palette { opcode: String },
+    /// Dropping it on the palette deletes it.
+    Canvas { head: BlockId },
 }
 
 /// What the snap highlight draws, canvas units.

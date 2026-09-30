@@ -138,8 +138,7 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pending = Some(Pending::Quit);
         }
-        // A run in hand is out of the program, so saving now would drop it.
-        if self.pending.is_none() && !self.editor.is_dragging() {
+        if self.pending.is_none() {
             self.shortcuts(&ctx);
         }
 
