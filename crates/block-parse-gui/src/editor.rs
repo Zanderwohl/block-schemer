@@ -215,6 +215,11 @@ impl BlockEditor {
             };
             self.gesture = self.start_drag(press, language, program, t);
         }
+        // Locked mid-drag, as when a run starts: the run goes back rather than
+        // landing in a program the host has made read-only.
+        if read_only {
+            self.cancel_drag();
+        }
         let lifted = self.lifted(program);
         let mut scene = layout.program(lifted.as_ref().unwrap_or(program));
 
@@ -477,6 +482,9 @@ impl BlockEditor {
 
     /// Lets go of any run in hand, leaving it where it was. The program is
     /// untouched, so this is safe after the host has switched programs.
+    /// Hosts switching programs mid-drag should call it: otherwise a drop
+    /// lands in whichever program is shown on release, if that program holds
+    /// the same run unchanged, since ids are only unique within a program.
     /// True if a run was in hand.
     pub fn cancel_drag(&mut self) -> bool {
         matches!(std::mem::take(&mut self.gesture), Gesture::Dragging(_))
@@ -903,6 +911,36 @@ mod tests {
         };
         assert!(!drop_run(&language, &mut other, drag, false));
         assert_eq!(other.stacks, before);
+    }
+
+    #[test]
+    fn a_run_dropped_into_an_identical_program_lands_there() {
+        let (language, _, mut editor) = dragging_the_tail();
+        let (_, mut copy, _) = dragging_the_tail();
+
+        let Gesture::Dragging(drag) = std::mem::take(&mut editor.gesture) else {
+            unreachable!()
+        };
+        assert!(drop_run(&language, &mut copy, drag, false));
+        let lengths: Vec<_> = copy.stacks.iter().map(|stack| stack.blocks.len()).collect();
+        assert_eq!(lengths, [1, 2]);
+    }
+
+    #[test]
+    fn going_read_only_mid_drag_lets_the_run_go_without_dropping_it() {
+        let (language, mut program, mut editor) = dragging_the_tail();
+        let before = program.stacks.clone();
+        editor.options.read_only = true;
+
+        // No pointer is down, so this frame would otherwise release the run.
+        let mut changed = true;
+        let mut frame = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            changed = editor.show(ui, &language, &mut program).changed;
+        });
+        frame.textures_delta.clear();
+        assert!(!changed);
+        assert!(!editor.is_dragging());
+        assert_eq!(program.stacks, before);
     }
 
     /// A "codes" language whose one literal normalizes to upper case, holding
