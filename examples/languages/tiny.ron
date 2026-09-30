@@ -108,13 +108,14 @@ Language(
             description: "Puts two pieces of text together, end to end.",
         ),
 
-        // Logic
+        // Logic. Comparisons take any value; the interpreter treats all values
+        // as totally ordered.
         (
             id: "less_than",
             name: "Less than",
             category: "Logic",
             kind: Reporter("bool"),
-            spec: "{a:number=0} < {b:number=0}",
+            spec: "{a:value=0} < {b:value=0}",
             tags: ["comparison"],
         ),
         (
@@ -122,7 +123,7 @@ Language(
             name: "Greater than",
             category: "Logic",
             kind: Reporter("bool"),
-            spec: "{a:number=0} > {b:number=0}",
+            spec: "{a:value=0} > {b:value=0}",
             tags: ["comparison"],
         ),
         (
@@ -130,7 +131,7 @@ Language(
             name: "Equals",
             category: "Logic",
             kind: Reporter("bool"),
-            spec: "{a:number=0} = {b:number=0}",
+            spec: "{a:value=0} = {b:value=0}",
             tags: ["comparison"],
         ),
         (
