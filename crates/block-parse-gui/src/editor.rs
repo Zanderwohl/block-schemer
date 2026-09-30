@@ -287,7 +287,7 @@ impl BlockEditor {
                 if let SlotContent::Literal { kind, text, .. } = &slot.content {
                     let rect = t.rect(slot.rect);
                     if canvas_rect.intersects(rect)
-                        && self.literal_field(&mut fields, rect, slot, kind, text, program, t.zoom, &theme)
+                        && self.literal_field(&mut fields, rect, slot, kind, text, language, program, t.zoom, &theme)
                     {
                         output.changed = true;
                     }
@@ -500,6 +500,7 @@ impl BlockEditor {
         slot: &PlacedSlot,
         kind: &LiteralKind,
         text: &str,
+        language: &Language,
         program: &mut Program,
         zoom: f32,
         theme: &Theme,
@@ -554,6 +555,12 @@ impl BlockEditor {
                     });
                 } else if self.edit.as_ref().is_some_and(this) {
                     self.edit = None;
+                }
+                if response.lost_focus() {
+                    let tidied = language.normalize_literal(&slot.ty, &buffer);
+                    if tidied != text {
+                        return program.set_literal(slot.parent, &slot.input, tidied);
+                    }
                 }
                 response.changed() && program.set_literal(slot.parent, &slot.input, buffer)
             }

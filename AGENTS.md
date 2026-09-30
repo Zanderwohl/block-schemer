@@ -22,7 +22,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     so invalid text stays in the program and shows as a problem. Built-in
     kinds (Float with e-notation, Integer, Number as an i64|f64 union,
     Currency in minor units, Binary, Hex, Text, Bool, Choice) plus
-    consumer-registered `LiteralValidator`s for `Custom(name)`.
+    consumer-registered `LiteralValidator`s for `Custom(name)`, which may also
+    `normalize` text when a field loses focus (never while typing).
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant.

@@ -354,6 +354,14 @@ impl Language {
         let ty = self.ty(ty).ok_or_else(|| format!("unknown type `{ty}`"))?;
         literal::parse(&ty.literal, text, &self.validators)
     }
+
+    /// What a slot of type `ty` keeps once the user leaves it.
+    pub fn normalize_literal(&self, ty: &str, text: &str) -> String {
+        match self.ty(ty) {
+            Some(ty) => literal::normalize(&ty.literal, text, &self.validators),
+            None => text.to_owned(),
+        }
+    }
 }
 
 /// RON as language and program files are read: `Some` may be left implicit.
