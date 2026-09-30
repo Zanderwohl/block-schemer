@@ -34,8 +34,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `debug`: `RunCommand`, `RunStatus`, `DebugView`, `trait Runner`. In core so
     interpreters need not depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, clap, rfd and the `block-parse-editor` binary
-  (`cargo editor -l <language> [program]`). Its File/Edit menus are egui for
+  by default) adds eframe, clap, rfd, winit (macOS only) and the
+  `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
+  File/Edit menus are egui for
   now; `--no-menu-bar` hides them for when native menus arrive. On macOS it
   turns off winit's default menu, whose Quit would skip the save prompt.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
@@ -56,7 +57,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   spaces; names used in specs also exclude `{ } [ ] : =`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
   problems and attaching checks the combined depth. Program loads raise RON's
-  recursion limit to `RON_RECURSION_LIMIT` (RON spends ~4 levels per block);
+  recursion limit to `RON_RECURSION_LIMIT` (RON spends 6–7 levels per block);
   only nesting past that is a fatal syntax error.
 - The editor never opens documentation links; it emits
   `EditorEvent::OpenDocumentation`. Untrusted language files are the user's

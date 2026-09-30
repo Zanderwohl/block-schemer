@@ -204,16 +204,20 @@ impl Layout<'_> {
         let mut scene = Scene::empty();
         for stack in &program.stacks {
             let origin = pos2(stack.pos[0], stack.pos[1]);
-            if let Some(head) = stack.blocks.first() {
-                let laid = self.block(head);
-                scene.heads.push(StackHead {
-                    block: head.id,
-                    top_left: origin,
-                    width: laid.size.x,
-                    is_hat: laid.top == Some(TopEdge::Hat),
-                });
+            let mut y = origin.y;
+            for (index, block) in stack.blocks.iter().enumerate() {
+                let laid = self.block(block);
+                if index == 0 {
+                    scene.heads.push(StackHead {
+                        block: block.id,
+                        top_left: origin,
+                        width: laid.size.x,
+                        is_hat: laid.top == Some(TopEdge::Hat),
+                    });
+                }
+                place(&laid, pos2(origin.x, y), 0, &mut scene);
+                y += laid.size.y;
             }
-            self.place_sequence(&stack.blocks, origin, 0, &mut scene);
         }
         scene
     }
@@ -907,6 +911,19 @@ mod tests {
         assert_eq!(palette.headings[0].text, "Events");
         for pair in palette.entries.windows(2) {
             assert!(pair[0].rect.max.y < pair[1].rect.min.y, "entries overlap");
+        }
+        for entry in &palette.entries {
+            let def = language.block(&entry.opcode).unwrap();
+            let expected = def
+                .category
+                .map_or("Other", |index| language.categories()[index].name.as_str());
+            let heading = palette
+                .headings
+                .iter()
+                .rev()
+                .find(|heading| heading.at.y < entry.rect.min.y)
+                .unwrap();
+            assert_eq!(heading.text, expected, "{} sits under the wrong heading", entry.opcode);
         }
     }
 }

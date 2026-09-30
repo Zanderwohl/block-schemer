@@ -69,7 +69,7 @@ pub fn snap_mark(painter: &Painter, mark: &SnapMark, t: Transform, theme: &Theme
             let edge = shape::top_edge(at.x, *width, at.y, TopEdge::Notched);
             painter.add(egui::Shape::line(t.points(edge), stroke));
         }
-        SnapMark::Slot { rect, shape } => outline(painter, *shape, t.rect(*rect), stroke),
+        SnapMark::Slot { rect, shape } => outline(painter, *shape, t.rect(*rect), stroke, t.zoom),
     }
 }
 
@@ -92,7 +92,7 @@ fn paint_block(painter: &Painter, block: &PlacedBlock, t: Transform, theme: &The
             let outline = t.points(shape::stack_outline(block.rect, form));
             painter.add(egui::Shape::closed_line(outline, edge));
         }
-        Form::Reporter(shape) => fill(painter, *shape, t.rect(block.rect), swatch.fill, edge),
+        Form::Reporter(shape) => fill(painter, *shape, t.rect(block.rect), swatch.fill, edge, t.zoom),
     }
 
     let font = FontId::proportional(LABEL_SIZE * t.zoom);
@@ -110,7 +110,7 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     let (kind, text, error) = match &slot.content {
         SlotContent::Plugged(_) => return,
         SlotContent::Empty => {
-            fill(painter, slot.shape, rect, slot.swatch.shadow, edge);
+            fill(painter, slot.shape, rect, slot.swatch.shadow, edge, t.zoom);
             return;
         }
         SlotContent::Literal { kind, text, error } => (kind, text, error),
@@ -121,9 +121,9 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     } else {
         theme.literal_fill
     };
-    fill(painter, slot.shape, rect, background, edge);
+    fill(painter, slot.shape, rect, background, edge, t.zoom);
     if error.is_some() {
-        outline(painter, slot.shape, rect, Stroke::new(2.0 * t.zoom, theme.error));
+        outline(painter, slot.shape, rect, Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
     }
     if live {
         return;
@@ -158,13 +158,13 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     }
 }
 
-fn fill(painter: &Painter, shape: Shape, rect: Rect, color: Color32, edge: Stroke) {
+fn fill(painter: &Painter, shape: Shape, rect: Rect, color: Color32, edge: Stroke, zoom: f32) {
     match shape {
         Shape::Round => {
             painter.rect(rect, radius(rect.height() / 2.0), color, edge, StrokeKind::Inside);
         }
         Shape::Square => {
-            painter.rect(rect, radius(3.0), color, edge, StrokeKind::Inside);
+            painter.rect(rect, radius(3.0 * zoom), color, edge, StrokeKind::Inside);
         }
         Shape::Hexagon => {
             painter.add(egui::Shape::convex_polygon(shape::hexagon(rect), color, edge));
@@ -172,13 +172,13 @@ fn fill(painter: &Painter, shape: Shape, rect: Rect, color: Color32, edge: Strok
     }
 }
 
-fn outline(painter: &Painter, shape: Shape, rect: Rect, stroke: Stroke) {
+fn outline(painter: &Painter, shape: Shape, rect: Rect, stroke: Stroke, zoom: f32) {
     match shape {
         Shape::Round => {
             painter.rect_stroke(rect, radius(rect.height() / 2.0), stroke, StrokeKind::Outside);
         }
         Shape::Square => {
-            painter.rect_stroke(rect, radius(3.0), stroke, StrokeKind::Outside);
+            painter.rect_stroke(rect, radius(3.0 * zoom), stroke, StrokeKind::Outside);
         }
         Shape::Hexagon => {
             painter.add(egui::Shape::closed_line(shape::hexagon(rect), stroke));

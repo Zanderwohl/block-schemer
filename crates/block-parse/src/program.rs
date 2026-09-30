@@ -13,10 +13,11 @@ pub const FORMAT_VERSION: u32 = 1;
 /// cannot be attached. Kept under 128 to leave room for later nesting.
 pub const MAX_DEPTH: usize = 120;
 
-/// RON's recursion limit for program loads. Each block level costs RON about
-/// four (block, map, input, block), so its default of 128 would stop loads
-/// near depth 30. Only a file nested past this is a fatal syntax error.
-pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 5 + 16;
+/// RON's recursion limit for program loads. Measured: a level of nesting
+/// costs RON 6 through a branch and 7 through an input, plus about 8 for the
+/// file around it, so its default of 128 stops loads near depth 17. Only a
+/// file nested past this is a fatal syntax error.
+pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 7 + 16;
 
 /// Only stack positions are stored; block positions are derived, so a language
 /// whose labels change width re-flows old files instead of overlapping them.
@@ -97,19 +98,23 @@ impl Program {
     }
 
     pub fn from_ron(text: &str) -> Result<Self, ProgramError> {
-        ron_options()
-            .with_recursion_limit(RON_RECURSION_LIMIT)
-            .from_str(text)
-            .map_err(ProgramError::Syntax)
+        with_deep_stack(|| {
+            ron_options()
+                .with_recursion_limit(RON_RECURSION_LIMIT)
+                .from_str(text)
+                .map_err(ProgramError::Syntax)
+        })
     }
 
     pub fn to_ron(&self) -> String {
         let config = ron::ser::PrettyConfig::new()
             .extensions(ron::extensions::Extensions::IMPLICIT_SOME);
-        ron::Options::default()
-            .with_recursion_limit(RON_RECURSION_LIMIT)
-            .to_string_pretty(self, config)
-            .expect("a program is plain data and always serializes")
+        with_deep_stack(|| {
+            ron::Options::default()
+                .with_recursion_limit(RON_RECURSION_LIMIT)
+                .to_string_pretty(self, config)
+                .expect("a program is plain data and always serializes")
+        })
     }
 
     /// Reads a program, noting anything odd about it without refusing it.
@@ -247,6 +252,31 @@ impl Block {
             .map(Block::height);
         let branches = self.branches.values().flatten().map(Block::height);
         1 + inputs.chain(branches).max().unwrap_or(0)
+    }
+}
+
+/// Stack for RON work on a `MAX_DEPTH` program. Measured: debug builds need
+/// between 2 and 4 MiB, more than spawned threads, tests and async runtimes
+/// usually get.
+const RON_STACK: usize = 16 * 1024 * 1024;
+
+/// Runs `work` on a thread with `RON_STACK` of stack, so loads and saves are
+/// safe from whatever thread calls them. Inline where threads are missing.
+fn with_deep_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(RON_STACK)
+                .spawn_scoped(scope, work)
+                .expect("a thread for RON work")
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        work()
     }
 }
 

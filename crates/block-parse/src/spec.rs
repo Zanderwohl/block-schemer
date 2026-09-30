@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn a_colon_after_the_first_stays_in_the_type() {
-        // So `{a:b:c}` is refused later as a bad type name, not misread.
+        // So `{a:b:c}` is refused later as an unknown type, not misread.
         assert_eq!(parse("{a:b:c}").unwrap(), vec![input("a", "b:c", None)]);
     }
 

@@ -8,8 +8,10 @@ use egui::{
     RichText, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 
-use crate::color::Swatches;
-use crate::interact::{Drag, DragSource, Gesture, LiteralEdit, SnapMark};
+use crate::color::{SwatchRecipe, Swatches};
+
+type SwatchKey = (SwatchRecipe, Vec<block_parse::CategoryColor>);
+use crate::interact::{DRAG_THRESHOLD, Drag, Gesture, LiteralEdit, Press, Pressed, SnapMark};
 use crate::layout::{
     Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
 };
@@ -25,9 +27,8 @@ pub struct BlockEditor {
     gesture: Gesture,
     edit: Option<LiteralEdit>,
     palette_scroll: f32,
-    /// Keyed by language name; resolved when the language changes, not per
-    /// frame.
-    swatches: Option<(String, Swatches)>,
+    /// Resolved when the recipe or the category colors change, not per frame.
+    swatches: Option<(SwatchKey, Swatches)>,
     /// The block the context menu was opened on.
     menu: Option<BlockId>,
     id: egui::Id,
@@ -106,8 +107,12 @@ impl BlockEditor {
         let theme = self.options.theme.clone();
         let read_only = self.options.read_only;
 
-        if self.swatches.as_ref().is_none_or(|(name, _)| *name != language.name) {
-            self.swatches = Some((language.name.clone(), Swatches::resolve(language, &theme.swatch)));
+        let key: SwatchKey = (
+            theme.swatch.clone(),
+            language.categories().iter().map(|category| category.color).collect(),
+        );
+        if self.swatches.as_ref().is_none_or(|(cached, _)| *cached != key) {
+            self.swatches = Some((key, Swatches::resolve(language, &theme.swatch)));
         }
         let swatches = match &self.swatches {
             Some((_, swatches)) => swatches.clone(),
@@ -174,10 +179,27 @@ impl BlockEditor {
         };
         let mut scene = layout.program(program);
 
+        if let Gesture::Pressed(press) = &self.gesture
+            && input.down
+            && input.at.is_some_and(|at| at.distance(press.at) > DRAG_THRESHOLD)
+        {
+            let Gesture::Pressed(press) = std::mem::take(&mut self.gesture) else {
+                unreachable!()
+            };
+            self.gesture = self.start_drag(press, language, program, t, &mut output);
+        }
+
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
                 if let Some(at) = over.filter(|_| input.pressed) {
-                    self.press(at, language, program, &scene, &palette, palette_rect, palette_t, t, &mut output);
+                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t);
+                }
+            }
+            Gesture::Pressed(press) => {
+                if input.down {
+                    self.gesture = Gesture::Pressed(press);
+                } else if let Pressed::Block { id, .. } = press.on {
+                    output.events.push(EditorEvent::BlockClicked(id));
                 }
             }
             Gesture::Panning => {
@@ -190,16 +212,18 @@ impl BlockEditor {
                 if let Some(at) = input.at {
                     drag.head = t.canvas(at) - drag.grab_offset;
                 }
+                // Every frame, release included, so a quick flick still snaps.
+                let run = layout.run(&drag.fragment.blocks, drag.head);
+                drag.snap = find_snap(language, program, &scene, &drag.fragment, &run);
                 if input.down {
-                    let run = layout.run(&drag.fragment.blocks, drag.head);
-                    drag.snap = find_snap(language, program, &scene, &drag.fragment, &run);
                     self.gesture = Gesture::Dragging(drag);
+                } else if input.at.is_some_and(|at| palette_rect.contains(at)) {
+                    // Checked before the snap, so dragging out to delete never
+                    // catches a seam on the way. A palette block dropped back
+                    // on the palette changes nothing.
+                    output.changed |= drag.from_canvas;
                 } else {
-                    // Checked before any snap, so dragging out to delete never
-                    // catches a seam on the way.
-                    if !input.at.is_some_and(|at| palette_rect.contains(at)) {
-                        drop_run(language, program, drag);
-                    }
+                    drop_run(language, program, drag);
                     output.changed = true;
                 }
             }
@@ -309,41 +333,28 @@ impl BlockEditor {
         output
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// What a press on `at` would pick up, without picking it up yet.
     fn press(
-        &mut self,
+        &self,
         at: Pos2,
-        language: &Language,
-        program: &mut Program,
         scene: &Scene,
         palette: &crate::layout::Palette,
         palette_rect: Rect,
         palette_t: Transform,
         t: Transform,
-        output: &mut EditorOutput,
-    ) {
+    ) -> Gesture {
         let read_only = self.options.read_only;
         if palette_rect.contains(at) {
-            if read_only {
-                return;
-            }
-            let Some(entry) = palette.entry_at(palette_t.canvas(at)) else {
-                return;
+            return match palette.entry_at(palette_t.canvas(at)) {
+                Some(entry) if !read_only => Gesture::Pressed(Press {
+                    at,
+                    on: Pressed::Palette {
+                        opcode: entry.opcode.clone(),
+                        top_left: palette_t.pos(entry.rect.min),
+                    },
+                }),
+                _ => Gesture::Idle,
             };
-            let Some(block) = program.instantiate(language, &entry.opcode) else {
-                return;
-            };
-            let grab_offset = (at - palette_t.pos(entry.rect.min)) / t.zoom;
-            self.gesture = Gesture::Dragging(Drag {
-                fragment: Fragment { blocks: vec![block] },
-                source: DragSource::Palette {
-                    opcode: entry.opcode.clone(),
-                },
-                grab_offset,
-                head: t.canvas(at) - grab_offset,
-                snap: None,
-            });
-            return;
         }
 
         let point = t.canvas(at);
@@ -353,25 +364,66 @@ impl BlockEditor {
                 .slot_at(point)
                 .is_some_and(|slot| matches!(slot.content, SlotContent::Literal { .. }));
         if on_field {
-            return;
+            return Gesture::Idle;
         }
-        match scene.hit(point).filter(|_| !read_only) {
-            Some(hit) => {
-                let (id, top_left) = (hit.id, hit.rect.min);
-                let from = program.locate(id);
-                if let Some(fragment) = program.detach(id) {
+        match scene.hit(point) {
+            Some(hit) => Gesture::Pressed(Press {
+                at,
+                on: Pressed::Block {
+                    id: hit.id,
+                    top_left: hit.rect.min,
+                },
+            }),
+            None => Gesture::Panning,
+        }
+    }
+
+    /// The pointer has moved far enough for a press to be a drag. Offsets are
+    /// taken from the press, so the run does not jump by the threshold.
+    fn start_drag(
+        &self,
+        press: Press,
+        language: &Language,
+        program: &mut Program,
+        t: Transform,
+        output: &mut EditorOutput,
+    ) -> Gesture {
+        match press.on {
+            Pressed::Palette { opcode, top_left } => {
+                let Some(block) = program.instantiate(language, &opcode) else {
+                    return Gesture::Idle;
+                };
+                let grab_offset = (press.at - top_left) / t.zoom;
+                Gesture::Dragging(Drag {
+                    fragment: Fragment { blocks: vec![block] },
+                    from_canvas: false,
+                    grab_offset,
+                    head: t.canvas(press.at) - grab_offset,
+                    snap: None,
+                })
+            }
+            // Read-only blocks cannot move, so dragging one pans instead.
+            Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
+            Pressed::Block { id, top_left } => match program.detach(id) {
+                Some(fragment) => {
                     output.changed = true;
-                    self.gesture = Gesture::Dragging(Drag {
+                    Gesture::Dragging(Drag {
                         fragment,
-                        source: DragSource::Canvas { from },
-                        grab_offset: point - top_left,
+                        from_canvas: true,
+                        grab_offset: t.canvas(press.at) - top_left,
                         head: top_left,
                         snap: None,
-                    });
+                    })
                 }
-            }
-            None => self.gesture = Gesture::Panning,
+                None => Gesture::Idle,
+            },
         }
+    }
+
+    /// True while a run is in hand. It is out of the program until dropped,
+    /// so hosts should not save meanwhile.
+    pub fn is_dragging(&self) -> bool {
+        matches!(self.gesture, Gesture::Dragging(_))
     }
 
     fn context_menu(

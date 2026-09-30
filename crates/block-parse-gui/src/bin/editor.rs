@@ -68,7 +68,6 @@ struct App {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    // The only way to pick a language for now; others are planned.
     let Some(language_path) = args.language else {
         eprintln!("no language given: pass --language <path>");
         return ExitCode::from(2);
@@ -139,7 +138,8 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pending = Some(Pending::Quit);
         }
-        if self.pending.is_none() {
+        // A run in hand is out of the program, so saving now would drop it.
+        if self.pending.is_none() && !self.editor.is_dragging() {
             self.shortcuts(&ctx);
         }
 
@@ -300,7 +300,7 @@ impl App {
             choice = Some(Choice::Cancel);
         }
         match choice {
-            // A cancelled Save As dialog cancels the whole action.
+            // A canceled Save As dialog cancels the whole action.
             Some(Choice::Save) => {
                 self.pending = None;
                 if self.save() {

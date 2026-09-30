@@ -285,6 +285,7 @@ impl Program {
             }
         };
         self.stacks.retain(|stack| !stack.blocks.is_empty());
+        self.reserve_ids(std::slice::from_ref(&removed));
         Some(removed)
     }
 
@@ -521,15 +522,31 @@ mod tests {
         assert_eq!(input.literal.as_deref(), Some("Hello, world!"));
     }
 
+    /// A just-loaded program, whose id counter has not been recovered yet.
+    fn loaded(language: &Language, opcodes: &[&str]) -> (Program, Vec<BlockId>) {
+        let mut program = Program::new(language);
+        let ids = stack(&mut program, language, opcodes);
+        (Program::from_ron(&program.to_ron()).unwrap(), ids)
+    }
+
     #[test]
     fn ids_taken_out_of_the_tree_are_never_reissued() {
         let language = tiny();
-        let mut program = Program::new(&language);
-        let ids = stack(&mut program, &language, &["print", "set"]);
+        let (mut program, ids) = loaded(&language, &["print", "set"]);
         let _held = program.detach(ids[0]).unwrap();
 
         let next = program.fresh_id();
         assert!(ids.iter().all(|id| next.0 > id.0), "{next:?} reuses one of {ids:?}");
+    }
+
+    #[test]
+    fn ids_of_removed_blocks_are_never_reissued() {
+        let language = tiny();
+        let (mut program, ids) = loaded(&language, &["print", "set"]);
+        program.remove(ids[1]).unwrap();
+
+        let next = program.fresh_id();
+        assert!(next.0 > ids[1].0, "{next:?} reuses {:?}", ids[1]);
     }
 
     #[test]
@@ -549,6 +566,9 @@ mod tests {
             innermost = id;
         }
         assert_eq!(program.depth_of(innermost), Some(MAX_DEPTH));
+        // RON's own recursion limit must not cut in before ours.
+        let back = Program::from_ron(&program.to_ron()).unwrap();
+        assert_eq!(back.depth_of(innermost), Some(MAX_DEPTH));
 
         let one_more = fresh(&mut program, &language, "print");
         let target = Target::BranchStart {
