@@ -94,6 +94,10 @@ pub struct BlockConfig {
     pub description: Option<String>,
     #[serde(default)]
     pub documentation: Option<String>,
+    /// A checkbox whose state the host owns and supplies in `Overlay`, never
+    /// saved in the program. Stack blocks only.
+    #[serde(default)]
+    pub switch: bool,
 }
 
 /// OKLCH. Only the hue is required; the GUI supplies the rest from its theme.
@@ -210,6 +214,7 @@ pub struct BlockDef {
     pub description: Option<String>,
     /// A URL or a relative path; resolving it is the consumer's business.
     pub documentation: Option<String>,
+    pub switch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -354,6 +359,14 @@ impl Language {
         let ty = self.ty(ty).ok_or_else(|| format!("unknown type `{ty}`"))?;
         literal::parse(&ty.literal, text, &self.validators)
     }
+
+    /// What a slot of type `ty` keeps once the user leaves it.
+    pub fn normalize_literal(&self, ty: &str, text: &str) -> String {
+        match self.ty(ty) {
+            Some(ty) => literal::normalize(&ty.literal, text, &self.validators),
+            None => text.to_owned(),
+        }
+    }
 }
 
 /// RON as language and program files are read: `Some` may be left implicit.
@@ -486,6 +499,10 @@ impl LanguageConfig {
                 problem(at, format!("reports unknown type `{output}`"));
             }
 
+            if config.switch && config.kind.output().is_some() {
+                problem(at, "switches go on stack blocks, not reporters".into());
+            }
+
             let spec_parts = match spec::parse(&config.spec) {
                 Ok(parts) => parts,
                 Err(message) => {
@@ -557,6 +574,7 @@ impl LanguageConfig {
                 tags: config.tags,
                 description: config.description,
                 documentation: config.documentation,
+                switch: config.switch,
             });
         }
 
@@ -663,6 +681,21 @@ mod tests {
             .replace("hue: 10.0", "hue: 400.0");
         let problems = compile(&text).unwrap_err();
         assert_eq!(problems.len(), 4, "{problems:#?}");
+    }
+
+    #[test]
+    fn only_stack_blocks_take_a_switch() {
+        let language = compile(&MINIMAL.replace(r#"spec: "if {c:bool} [then]""#, r#"spec: "if {c:bool} [then]", switch: true"#))
+            .unwrap();
+        assert!(language.block("if").unwrap().switch);
+        assert!(!language.block("go").unwrap().switch, "off unless asked for");
+
+        let problems = compile(&MINIMAL.replace(
+            r#"spec: "{a:number=1} + {b:number}""#,
+            r#"spec: "{a:number=1} + {b:number}", switch: true"#,
+        ))
+        .unwrap_err();
+        assert!(problems[0].contains("switch"), "{problems:#?}");
     }
 
     #[test]

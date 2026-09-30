@@ -287,6 +287,22 @@ impl Program {
         Some(removed)
     }
 
+    /// Where a run detached at `id` goes to be put back as it was. A whole
+    /// stack returns to its position but last in stack order.
+    pub fn home_of(&self, id: BlockId) -> Option<Target> {
+        Some(match self.locate(id)? {
+            Location::Stack { stack, index: 0 } => Target::Free {
+                pos: self.stacks[stack].pos,
+            },
+            Location::Stack { stack, index } => Target::After(self.stacks[stack].blocks[index - 1].id),
+            Location::Branch { parent, branch, index: 0 } => Target::BranchStart { parent, branch },
+            Location::Branch { parent, branch, index } => {
+                Target::After(self.find(parent)?.branches.get(&branch)?[index - 1].id)
+            }
+            Location::Input { parent, input } => Target::Input { parent, input },
+        })
+    }
+
     /// The stack or branch holding `id`, and its index there. `None` for a
     /// reporter in a slot.
     pub fn sequence_of(&self, id: BlockId) -> Option<(&[Block], usize)> {
@@ -579,6 +595,33 @@ mod tests {
                 depth: MAX_DEPTH + 1
             })
         );
+    }
+
+    #[test]
+    fn a_run_goes_back_home_as_it_was() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["when_run", "while", "print"]);
+        let other = stack(&mut program, &language, &["print"]);
+        let inner = program.instantiate(&language, "set").unwrap();
+        let join = program.instantiate(&language, "join").unwrap();
+        let (inner_id, join_id) = (inner.id, join.id);
+        let owner = program.find_mut(ids[1]).unwrap();
+        owner.branches.get_mut("body").unwrap().push(inner);
+        program.find_mut(ids[2]).unwrap().inputs.get_mut("value").unwrap().block = Some(Box::new(join));
+        let before = program.stacks.clone();
+
+        let sorted = |stacks: &[Stack]| {
+            let mut stacks = stacks.to_vec();
+            stacks.sort_by_key(|stack| stack.blocks[0].id);
+            stacks
+        };
+        for id in [ids[0], ids[1], ids[2], inner_id, join_id, other[0]] {
+            let home = program.home_of(id).unwrap();
+            let run = program.detach(id).unwrap();
+            program.attach(&language, run, home).unwrap();
+            assert_eq!(sorted(&program.stacks), sorted(&before), "{id:?} did not go back as it was");
+        }
     }
 
     #[test]

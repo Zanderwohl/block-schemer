@@ -90,7 +90,7 @@ pub enum ProblemCode {
     AfterCap,
     /// Reported on the second block.
     DuplicateId,
-    /// Nested past `MAX_DEPTH`. Replaces the block at the limit; nothing
+    /// Nested past `MAX_DEPTH`. Replaces the first block past the limit; nothing
     /// below it is parsed.
     TooDeep,
 }
@@ -99,4 +99,69 @@ pub enum ProblemCode {
 pub enum Severity {
     Warning,
     Error,
+}
+
+impl Ast {
+    /// Every problem in tree order, including those under recovered nodes.
+    pub fn problems(&self) -> Vec<&Problem> {
+        let mut found = Vec::new();
+        for script in &self.scripts {
+            statements(&script.body, &mut found);
+        }
+        found
+    }
+
+    /// No error-level problems. Warnings are allowed.
+    pub fn is_clean(&self) -> bool {
+        self.problems()
+            .iter()
+            .all(|problem| problem.severity < Severity::Error)
+    }
+}
+
+impl Node {
+    pub fn arg(&self, name: &str) -> Option<&Expr> {
+        self.args.iter().find(|arg| arg.name == name).map(|arg| &arg.value)
+    }
+
+    pub fn branch(&self, name: &str) -> Option<&[Stmt]> {
+        self.branches
+            .iter()
+            .find(|branch| branch.name == name)
+            .map(|branch| branch.body.as_slice())
+    }
+}
+
+fn statements<'a>(body: &'a [Stmt], found: &mut Vec<&'a Problem>) {
+    for statement in body {
+        match statement {
+            Stmt::Node(node) => node_problems(node, found),
+            Stmt::Problem(problem) => problem_and_below(problem, found),
+        }
+    }
+}
+
+fn node_problems<'a>(node: &'a Node, found: &mut Vec<&'a Problem>) {
+    for arg in &node.args {
+        expression(&arg.value, found);
+    }
+    for branch in &node.branches {
+        statements(&branch.body, found);
+    }
+}
+
+fn expression<'a>(expr: &'a Expr, found: &mut Vec<&'a Problem>) {
+    match expr {
+        Expr::Literal(_) => {}
+        Expr::Node(node) => node_problems(node, found),
+        Expr::Convert { value, .. } => expression(value, found),
+        Expr::Problem(problem) => problem_and_below(problem, found),
+    }
+}
+
+fn problem_and_below<'a>(problem: &'a Problem, found: &mut Vec<&'a Problem>) {
+    found.push(problem);
+    if let Some(node) = &problem.recovered {
+        node_problems(node, found);
+    }
 }

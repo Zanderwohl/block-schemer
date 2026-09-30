@@ -17,6 +17,12 @@ use crate::value::Value;
 pub trait LiteralValidator: Debug + Send + Sync {
     /// `Err` is a short message for the tag under the slot.
     fn validate(&self, text: &str) -> Result<Value, String>;
+
+    /// Tidies typed text on blur. Never applied while typing, so the cursor
+    /// never jumps.
+    fn normalize(&self, text: &str) -> String {
+        text.to_owned()
+    }
 }
 
 /// Validators by the name `LiteralKind::Custom` refers to them by.
@@ -77,6 +83,17 @@ pub fn parse(kind: &LiteralKind, text: &str, validators: &Validators) -> Result<
             Some(validator) => validator.validate(text),
             None => Err(format!("no validator named `{name}`")),
         },
+    }
+}
+
+/// Built-in kinds keep text as typed; only `Custom` validators normalize.
+pub fn normalize(kind: &LiteralKind, text: &str, validators: &Validators) -> String {
+    match kind {
+        LiteralKind::Custom(name) => match validators.get(name) {
+            Some(validator) => validator.normalize(text),
+            None => text.to_owned(),
+        },
+        _ => text.to_owned(),
     }
 }
 
@@ -235,6 +252,44 @@ mod tests {
     #[test]
     fn text_is_kept_exactly() {
         assert_eq!(ok(LiteralKind::Text, "  hi "), Value::Text("  hi ".into()));
+    }
+
+    /// Jellycell's codes: three capitals, cleaned up when the field is left.
+    #[derive(Debug)]
+    struct Code;
+    impl LiteralValidator for Code {
+        fn validate(&self, text: &str) -> Result<Value, String> {
+            if text.len() == 3 && text.bytes().all(|b| b.is_ascii_uppercase()) {
+                Ok(Value::Text(text.into()))
+            } else {
+                Err("three capital letters".into())
+            }
+        }
+
+        fn normalize(&self, text: &str) -> String {
+            let mut code: String = text
+                .chars()
+                .filter(char::is_ascii_alphabetic)
+                .map(|c| c.to_ascii_uppercase())
+                .take(3)
+                .collect();
+            while code.len() < 3 {
+                code.push('A');
+            }
+            code
+        }
+    }
+
+    #[test]
+    fn custom_kinds_normalize_what_was_typed_and_built_ins_keep_it() {
+        let mut validators = Validators::new();
+        validators.insert("code", Arc::new(Code));
+        let kind = LiteralKind::Custom("code".into());
+
+        let tidied = normalize(&kind, "ab1", &validators);
+        assert_eq!(tidied, "ABA");
+        assert!(parse(&kind, &tidied, &validators).is_ok());
+        assert_eq!(normalize(&LiteralKind::Float, " 1e3 ", &validators), " 1e3 ");
     }
 
     #[test]

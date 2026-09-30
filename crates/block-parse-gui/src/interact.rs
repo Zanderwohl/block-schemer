@@ -42,6 +42,8 @@ pub struct Drag {
     /// Dropping a canvas run on the palette deletes it; a palette block
     /// dropped back there changes nothing.
     pub from_canvas: bool,
+    /// Where a canceled drag puts the run back; `None` for a palette block.
+    pub home: Option<Target>,
     /// Pointer minus head top-left at the grab, canvas units, so the run does
     /// not jump.
     pub grab_offset: Vec2,

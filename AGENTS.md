@@ -22,17 +22,22 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     so invalid text stays in the program and shows as a problem. Built-in
     kinds (Float with e-notation, Integer, Number as an i64|f64 union,
     Currency in minor units, Binary, Hex, Text, Bool, Choice) plus
-    consumer-registered `LiteralValidator`s for `Custom(name)`.
+    consumer-registered `LiteralValidator`s for `Custom(name)`, which may also
+    `normalize` text when a field loses focus (never while typing).
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant.
   - `edit`: tree operations by id (`detach`, `can_attach`, `attach`). All
     connection rules live here so GUI and headless tools agree.
-  - `ast`: always a whole tree. Faults become `Problem` nodes in place (in
-    `Stmt` or `Expr`), keeping what could be parsed in `recovered`. Only
-    unreadable RON is fatal.
-  - `debug`: `RunCommand`, `RunStatus`, `DebugView`, `trait Runner`. In core so
-    interpreters need not depend on egui.
+  - `ast` (built by `Program::ast`): always a whole tree. Faults become
+    `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
+    parsed in `recovered`. Only unreadable RON is fatal. A stack of one
+    reporter is a loose expression, not a problem; warnings (unknown inputs
+    and branches) leave `is_clean` true.
+  - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
+    switch states),
+    `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
+    depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only) and the
   `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
@@ -47,10 +52,15 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 - `BlockId` is the only handle the outside world has on a block: AST nodes,
   problems, breakpoints and pauses all use it.
-- The editor runs nothing and stores no run state. Status, breakpoints, pauses
-  and annotations come from the consumer each frame. Commands go out either as
-  a polled list in `EditorOutput` or through a `Runner`. Breakpoints are
-  requests; the consumer owns them and their persistence.
+- The editor runs nothing and stores no host state. Breakpoints, highlights
+  (semantic styles the theme colors; pauses are `Active`), annotations and
+  muted blocks and switch states come from the host each frame as an
+  `Overlay`. A block with `switch: true` shows a checkbox whose state is the
+  host's, never saved; clicking requests `EditorEvent::Switched`, even in
+  read-only mode, and a switch with no state is drawn disabled. Commands and
+  events go out either as a polled list in `EditorOutput` or through a
+  `Runner`. Breakpoints are requests; the host owns them and their
+  persistence.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Opcodes, type names, input and branch names are printable ASCII without
@@ -71,9 +81,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 
 ## Deferred
 
-- AST building (`Program::ast`), including `TooDeep` problems on load.
-- The debug overlay (breakpoints, pauses, annotations), `RunToolbar`,
-  `Runner` dispatch and `EditorOptions::toolbar`.
+- `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
 - Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.

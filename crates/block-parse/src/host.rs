@@ -1,10 +1,10 @@
-//! Between an editor and whatever runs the program. In core so an interpreter
-//! can implement [`Runner`] without depending on egui.
+//! Between an editor and its host. In core so an interpreter can implement
+//! [`Runner`] without depending on egui.
 //!
-//! The editor runs nothing and keeps no run state: the consumer supplies
-//! status, pauses and breakpoints every frame.
+//! The editor runs nothing and keeps no host state: the host supplies an
+//! [`Overlay`] every frame, and requests go back out as events and commands.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Ast, Severity};
 use crate::program::{BlockId, Program};
@@ -30,20 +30,40 @@ pub enum RunStatus {
     Paused,
 }
 
-/// Breakpoints are the consumer's to keep or discard; the editor only
-/// requests toggles.
+/// What the host wants drawn over the blocks this frame. Breakpoints are the
+/// host's to keep or discard; the editor only requests toggles.
 #[derive(Debug, Clone, Default)]
-pub struct DebugView {
+pub struct Overlay {
     pub breakpoints: HashSet<BlockId>,
-    /// Several is normal: one per thread.
-    pub pauses: Vec<Pause>,
+    /// Outlines. Where one block has several, the last wins.
+    pub highlights: Vec<Highlight>,
     pub annotations: Vec<Annotation>,
+    /// Drawn drained of color: blocks that do not apply in the host's
+    /// current context.
+    pub muted: HashSet<BlockId>,
+    /// State for blocks whose language gives them a `switch`. A switchable
+    /// block missing here is drawn disabled.
+    pub switches: HashMap<BlockId, bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Pause {
+pub struct Highlight {
     pub block: BlockId,
+    pub style: HighlightStyle,
+    /// Tells several apart, such as `"thread 2"` on a pause.
     pub label: Option<String>,
+}
+
+/// What a highlight means; the editor's theme picks the color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HighlightStyle {
+    Selected,
+    /// Pointed at by the selection.
+    Related,
+    /// Running or paused here, one per thread.
+    Active,
+    /// An index into the theme's extra colors.
+    Custom(u8),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +79,7 @@ pub struct Annotation {
 pub trait Runner {
     fn status(&self) -> RunStatus;
     fn supports(&self, command: RunCommand) -> bool;
-    fn debug_view(&self) -> DebugView;
+    fn overlay(&self) -> Overlay;
 
     fn start(&mut self, program: &Program, ast: &Ast);
     fn stop(&mut self);
@@ -70,6 +90,6 @@ pub trait Runner {
     fn step_into(&mut self);
     fn step_out(&mut self);
 
-    /// A request; the next `debug_view` says what the runner decided.
+    /// A request; the next `overlay` says what the runner decided.
     fn toggle_breakpoint(&mut self, block: BlockId);
 }

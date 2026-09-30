@@ -1,4 +1,4 @@
-use block_parse::debug::RunCommand;
+use block_parse::host::{Overlay, RunCommand};
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, LiteralKind};
 use block_parse::program::{BlockId, Program};
@@ -58,13 +58,16 @@ pub struct EditorOutput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorEvent {
-    /// A request; the consumer's next `DebugView` has the answer.
+    /// A request; the host's next `Overlay` has the answer.
     ToggleBreakpoint(BlockId),
     /// Clicked, not dragged.
     BlockClicked(BlockId),
     /// The user asked for a block's `documentation`. The editor never opens
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
+    /// A request to set a block's switch; the host's next `Overlay` has the
+    /// answer. Sent in read-only mode too.
+    Switched(BlockId, bool),
 }
 
 impl Default for BlockEditor {
@@ -100,6 +103,17 @@ impl BlockEditor {
 
     /// Fills the rest of `ui` with a palette on the left and the canvas.
     pub fn show(&mut self, ui: &mut egui::Ui, language: &Language, program: &mut Program) -> EditorOutput {
+        self.show_with(ui, language, program, &Overlay::default())
+    }
+
+    /// As [`show`](Self::show), drawing the host's `overlay` over the blocks.
+    pub fn show_with(
+        &mut self,
+        ui: &mut egui::Ui,
+        language: &Language,
+        program: &mut Program,
+        overlay: &Overlay,
+    ) -> EditorOutput {
         let mut output = EditorOutput::default();
         let bounds = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(bounds, Sense::click_and_drag());
@@ -192,7 +206,7 @@ impl BlockEditor {
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
                 if let Some(at) = over.filter(|_| input.pressed) {
-                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t);
+                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
                 }
             }
             Gesture::Pressed(press) => {
@@ -255,32 +269,47 @@ impl BlockEditor {
                 theme.palette_heading,
             );
         }
-        paint::scene(&painter, &palette.scene, palette_t, &theme, false);
+        paint::scene(&painter, &palette.scene, palette_t, &theme, false, &Overlay::default());
 
         let canvas = ui.painter_at(canvas_rect);
         canvas.rect_filled(canvas_rect, 0.0, theme.canvas);
         grid(&canvas, canvas_rect, t, theme.grid);
-        paint::scene(&canvas, &scene, t, &theme, !read_only);
+        paint::scene(&canvas, &scene, t, &theme, !read_only, overlay);
         if let Gesture::Dragging(drag) = &self.gesture
             && let Some((_, mark)) = &drag.snap
         {
             paint::snap_mark(&canvas, mark, t, &theme);
         }
         paint::error_tags(&canvas, &scene, t, &theme);
+        paint::markers(&canvas, &scene, t, &theme, overlay);
 
+        let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
+        fields.set_clip_rect(canvas_rect);
+        // Live even when read-only: switches are the host's, not program data.
+        for block in &scene.blocks {
+            let (Some(rect), Some(&on)) = (block.switch, overlay.switches.get(&block.id)) else {
+                continue;
+            };
+            let rect = t.rect(rect);
+            let mut value = on;
+            if canvas_rect.intersects(rect) && checkbox(&mut fields, rect.center(), t.zoom, &mut value).changed() {
+                output.events.push(EditorEvent::Switched(block.id, value));
+            }
+        }
         if !read_only {
-            let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
-            fields.set_clip_rect(canvas_rect);
             for slot in scene.slots() {
                 if let SlotContent::Literal { kind, text, .. } = &slot.content {
                     let rect = t.rect(slot.rect);
                     if canvas_rect.intersects(rect)
-                        && self.literal_field(&mut fields, rect, slot, kind, text, program, t.zoom, &theme)
+                        && self.literal_field(&mut fields, rect, slot, kind, text, language, program, t.zoom, &theme)
                     {
                         output.changed = true;
                     }
                 }
             }
+        }
+        if self.settle_edit(&ctx, language, program) {
+            output.changed = true;
         }
 
         if let Gesture::Dragging(drag) = &self.gesture {
@@ -288,7 +317,7 @@ impl BlockEditor {
             // palette on the way to being deleted.
             let floating = ctx.layer_painter(LayerId::new(Order::Foreground, self.id.with("drag")));
             let run = layout.run(&drag.fragment.blocks, drag.head);
-            paint::scene(&floating, &run.scene, t, &theme, false);
+            paint::scene(&floating, &run.scene, t, &theme, false, &Overlay::default());
             ctx.set_cursor_icon(CursorIcon::Grabbing);
         } else if let Some(at) = over {
             let on_palette = palette_rect.contains(at);
@@ -299,6 +328,7 @@ impl BlockEditor {
                     SlotContent::Literal { kind, .. } => Some(kind),
                     SlotContent::Empty | SlotContent::Plugged(_) => None,
                 });
+            let on_switch = !on_palette && live_switch_at(&scene, overlay, t.canvas(at)).is_some();
             let on_block = if on_palette {
                 palette.entry_at(palette_t.canvas(at)).is_some()
             } else {
@@ -306,6 +336,7 @@ impl BlockEditor {
             };
             // Set after the fields have drawn, so this decides for all of them.
             match field {
+                _ if on_switch => ctx.set_cursor_icon(CursorIcon::PointingHand),
                 Some(LiteralKind::Bool | LiteralKind::Choice(_)) => {
                     ctx.set_cursor_icon(CursorIcon::PointingHand);
                 }
@@ -333,6 +364,7 @@ impl BlockEditor {
     }
 
     /// What a press on `at` would pick up, without picking it up yet.
+    #[allow(clippy::too_many_arguments)]
     fn press(
         &self,
         at: Pos2,
@@ -341,6 +373,7 @@ impl BlockEditor {
         palette_rect: Rect,
         palette_t: Transform,
         t: Transform,
+        overlay: &Overlay,
     ) -> Gesture {
         let read_only = self.options.read_only;
         if palette_rect.contains(at) {
@@ -357,6 +390,9 @@ impl BlockEditor {
         }
 
         let point = t.canvas(at);
+        if live_switch_at(scene, overlay, point).is_some() {
+            return Gesture::Idle;
+        }
         // A press on a field belongs to its widget.
         let on_field = !read_only
             && scene
@@ -396,6 +432,7 @@ impl BlockEditor {
                 Gesture::Dragging(Drag {
                     fragment: Fragment { blocks: vec![block] },
                     from_canvas: false,
+                    home: None,
                     grab_offset,
                     head: t.canvas(press.at) - grab_offset,
                     snap: None,
@@ -403,20 +440,49 @@ impl BlockEditor {
             }
             // Read-only blocks cannot move, so dragging one pans instead.
             Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
-            Pressed::Block { id, top_left } => match program.detach(id) {
-                Some(fragment) => {
-                    output.changed = true;
-                    Gesture::Dragging(Drag {
-                        fragment,
-                        from_canvas: true,
-                        grab_offset: t.canvas(press.at) - top_left,
-                        head: top_left,
-                        snap: None,
-                    })
+            Pressed::Block { id, top_left } => {
+                let home = program.home_of(id);
+                match program.detach(id) {
+                    Some(fragment) => {
+                        output.changed = true;
+                        Gesture::Dragging(Drag {
+                            fragment,
+                            from_canvas: true,
+                            home,
+                            grab_offset: t.canvas(press.at) - top_left,
+                            head: top_left,
+                            snap: None,
+                        })
+                    }
+                    None => Gesture::Idle,
                 }
-                None => Gesture::Idle,
-            },
+            }
         }
+    }
+
+    /// Puts a run in hand back where it was picked up; a palette block is
+    /// dropped. `program` must be the one the drag came from, before any
+    /// switch: ids are only unique within a program. True if it changed.
+    pub fn cancel_drag(&mut self, language: &Language, program: &mut Program) -> bool {
+        let Gesture::Dragging(drag) = std::mem::take(&mut self.gesture) else {
+            return false;
+        };
+        let Some(home) = drag.home else {
+            return false;
+        };
+        let head = [drag.head.x, drag.head.y];
+        match program.attach(language, drag.fragment, home) {
+            Ok(ejected) => {
+                if let Some(ejected) = ejected {
+                    let _ = program.attach(language, ejected, Target::Free { pos: head });
+                }
+            }
+            // Its home is gone, say the host edited the program meanwhile.
+            Err((_, fragment)) => {
+                let _ = program.attach(language, fragment, Target::Free { pos: head });
+            }
+        }
+        true
     }
 
     /// True while a run is in hand. It is out of the program until dropped,
@@ -463,6 +529,10 @@ impl BlockEditor {
                 ui.close();
             }
         }
+        if ui.button("Toggle breakpoint").clicked() {
+            output.events.push(EditorEvent::ToggleBreakpoint(id));
+            ui.close();
+        }
         if let Some(def) = def
             && let Some(link) = &def.documentation
             && ui.button("Documentation").clicked()
@@ -475,6 +545,33 @@ impl BlockEditor {
         }
     }
 
+    /// Normalizes a literal that lost focus without its field being drawn,
+    /// such as one panned off the canvas or left when the editor went
+    /// read-only. True if the program changed.
+    fn settle_edit(&mut self, ctx: &egui::Context, language: &Language, program: &mut Program) -> bool {
+        let Some(edit) = self.edit.clone() else {
+            return false;
+        };
+        let id = self.id.with((edit.block, edit.input.as_str()));
+        if ctx.memory(|memory| memory.has_focus(id)) {
+            return false;
+        }
+        self.edit = None;
+        let Some(block) = program.find(edit.block) else {
+            return false;
+        };
+        let ty = language
+            .block(&block.opcode)
+            .and_then(|def| def.input(&edit.input))
+            .map(|input| input.ty.clone());
+        let text = block.inputs.get(&edit.input).and_then(|input| input.literal.clone());
+        let (Some(ty), Some(text)) = (ty, text) else {
+            return false;
+        };
+        let tidied = language.normalize_literal(&ty, &text);
+        tidied != text && program.set_literal(edit.block, &edit.input, tidied)
+    }
+
     /// True if the program changed.
     #[allow(clippy::too_many_arguments)]
     fn literal_field(
@@ -484,6 +581,7 @@ impl BlockEditor {
         slot: &PlacedSlot,
         kind: &LiteralKind,
         text: &str,
+        language: &Language,
         program: &mut Program,
         zoom: f32,
         theme: &Theme,
@@ -492,8 +590,7 @@ impl BlockEditor {
         match kind {
             LiteralKind::Bool => {
                 let mut on = text == "true";
-                let area = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
-                if ui.put(area, egui::Checkbox::without_text(&mut on)).changed() {
+                if checkbox(ui, rect.center(), zoom, &mut on).changed() {
                     return program.set_literal(slot.parent, &slot.input, on.to_string());
                 }
                 false
@@ -538,6 +635,10 @@ impl BlockEditor {
                     });
                 } else if self.edit.as_ref().is_some_and(this) {
                     self.edit = None;
+                }
+                if response.lost_focus() {
+                    let tidied = language.normalize_literal(&slot.ty, &buffer);
+                    return tidied != text && program.set_literal(slot.parent, &slot.input, tidied);
                 }
                 response.changed() && program.set_literal(slot.parent, &slot.input, buffer)
             }
@@ -607,6 +708,30 @@ fn find_snap(
     best.map(|(_, target, mark)| (target, mark))
 }
 
+/// A checkbox sized to the zoom, like the disabled one painted in its place.
+fn checkbox(ui: &mut egui::Ui, center: Pos2, zoom: f32, value: &mut bool) -> egui::Response {
+    let size = 14.0 * zoom;
+    ui.scope(|ui| {
+        let spacing = ui.spacing_mut();
+        spacing.icon_width = size;
+        spacing.icon_width_inner = size * 0.55;
+        ui.put(Rect::from_center_size(center, Vec2::splat(size)), egui::Checkbox::without_text(value))
+    })
+    .inner
+}
+
+/// A switch the host has given state, so a live checkbox covers it.
+fn live_switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<BlockId> {
+    scene
+        .blocks
+        .iter()
+        .rev()
+        .find(|block| {
+            block.switch.is_some_and(|rect| rect.contains(point)) && overlay.switches.contains_key(&block.id)
+        })
+        .map(|block| block.id)
+}
+
 /// A reporter pushed out of a slot lands just below it.
 fn drop_run(language: &Language, program: &mut Program, drag: Drag) {
     let head = [drag.head.x, drag.head.y];
@@ -669,5 +794,103 @@ impl Measure for EguiMeasure<'_> {
                 .size()
                 .x
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn send_and_sync<T: Send + Sync>() {}
+
+    fn tiny() -> Language {
+        Language::from_ron(
+            include_str!("../../../examples/languages/tiny.ron"),
+            &block_parse::Validators::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_canceled_drag_puts_the_run_back() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let blocks = ["when_run", "print", "print"].map(|op| program.instantiate(&language, op).unwrap());
+        let second = blocks[1].id;
+        program.stacks.push(block_parse::Stack {
+            pos: [10.0, 10.0],
+            blocks: blocks.to_vec(),
+        });
+        let before = program.stacks.clone();
+
+        let mut editor = BlockEditor::default();
+        let home = program.home_of(second);
+        let fragment = program.detach(second).unwrap();
+        editor.gesture = Gesture::Dragging(Drag {
+            fragment,
+            from_canvas: true,
+            home,
+            grab_offset: Vec2::ZERO,
+            head: pos2(400.0, 300.0),
+            snap: None,
+        });
+
+        assert!(editor.cancel_drag(&language, &mut program));
+        assert_eq!(program.stacks, before);
+        assert!(!editor.is_dragging());
+        assert!(!editor.cancel_drag(&language, &mut program), "nothing left to cancel");
+    }
+
+    #[test]
+    fn a_field_left_without_being_drawn_is_still_normalized() {
+        #[derive(Debug)]
+        struct Upper;
+        impl block_parse::LiteralValidator for Upper {
+            fn validate(&self, text: &str) -> Result<block_parse::Value, String> {
+                Ok(block_parse::Value::Text(text.into()))
+            }
+            fn normalize(&self, text: &str) -> String {
+                text.to_ascii_uppercase()
+            }
+        }
+        let mut validators = block_parse::Validators::new();
+        validators.insert("upper", std::sync::Arc::new(Upper));
+        let language = Language::from_ron(
+            r#"Language(
+                name: "codes",
+                file: (extension: "c"),
+                types: { "code": (literal: Custom("upper")) },
+                blocks: [(id: "start", name: "Start", spec: "start {code:code}")],
+            )"#,
+            &validators,
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let start = program.instantiate(&language, "start").unwrap();
+        let id = start.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![start],
+        });
+        program.set_literal(id, "code", "ab".into());
+
+        let mut editor = BlockEditor {
+            edit: Some(LiteralEdit {
+                block: id,
+                input: "code".into(),
+            }),
+            ..BlockEditor::default()
+        };
+        // A fresh context has nothing focused, as after the field went away.
+        assert!(editor.settle_edit(&egui::Context::default(), &language, &mut program));
+        assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
+        assert!(editor.edit.is_none());
+    }
+
+    #[test]
+    fn the_editor_and_what_it_edits_can_live_in_a_bevy_resource() {
+        send_and_sync::<BlockEditor>();
+        send_and_sync::<Language>();
+        send_and_sync::<Program>();
     }
 }

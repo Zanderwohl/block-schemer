@@ -23,6 +23,7 @@ pub const MIN_BLOCK_WIDTH: f32 = 64.0;
 pub const SNAP_RADIUS: f32 = 28.0;
 pub const LABEL_SIZE: f32 = 14.0;
 pub const LITERAL_SIZE: f32 = 13.0;
+pub const SWITCH_SIZE: f32 = 16.0;
 const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
@@ -59,6 +60,8 @@ pub struct PlacedBlock {
     pub slots: Vec<PlacedSlot>,
     /// Rows and arms, excluding branch mouths.
     pub hit: Vec<Rect>,
+    /// Where the block's switch sits, if its language gives it one.
+    pub switch: Option<Rect>,
     pub depth: u16,
 }
 
@@ -350,6 +353,7 @@ impl Layout<'_> {
             branches: Vec::new(),
             children: Vec::new(),
             seam_below: true,
+            switch: None,
         }
     }
 
@@ -401,6 +405,8 @@ impl Layout<'_> {
         };
 
         let mut row: Vec<Item> = Vec::new();
+        // At the end of the first row, whatever the spec puts there.
+        let mut switch = def.switch;
         let mut after_branch = false;
         let mut finish_row = |laid: &mut Laid, row: Vec<Item>, y: f32, bottom_arm: bool| {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
@@ -416,6 +422,9 @@ impl Layout<'_> {
 
         for part in &def.parts {
             if let Part::Branch(name) = part {
+                if std::mem::take(&mut switch) {
+                    row.push(Item::Switch);
+                }
                 let height = finish_row(&mut laid, std::mem::take(&mut row), y, false);
                 sections.push(Section::Row {
                     top: y,
@@ -449,6 +458,9 @@ impl Layout<'_> {
             }
         }
         if !row.is_empty() || sections.is_empty() || after_branch {
+            if switch {
+                row.push(Item::Switch);
+            }
             let height = finish_row(&mut laid, row, y, after_branch);
             sections.push(Section::Row {
                 top: y,
@@ -542,6 +554,7 @@ struct Laid {
     /// Branch children, in branch order; `LaidBranch::blocks` holds where.
     children: Vec<Laid>,
     seam_below: bool,
+    switch: Option<Rect>,
 }
 
 struct LaidSlot {
@@ -580,6 +593,7 @@ enum Item {
         size: Vec2,
         content: LaidContent,
     },
+    Switch,
 }
 
 impl Item {
@@ -587,6 +601,7 @@ impl Item {
         match self {
             Self::Label { width, .. } => vec2(*width, LABEL_SIZE),
             Self::Slot { size, .. } => *size,
+            Self::Switch => Vec2::splat(SWITCH_SIZE),
         }
     }
 }
@@ -604,6 +619,7 @@ impl Laid {
             branches: Vec::new(),
             children: Vec::new(),
             seam_below: false,
+            switch: None,
         }
     }
 
@@ -639,6 +655,10 @@ impl Laid {
                         shape,
                         content,
                     });
+                    x += size.x;
+                }
+                Item::Switch => {
+                    self.switch = Some(Rect::from_min_size(pos2(x, center - size.y / 2.0), size));
                     x += size.x;
                 }
             }
@@ -711,6 +731,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             .collect(),
         slots: Vec::new(),
         hit,
+        switch: laid.switch.map(|rect| rect.translate(offset)),
         depth,
     });
 
@@ -891,6 +912,31 @@ mod tests {
         let condition = focused.slots().find(|slot| slot.input == "condition").unwrap();
         let SlotContent::Literal { error, .. } = &condition.content else { panic!() };
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn a_switch_ends_the_first_row_before_any_branch() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "codons",
+                file: (extension: "c"),
+                types: { "code": (literal: Text) },
+                blocks: [(id: "start", name: "Start", spec: "start {code:code=AAA} [body]", switch: true)],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let (program, ids) = with_stack(&language, &["start"]);
+        let scene = scene_of(&language, &program);
+
+        let start = placed(&scene, ids[0]);
+        let switch = start.switch.expect("the language gives it a switch");
+        let Form::Stack(form) = &start.form else { panic!() };
+        let Section::Row { top, bottom } = form.sections[0] else { panic!() };
+        assert!(switch.min.y >= top && switch.max.y <= bottom, "{switch:?} is not in the first row");
+        assert!(switch.min.x > start.slots[0].rect.max.x, "it follows the row's slot");
+        assert!(switch.max.x <= start.rect.max.x, "and fits inside the block");
+        assert!(start.hit.iter().any(|rect| rect.contains(switch.center())));
     }
 
     #[test]
