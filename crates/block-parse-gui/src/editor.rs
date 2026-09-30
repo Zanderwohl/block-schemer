@@ -313,13 +313,27 @@ impl BlockEditor {
         fields.set_clip_rect(canvas_rect);
         // Live even when read-only: switches are the host's, not program data.
         for block in &scene.blocks {
-            let (Some(rect), Some(&on)) = (block.switch, overlay.switches.get(&block.id)) else {
+            let Some(rect) = block.switch.map(|rect| t.rect(rect)) else {
                 continue;
             };
-            let rect = t.rect(rect);
-            let mut value = on;
-            if canvas_rect.intersects(rect) && checkbox(&mut fields, rect.center(), t.zoom, &mut value).changed() {
-                output.events.push(EditorEvent::Switched(block.id, value));
+            if !canvas_rect.intersects(rect) {
+                continue;
+            }
+            match overlay.switches.get(&block.id) {
+                Some(&on) => {
+                    let mut value = on;
+                    if checkbox(&mut fields, rect.center(), t.zoom, &mut value).changed() {
+                        output.events.push(EditorEvent::Switched(block.id, value));
+                    }
+                }
+                // Hover only, so a press still reaches `press`, which ignores it.
+                None => {
+                    if let Some(hint) = &overlay.switch_hint {
+                        fields
+                            .interact(rect, self.id.with(("switch", block.id)), Sense::hover())
+                            .on_hover_text(hint);
+                    }
+                }
             }
         }
         if !read_only {
@@ -1016,7 +1030,7 @@ mod tests {
     }
 
     /// One frame of `editor` over `program` with `events`, on a screen whose
-    /// canvas starts at the left edge.
+    /// canvas starts at the left edge. Returns every piece of text painted.
     fn frame(
         ctx: &egui::Context,
         editor: &mut BlockEditor,
@@ -1024,7 +1038,7 @@ mod tests {
         program: &mut Program,
         overlay: &Overlay,
         events: Vec<egui::Event>,
-    ) {
+    ) -> Vec<String> {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
             events,
@@ -1034,6 +1048,19 @@ mod tests {
             editor.show_with(ui, language, program, overlay);
         });
         out.textures_delta.clear();
+
+        fn walk(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        for clipped in &out.shapes {
+            walk(&clipped.shape, &mut texts);
+        }
+        texts
     }
 
     /// Presses at `at` and drags well past the threshold, holding on.
@@ -1062,8 +1089,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_switch_without_state_is_not_a_handle_on_its_block() {
+    /// A language of one switchable block, a program holding it at the canvas
+    /// origin, a context with fonts, and the screen points of its switch and
+    /// of its label, for an editor made by [`codon_editor`].
+    fn codon_on_canvas() -> (Language, Program, egui::Context, Pos2, Pos2) {
         let language = Language::from_ron(
             r#"Language(
                 name: "codons",
@@ -1080,13 +1109,8 @@ mod tests {
             blocks: vec![start],
         });
 
-        let fresh = || {
-            let mut editor = BlockEditor::default();
-            editor.options.palette_width = Some(0.0);
-            editor
-        };
         let ctx = egui::Context::default();
-        let mut editor = fresh();
+        let mut editor = codon_editor();
         // Once, so fonts exist to lay the block out with.
         frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
         let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
@@ -1103,15 +1127,53 @@ mod tests {
         let to_screen = |point: Pos2| point + editor.view.pan;
         let switch = to_screen(placed.switch.expect("the language gives it a switch").center());
         let label = to_screen(placed.rect.left_center() + vec2(8.0, 0.0));
+        (language, program, ctx, switch, label)
+    }
 
+    fn codon_editor() -> BlockEditor {
+        let mut editor = BlockEditor::default();
+        editor.options.palette_width = Some(0.0);
+        editor
+    }
+
+    #[test]
+    fn a_switch_without_state_is_not_a_handle_on_its_block() {
+        let (language, mut program, ctx, switch, label) = codon_on_canvas();
         let no_state = Overlay::default();
-        let mut editor = fresh();
+        let mut editor = codon_editor();
         press_and_drag(&ctx, &mut editor, &language, &mut program, &no_state, switch);
         assert!(!editor.is_dragging(), "a press on the switch picked the block up");
 
-        let mut editor = fresh();
+        let mut editor = codon_editor();
         press_and_drag(&ctx, &mut editor, &language, &mut program, &no_state, label);
         assert!(editor.is_dragging(), "the same gesture on the label should drag");
+    }
+
+    #[test]
+    fn a_disabled_switch_says_why_when_hovered() {
+        let (language, mut program, ctx, switch, label) = codon_on_canvas();
+        let codon = program.stacks[0].blocks[0].id;
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let hint = "select a cell first";
+        let hinted = Overlay {
+            switch_hint: Some(hint.into()),
+            ..Overlay::default()
+        };
+        let mut hover = |at: Pos2, overlay: &Overlay| {
+            let mut editor = codon_editor();
+            let mut texts = Vec::new();
+            for events in [vec![egui::Event::PointerMoved(at)], vec![], vec![]] {
+                texts = frame(&ctx, &mut editor, &language, &mut program, overlay, events);
+            }
+            texts.iter().any(|text| text == hint)
+        };
+
+        assert!(hover(switch, &hinted), "no tooltip over the disabled switch");
+        assert!(!hover(label, &hinted), "only the switch carries it");
+
+        let mut live = hinted.clone();
+        live.switches.insert(codon, true);
+        assert!(!hover(switch, &live), "a live switch needs no excuse");
     }
 
     #[test]

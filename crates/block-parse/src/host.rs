@@ -44,6 +44,9 @@ pub struct Overlay {
     /// State for blocks whose language gives them a `switch`. A switchable
     /// block missing here is drawn disabled.
     pub switches: HashMap<BlockId, bool>,
+    /// Shown on hovering a disabled switch on the canvas: why it is disabled,
+    /// which only the host knows.
+    pub switch_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
