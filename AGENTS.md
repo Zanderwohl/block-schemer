@@ -34,8 +34,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `debug`: `RunCommand`, `RunStatus`, `DebugView`, `trait Runner`. In core so
     interpreters need not depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, clap and the `block-parse-editor` binary
-  (`cargo editor -l <language> [program]`).
+  by default) adds eframe, clap, rfd and the `block-parse-editor` binary
+  (`cargo editor -l <language> [program]`). Its File/Edit menus are egui for
+  now; `--no-menu-bar` hides them for when native menus arrive. On macOS it
+  turns off winit's default menu, whose Quit would skip the save prompt.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing) and `strict_tiny.ron` (the same language with exact
   types and explicit conversions).
@@ -72,6 +74,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - The debug overlay (breakpoints, pauses, annotations), `RunToolbar`,
   `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
+- Undo and redo (the Edit menu items are there, disabled).
+- Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
 
 ## Spelling

@@ -13,4 +13,6 @@ ron = "0.12"
 egui = "0.36"
 eframe = "0.36"
 clap = { version = "4", features = ["derive"] }
+rfd = "0.17"
+winit = "0.30"
 palette = { version = "0.7", default-features = false, features = ["std"] }
