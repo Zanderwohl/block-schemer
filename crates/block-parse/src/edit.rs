@@ -1,7 +1,7 @@
 //! Tree operations, addressed by [`BlockId`] because positions go stale.
 
 use crate::language::{BlockKind, Fit, Language};
-use crate::program::{Block, BlockId, MAX_DEPTH, Program, Stack};
+use crate::program::{Block, BlockId, MAX_DEPTH, Program, Stack, find_in};
 
 /// Blocks out of the program: a statement and everything below it, or one
 /// reporter.
@@ -88,12 +88,43 @@ impl Program {
         fragment: &Fragment,
         target: &Target,
     ) -> Result<(), AttachError> {
+        self.check_attach(language, fragment, target, None)
+    }
+
+    /// [`can_attach`](Self::can_attach) for a run still in the program, with
+    /// `fragment` its copy, judged as if it were already detached. Spares a
+    /// drag copying the program to ask. A fragment whose head is not in the
+    /// program is judged as by `can_attach`.
+    pub fn can_move(
+        &self,
+        language: &Language,
+        fragment: &Fragment,
+        target: &Target,
+    ) -> Result<(), AttachError> {
+        let head = fragment.blocks.first().map(|head| head.id);
+        self.check_attach(language, fragment, target, head)
+    }
+
+    fn check_attach(
+        &self,
+        language: &Language,
+        fragment: &Fragment,
+        target: &Target,
+        lifted: Option<BlockId>,
+    ) -> Result<(), AttachError> {
         let Some(head) = fragment.blocks.first() else {
             return Err(AttachError::WrongKind);
         };
-        if matches!(target, Target::Free { .. }) {
-            return Ok(());
+        let anchor = match target {
+            Target::Free { .. } => return Ok(()),
+            Target::After(id) => *id,
+            Target::BranchStart { parent, .. } | Target::Input { parent, .. } => *parent,
+            Target::Above { head, .. } => *head,
+        };
+        if lifted.is_some() && find_in(&fragment.blocks, anchor).is_some() {
+            return Err(AttachError::NoSuchBlock(anchor));
         }
+        let is_lifted = |block: &Block| Some(block.id) == lifted;
         let def = language
             .block(&head.opcode)
             .ok_or_else(|| AttachError::UnknownOpcode(head.opcode.clone()))?;
@@ -145,7 +176,8 @@ impl Program {
                     Some(BlockKind::Reporter(_)) => return Err(AttachError::WrongKind),
                     _ => {}
                 }
-                if ends_in_cap && index + 1 < seq.len() {
+                let len = seq.iter().position(is_lifted).unwrap_or(seq.len());
+                if ends_in_cap && index + 1 < len {
                     return Err(AttachError::CapWouldOrphan);
                 }
                 self.depth_of(*id).unwrap_or(1)
@@ -162,7 +194,12 @@ impl Program {
                         branch: branch.clone(),
                     });
                 }
-                if ends_in_cap && owner.branches.get(branch).is_some_and(|seq| !seq.is_empty()) {
+                let occupied = owner
+                    .branches
+                    .get(branch)
+                    .and_then(|seq| seq.first())
+                    .is_some_and(|first| !is_lifted(first));
+                if ends_in_cap && occupied {
                     return Err(AttachError::CapWouldOrphan);
                 }
                 self.depth_of(*parent).unwrap_or(1) + 1
@@ -472,6 +509,61 @@ mod tests {
         assert_eq!(
             program.can_attach(&language, &print, &above),
             Err(AttachError::HatNotAtTop)
+        );
+    }
+
+    /// A cap is what makes a run's own place matter to where it may go.
+    fn with_cap() -> Language {
+        Language::from_ron(
+            r#"Language(
+                name: "capped",
+                file: (extension: "capped"),
+                blocks: [
+                    (id: "step", name: "Step", spec: "step"),
+                    (id: "loop", name: "Loop", spec: "loop [body]"),
+                    (id: "stop", name: "Stop", kind: Cap, spec: "stop"),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_run_moves_as_if_already_detached() {
+        let language = with_cap();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["step", "loop", "stop"]);
+        let inner = program.instantiate(&language, "stop").unwrap();
+        let inner_id = inner.id;
+        program.find_mut(ids[1]).unwrap().branches.get_mut("body").unwrap().push(inner);
+        let body = Target::BranchStart {
+            parent: ids[1],
+            branch: "body".into(),
+        };
+
+        for (id, target) in [(ids[2], Target::After(ids[1])), (inner_id, body.clone())] {
+            let run = program.clone().detach(id).unwrap();
+            assert_eq!(
+                program.can_attach(&language, &run, &target),
+                Err(AttachError::CapWouldOrphan)
+            );
+            assert_eq!(program.can_move(&language, &run, &target), Ok(()));
+        }
+
+        let run = program.clone().detach(ids[1]).unwrap();
+        assert_eq!(
+            program.can_move(&language, &run, &body),
+            Err(AttachError::NoSuchBlock(ids[1]))
+        );
+        let above = Target::Above {
+            head: ids[0],
+            pos: [0.0, 0.0],
+        };
+        let whole = program.clone().detach(ids[0]).unwrap();
+        assert_eq!(
+            program.can_move(&language, &whole, &above),
+            Err(AttachError::NoSuchBlock(ids[0]))
         );
     }
 

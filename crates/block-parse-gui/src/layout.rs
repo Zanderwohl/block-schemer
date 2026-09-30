@@ -199,6 +199,9 @@ pub struct Layout<'a> {
     pub editing: Option<(BlockId, &'a str)>,
     /// Off for palette templates, which should never look wrong.
     pub validate: bool,
+    /// The head of a run in hand, which [`program`](Self::program) lays out
+    /// as if already detached.
+    pub lifted: Option<BlockId>,
 }
 
 impl Layout<'_> {
@@ -207,7 +210,7 @@ impl Layout<'_> {
         for stack in &program.stacks {
             let origin = pos2(stack.pos[0], stack.pos[1]);
             let mut y = origin.y;
-            for (index, block) in stack.blocks.iter().enumerate() {
+            for (index, block) in self.unlifted(&stack.blocks).iter().enumerate() {
                 let laid = self.block(block);
                 if index == 0 {
                     scene.heads.push(StackHead {
@@ -300,6 +303,12 @@ impl Layout<'_> {
             width: width + 2.0 * PALETTE_MARGIN,
             height: y,
         }
+    }
+
+    /// `seq` up to the run in hand, which is always its tail.
+    fn unlifted<'b>(&self, seq: &'b [Block]) -> &'b [Block] {
+        let end = seq.iter().position(|block| Some(block.id) == self.lifted);
+        &seq[..end.unwrap_or(seq.len())]
     }
 
     /// Returns the total height.
@@ -431,7 +440,7 @@ impl Layout<'_> {
                     bottom: y + height,
                 });
                 y += height;
-                let children = block.branches.get(name).map(Vec::as_slice).unwrap_or(&[]);
+                let children = self.unlifted(block.branches.get(name).map(Vec::as_slice).unwrap_or(&[]));
                 let mut child_y = y;
                 let mut blocks = Vec::new();
                 for child in children {
@@ -495,7 +504,10 @@ impl Layout<'_> {
         let kind = ty.map_or(LiteralKind::None, |ty| ty.literal.clone());
         let stored = block.inputs.get(&input.name);
 
-        if let Some(inner) = stored.and_then(|stored| stored.block.as_deref()) {
+        let plugged = stored
+            .and_then(|stored| stored.block.as_deref())
+            .filter(|inner| Some(inner.id) != self.lifted);
+        if let Some(inner) = plugged {
             let laid = self.block(inner);
             return Item::Slot {
                 input: input.name.clone(),
@@ -814,6 +826,7 @@ mod tests {
             swatches: &swatches,
             editing: None,
             validate: true,
+            lifted: None,
         }
         .program(program)
     }
@@ -876,6 +889,38 @@ mod tests {
     }
 
     #[test]
+    fn a_run_in_hand_lays_out_as_if_detached() {
+        let language = tiny();
+        let (mut program, ids) = with_stack(&language, &["when_run", "while", "print"]);
+        let inner = program.instantiate(&language, "set").unwrap();
+        let join = program.instantiate(&language, "join").unwrap();
+        let (inner_id, join_id) = (inner.id, join.id);
+        program.find_mut(ids[1]).unwrap().branches.get_mut("body").unwrap().push(inner);
+        program.find_mut(ids[2]).unwrap().inputs.get_mut("value").unwrap().block = Some(Box::new(join));
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+
+        for id in [ids[0], ids[1], ids[2], inner_id, join_id] {
+            let mut detached = program.clone();
+            detached.detach(id).unwrap();
+            let lifted = Layout {
+                language: &language,
+                measure: &Fixed,
+                swatches: &swatches,
+                editing: None,
+                validate: true,
+                lifted: Some(id),
+            }
+            .program(&program);
+            // Scenes hold floats and no `PartialEq`; their debug text is exact.
+            assert_eq!(
+                format!("{lifted:?}"),
+                format!("{:?}", scene_of(&language, &detached)),
+                "{id:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_plugged_reporter_grows_its_slot_and_hides_the_literal() {
         let language = tiny();
         let (mut program, ids) = with_stack(&language, &["print"]);
@@ -907,6 +952,7 @@ mod tests {
             swatches: &swatches,
             editing: Some((ids[0], "condition")),
             validate: true,
+            lifted: None,
         }
         .program(&program);
         let condition = focused.slots().find(|slot| slot.input == "condition").unwrap();
@@ -949,6 +995,7 @@ mod tests {
             swatches: &swatches,
             editing: None,
             validate: false,
+            lifted: None,
         }
         .palette();
 

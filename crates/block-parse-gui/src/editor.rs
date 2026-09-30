@@ -156,6 +156,7 @@ impl BlockEditor {
             swatches: &swatches,
             editing: None,
             validate: false,
+            lifted: None,
         }
         .palette();
         let palette_width = self
@@ -200,12 +201,13 @@ impl BlockEditor {
         let t = self.view.transform(canvas_rect);
 
         let edit = self.edit.clone();
-        let layout = Layout {
+        let mut layout = Layout {
             language,
             measure: &measure,
             swatches: &swatches,
             editing: edit.as_ref().map(|edit| (edit.block, edit.input.as_str())),
             validate: true,
+            lifted: None,
         };
         if let Gesture::Pressed(press) = &self.gesture
             && input.down
@@ -220,8 +222,8 @@ impl BlockEditor {
         if read_only {
             self.cancel_drag();
         }
-        let lifted = self.lifted(program);
-        let mut scene = layout.program(lifted.as_ref().unwrap_or(program));
+        layout.lifted = self.lifted();
+        let mut scene = layout.program(program);
 
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
@@ -248,8 +250,7 @@ impl BlockEditor {
                 }
                 // Every frame, release included, so a quick flick still snaps.
                 let run = layout.run(&drag.fragment.blocks, drag.head);
-                let shown = lifted.as_ref().unwrap_or(program);
-                drag.snap = find_snap(language, shown, &scene, &drag.fragment, &run);
+                drag.snap = find_snap(language, program, &scene, &drag.fragment, &run);
                 if input.down {
                     self.gesture = Gesture::Dragging(drag);
                 } else {
@@ -274,8 +275,8 @@ impl BlockEditor {
         }
 
         if output.changed {
-            let lifted = self.lifted(program);
-            scene = layout.program(lifted.as_ref().unwrap_or(program));
+            layout.lifted = self.lifted();
+            scene = layout.program(program);
         }
 
         let painter = ui.painter_at(palette_rect);
@@ -465,19 +466,16 @@ impl BlockEditor {
         }
     }
 
-    /// `program` without the run in hand, which is how it is laid out and
-    /// snapped against while dragging.
-    fn lifted(&self, program: &Program) -> Option<Program> {
-        let Gesture::Dragging(Drag {
-            source: DragSource::Canvas { head },
-            ..
-        }) = &self.gesture
-        else {
-            return None;
-        };
-        let mut lifted = program.clone();
-        lifted.detach(*head)?;
-        Some(lifted)
+    /// The head of the run in hand, which the program is laid out and snapped
+    /// against as if it were already detached.
+    fn lifted(&self) -> Option<BlockId> {
+        match &self.gesture {
+            Gesture::Dragging(Drag {
+                source: DragSource::Canvas { head },
+                ..
+            }) => Some(*head),
+            _ => None,
+        }
     }
 
     /// Hosts switching programs mid-drag call this: ids are only unique within
@@ -675,7 +673,9 @@ fn find_snap(
     let mut consider = |distance: f32, target: Target, mark: SnapMark| {
         if distance <= SNAP_RADIUS
             && best.as_ref().is_none_or(|(nearest, ..)| distance < *nearest)
-            && program.can_attach(language, fragment, &target).is_ok()
+            // A palette block's fresh id is in no program, so this is
+            // `can_attach` for it.
+            && program.can_move(language, fragment, &target).is_ok()
         {
             best = Some((distance, target, mark));
         }
@@ -873,7 +873,7 @@ mod tests {
     fn a_run_in_hand_stays_in_the_program_until_dropped() {
         let (language, mut program, mut editor) = dragging_the_tail();
         assert_eq!(program.stacks[0].blocks.len(), 3);
-        assert_eq!(editor.lifted(&program).unwrap().stacks[0].blocks.len(), 1);
+        assert_eq!(editor.lifted(), Some(program.stacks[0].blocks[1].id));
 
         let Gesture::Dragging(drag) = std::mem::take(&mut editor.gesture) else {
             unreachable!()
