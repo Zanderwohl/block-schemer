@@ -877,11 +877,13 @@ mod tests {
         });
         program.set_literal(id, "code", "ab".into());
 
-        let mut editor = BlockEditor::default();
-        editor.edit = Some(LiteralEdit {
-            block: id,
-            input: "code".into(),
-        });
+        let mut editor = BlockEditor {
+            edit: Some(LiteralEdit {
+                block: id,
+                input: "code".into(),
+            }),
+            ..BlockEditor::default()
+        };
         // A fresh context has nothing focused, as after the field went away.
         assert!(editor.settle_edit(&egui::Context::default(), &language, &mut program));
         assert_eq!(program.find(id).unwrap().inputs["code"].literal.as_deref(), Some("AB"));
