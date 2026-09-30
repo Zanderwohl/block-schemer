@@ -3,7 +3,7 @@
 
 use block_parse::edit::Target;
 use block_parse::language::{BlockDef, BlockKind, InputDef, LiteralKind, Part, Shape};
-use block_parse::program::{Block, BlockId, Program};
+use block_parse::program::{Block, BlockId, Program, Stack};
 use block_parse::Language;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -27,6 +27,7 @@ pub const SWITCH_SIZE: f32 = 16.0;
 const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
+const GRID_GAP: f32 = 24.0;
 
 /// Canvas units.
 pub trait Measure {
@@ -239,35 +240,7 @@ impl Layout<'_> {
 
     pub fn palette(&self) -> Palette {
         let mut templates = Program::default();
-        let blocks: Vec<(Block, Option<usize>)> = self
-            .language
-            .blocks()
-            .iter()
-            .filter_map(|def| Some((templates.instantiate(self.language, &def.opcode)?, def.category)))
-            .collect();
-
-        let mut groups: Vec<(Option<&str>, Vec<&Block>)> = self
-            .language
-            .categories()
-            .iter()
-            .enumerate()
-            .map(|(index, category)| {
-                let members = blocks
-                    .iter()
-                    .filter(|(_, c)| *c == Some(index))
-                    .map(|(block, _)| block)
-                    .collect();
-                (Some(category.name.as_str()), members)
-            })
-            .collect();
-        groups.push((
-            None,
-            blocks
-                .iter()
-                .filter(|(_, category)| category.is_none())
-                .map(|(block, _)| block)
-                .collect(),
-        ));
+        let groups = self.groups(&mut templates);
 
         let mut scene = Scene::empty();
         let mut entries = Vec::new();
@@ -283,7 +256,7 @@ impl Layout<'_> {
                 text: name.unwrap_or("Other").to_owned(),
             });
             y += PALETTE_HEADING;
-            for block in members {
+            for block in &members {
                 let laid = self.block(block);
                 let origin = pos2(PALETTE_MARGIN, y);
                 entries.push(PaletteEntry {
@@ -303,6 +276,47 @@ impl Layout<'_> {
             width: width + 2.0 * PALETTE_MARGIN,
             height: y,
         }
+    }
+
+    /// Every block in the language, a column per category, uncategorized last.
+    pub fn grid(&self) -> Program {
+        let mut program = Program::new(self.language);
+        let groups = self.groups(&mut program);
+        let mut x = GRID_GAP;
+        for (_, members) in groups {
+            if members.is_empty() {
+                continue;
+            }
+            let mut y = GRID_GAP;
+            let mut width: f32 = 0.0;
+            for block in members {
+                let size = self.block(&block).size;
+                program.stacks.push(Stack {
+                    pos: [x, y],
+                    blocks: vec![block],
+                });
+                width = width.max(size.x);
+                y += size.y + GRID_GAP;
+            }
+            x += width + GRID_GAP;
+        }
+        program
+    }
+
+    /// Ids come from `program`. Uncategorized blocks are last, under `None`.
+    fn groups(&self, program: &mut Program) -> Vec<(Option<&str>, Vec<Block>)> {
+        let categories = self.language.categories();
+        let mut groups: Vec<(Option<&str>, Vec<Block>)> = categories
+            .iter()
+            .map(|category| (Some(category.name.as_str()), Vec::new()))
+            .chain([(None, Vec::new())])
+            .collect();
+        for def in self.language.blocks() {
+            if let Some(block) = program.instantiate(self.language, &def.opcode) {
+                groups[def.category.unwrap_or(categories.len())].1.push(block);
+            }
+        }
+        groups
     }
 
     /// `seq` up to the run in hand, which is always its tail.
@@ -1037,6 +1051,58 @@ mod tests {
                 .find(|heading| heading.at.y < entry.rect.min.y)
                 .unwrap();
             assert_eq!(heading.text, expected, "{} sits under the wrong heading", entry.opcode);
+        }
+    }
+
+    #[test]
+    fn grid_puts_each_category_in_a_column_as_wide_as_its_widest_block() {
+        // An uncategorized `print` needs a last column; the emptied Output none.
+        let language = Language::from_ron(
+            &include_str!("../../../examples/languages/tiny.ron").replace("category: \"Output\",", ""),
+            &Validators::new(),
+        )
+        .unwrap();
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let layout = Layout {
+            language: &language,
+            measure: &Fixed,
+            swatches: &swatches,
+            editing: None,
+            validate: false,
+            lifted: None,
+        };
+        let program = layout.grid();
+        let scene = layout.program(&program);
+        assert_eq!(program.stacks.len(), language.blocks().len());
+
+        let mut columns: Vec<(f32, Option<usize>, Vec<&PlacedBlock>)> = Vec::new();
+        for stack in &program.stacks {
+            let block = placed(&scene, stack.blocks[0].id);
+            let category = language.block(&stack.blocks[0].opcode).unwrap().category;
+            match columns.last_mut() {
+                Some((x, c, members)) if *x == stack.pos[0] => {
+                    assert_eq!(*c, category, "{} is in the wrong column", stack.blocks[0].opcode);
+                    members.push(block);
+                }
+                _ => columns.push((stack.pos[0], category, vec![block])),
+            }
+        }
+        let mut expected: Vec<Option<usize>> = (0..language.categories().len())
+            .filter(|index| language.blocks().iter().any(|def| def.category == Some(*index)))
+            .map(Some)
+            .collect();
+        expected.push(None);
+        assert_eq!(columns.iter().map(|(_, c, _)| *c).collect::<Vec<_>>(), expected);
+
+        assert_eq!(program.stacks[0].pos, [GRID_GAP, GRID_GAP]);
+        for pair in columns.windows(2) {
+            let widest = pair[0].2.iter().map(|block| block.rect.width()).fold(0.0, f32::max);
+            assert_eq!(pair[1].0, pair[0].0 + widest + GRID_GAP);
+        }
+        for (_, _, members) in &columns {
+            for pair in members.windows(2) {
+                assert_eq!(pair[1].rect.min.y, pair[0].rect.max.y + GRID_GAP);
+            }
         }
     }
 }

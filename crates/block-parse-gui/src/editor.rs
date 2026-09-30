@@ -923,7 +923,7 @@ fn select_all(ctx: &egui::Context, id: egui::Id, len: usize) {
     state.store(ctx, id);
 }
 
-struct EguiMeasure<'a>(&'a egui::Context);
+pub(crate) struct EguiMeasure<'a>(pub &'a egui::Context);
 
 impl Measure for EguiMeasure<'_> {
     fn text_width(&self, text: &str, font: Font) -> f32 {

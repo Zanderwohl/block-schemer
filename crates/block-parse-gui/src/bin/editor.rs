@@ -7,20 +7,34 @@ use block_parse::language::Language;
 use block_parse::program::Program;
 use block_parse::Validators;
 use block_parse_gui::{BlockEditor, EditorEvent};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportCommand};
 
 #[derive(Parser)]
 #[command(about = "Edit block programs for a block-parse language")]
 struct Args {
+    #[arg(short, long, value_enum, default_value_t = Command::Editor)]
+    command: Command,
     /// The language definition (RON, whatever its extension).
     #[arg(short, long)]
     language: Option<PathBuf>,
     /// Hide the egui menu bar, for hosts that provide native menus.
     #[arg(long)]
     no_menu_bar: bool,
-    /// The program to open. Created on first save if it does not exist.
+    /// With `--command snapshot`: pixels per canvas unit.
+    #[arg(long, default_value_t = 2.0)]
+    scale: f32,
+    /// The program to open, created on first save if it does not exist. For
+    /// `snapshot`, the PNG to write.
     program: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum Command {
+    /// Open the editor window.
+    Editor,
+    /// Render every block in the language, a column per category, to a PNG.
+    Snapshot,
 }
 
 const NEW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
@@ -79,6 +93,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args.command == Command::Snapshot {
+        return snapshot(&language, args.program.as_deref(), args.scale);
+    }
 
     let mut status = String::new();
     let program = match &args.program {
@@ -128,6 +145,34 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[cfg(feature = "snapshot")]
+fn snapshot(language: &Language, output: Option<&Path>, scale: f32) -> ExitCode {
+    let Some(output) = output else {
+        eprintln!("no output given: pass the path of the PNG to write");
+        return ExitCode::from(2);
+    };
+    let image = match block_parse_gui::snapshot::grid(language, &block_parse_gui::Theme::default(), scale) {
+        Ok(image) => image,
+        Err(error) => {
+            eprintln!("could not render: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match image.save_with_format(output, image::ImageFormat::Png) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}: {error}", output.display());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "snapshot"))]
+fn snapshot(_: &Language, _: Option<&Path>, _: f32) -> ExitCode {
+    eprintln!("built without snapshots: rebuild with --features snapshot");
+    ExitCode::from(2)
 }
 
 impl eframe::App for App {

@@ -8,6 +8,8 @@ pub mod interact;
 pub mod layout;
 pub mod paint;
 pub mod shape;
+#[cfg(feature = "snapshot")]
+pub mod snapshot;
 pub mod theme;
 pub mod toolbar;
 pub mod view;
