@@ -408,6 +408,7 @@ impl BlockEditor {
                 Gesture::Dragging(Drag {
                     fragment: Fragment { blocks: vec![block] },
                     from_canvas: false,
+                    home: None,
                     grab_offset,
                     head: t.canvas(press.at) - grab_offset,
                     snap: None,
@@ -415,20 +416,49 @@ impl BlockEditor {
             }
             // Read-only blocks cannot move, so dragging one pans instead.
             Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
-            Pressed::Block { id, top_left } => match program.detach(id) {
-                Some(fragment) => {
-                    output.changed = true;
-                    Gesture::Dragging(Drag {
-                        fragment,
-                        from_canvas: true,
-                        grab_offset: t.canvas(press.at) - top_left,
-                        head: top_left,
-                        snap: None,
-                    })
+            Pressed::Block { id, top_left } => {
+                let home = program.home_of(id);
+                match program.detach(id) {
+                    Some(fragment) => {
+                        output.changed = true;
+                        Gesture::Dragging(Drag {
+                            fragment,
+                            from_canvas: true,
+                            home,
+                            grab_offset: t.canvas(press.at) - top_left,
+                            head: top_left,
+                            snap: None,
+                        })
+                    }
+                    None => Gesture::Idle,
                 }
-                None => Gesture::Idle,
-            },
+            }
         }
+    }
+
+    /// Puts a run in hand back where it was picked up; a block from the
+    /// palette is dropped. For hosts that stop showing the editor, or switch
+    /// program, mid-drag. True if the program changed.
+    pub fn cancel_drag(&mut self, language: &Language, program: &mut Program) -> bool {
+        let Gesture::Dragging(drag) = std::mem::take(&mut self.gesture) else {
+            return false;
+        };
+        let Some(home) = drag.home else {
+            return false;
+        };
+        let head = [drag.head.x, drag.head.y];
+        match program.attach(language, drag.fragment, home) {
+            Ok(ejected) => {
+                if let Some(ejected) = ejected {
+                    let _ = program.attach(language, ejected, Target::Free { pos: head });
+                }
+            }
+            // Its home is gone, say the host edited the program meanwhile.
+            Err((_, fragment)) => {
+                let _ = program.attach(language, fragment, Target::Free { pos: head });
+            }
+        }
+        true
     }
 
     /// True while a run is in hand. It is out of the program until dropped,
@@ -700,6 +730,44 @@ mod tests {
     use super::*;
 
     fn send_and_sync<T: Send + Sync>() {}
+
+    fn tiny() -> Language {
+        Language::from_ron(
+            include_str!("../../../examples/languages/tiny.ron"),
+            &block_parse::Validators::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_canceled_drag_puts_the_run_back() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let blocks = ["when_run", "print", "print"].map(|op| program.instantiate(&language, op).unwrap());
+        let second = blocks[1].id;
+        program.stacks.push(block_parse::Stack {
+            pos: [10.0, 10.0],
+            blocks: blocks.to_vec(),
+        });
+        let before = program.stacks.clone();
+
+        let mut editor = BlockEditor::default();
+        let home = program.home_of(second);
+        let fragment = program.detach(second).unwrap();
+        editor.gesture = Gesture::Dragging(Drag {
+            fragment,
+            from_canvas: true,
+            home,
+            grab_offset: Vec2::ZERO,
+            head: pos2(400.0, 300.0),
+            snap: None,
+        });
+
+        assert!(editor.cancel_drag(&language, &mut program));
+        assert_eq!(program.stacks, before);
+        assert!(!editor.is_dragging());
+        assert!(!editor.cancel_drag(&language, &mut program), "nothing left to cancel");
+    }
 
     #[test]
     fn the_editor_and_what_it_edits_can_live_in_a_bevy_resource() {
