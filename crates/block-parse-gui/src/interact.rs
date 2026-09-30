@@ -73,3 +73,18 @@ pub struct LiteralEdit {
     pub block: BlockId,
     pub input: String,
 }
+
+/// The choice literal whose menu is open. Keyed by id, like [`LiteralEdit`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenChoice {
+    pub block: BlockId,
+    pub input: String,
+    /// Screen pixels, when the menu is cut short to fit.
+    pub scroll: f32,
+}
+
+impl OpenChoice {
+    pub fn is(&self, block: BlockId, input: &str) -> bool {
+        self.block == block && self.input == input
+    }
+}

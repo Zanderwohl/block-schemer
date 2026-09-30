@@ -44,7 +44,7 @@ const ACCENT_WIDTH: f32 = 3.0;
 const HALO_WIDTH: f32 = ACCENT_WIDTH + 2.5;
 
 /// `live` marks literals that real widgets will cover: only their backgrounds
-/// are painted, or the text would show twice.
+/// are painted, or the text would show twice. Choices are always painted.
 pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live: bool, overlay: &Overlay) {
     let highlights = by_block(overlay);
     for block in &scene.blocks {
@@ -177,17 +177,8 @@ fn paint_block(
     };
     match &block.form {
         Form::Stack(form) => {
-            let mut mesh = Mesh::default();
-            for piece in shape::stack_fill(block.rect, form) {
-                let base = mesh.vertices.len() as u32;
-                for point in &piece {
-                    mesh.colored_vertex(t.pos(*point), body);
-                }
-                for i in 1..piece.len() as u32 - 1 {
-                    mesh.add_triangle(base, base + i, base + i + 1);
-                }
-            }
-            painter.add(egui::Shape::mesh(mesh));
+            let pieces = shape::stack_fill(block.rect, form).into_iter().map(|piece| t.points(piece));
+            fill_pieces(painter, pieces, body);
             let outline = t.points(shape::stack_outline(block.rect, form));
             match accent {
                 Some(accent) => {
@@ -241,7 +232,8 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     if error.is_some() {
         outline(painter, slot.shape, rect, Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
     }
-    if live {
+    // A choice has no widget over it; its menu opens beside it.
+    if live && !matches!(kind, LiteralKind::Choice(_)) {
         return;
     }
 
@@ -251,27 +243,52 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
             let check = Rect::from_center_size(rect.center(), vec2(14.0, 14.0) * t.zoom);
             painter.rect_filled(check, radius(2.0 * t.zoom), theme.literal_fill);
             if text == "true" {
-                let tick = [
-                    pos2(check.min.x + 3.0 * t.zoom, check.center().y),
-                    pos2(check.center().x - t.zoom, check.max.y - 3.0 * t.zoom),
-                    pos2(check.max.x - 3.0 * t.zoom, check.min.y + 3.0 * t.zoom),
-                ];
-                painter.add(egui::Shape::line(tick.to_vec(), Stroke::new(2.0 * t.zoom, theme.literal_ink)));
+                tick(painter, check.center(), 14.0 * t.zoom, Stroke::new(2.0 * t.zoom, theme.literal_ink));
             }
         }
         LiteralKind::Choice(_) => {
             painter.text(
                 rect.left_center() + vec2(8.0 * t.zoom, 0.0),
                 Align2::LEFT_CENTER,
-                format!("{text} \u{25be}"),
+                text,
                 font,
                 theme.literal_ink,
             );
+            let caret = pos2(rect.max.x - 12.0 * t.zoom, rect.center().y);
+            let caret = [vec2(-4.0, -2.0), vec2(4.0, -2.0), vec2(0.0, 3.0)].map(|v| caret + v * t.zoom);
+            painter.add(egui::Shape::convex_polygon(caret.to_vec(), theme.literal_ink, Stroke::NONE));
         }
         _ => {
             painter.text(rect.center(), Align2::CENTER_CENTER, text, font, theme.literal_ink);
         }
     }
+}
+
+/// Screen-space convex pieces as one mesh, so shared edges leave no seams.
+pub fn fill_pieces(painter: &Painter, pieces: impl IntoIterator<Item = Vec<Pos2>>, color: Color32) {
+    let mut mesh = Mesh::default();
+    for piece in pieces {
+        let base = mesh.vertices.len() as u32;
+        for point in &piece {
+            mesh.colored_vertex(*point, color);
+        }
+        for i in 1..piece.len() as u32 - 1 {
+            mesh.add_triangle(base, base + i, base + i + 1);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// The mark of a chosen option or a set bool, in a `size` square.
+pub fn tick(painter: &Painter, center: Pos2, size: f32, stroke: Stroke) {
+    let check = Rect::from_center_size(center, vec2(size, size));
+    let inset = size * 3.0 / 14.0;
+    let tick = [
+        pos2(check.min.x + inset, check.center().y),
+        pos2(check.center().x - size / 14.0, check.max.y - inset),
+        pos2(check.max.x - inset, check.min.y + inset),
+    ];
+    painter.add(egui::Shape::line(tick.to_vec(), stroke));
 }
 
 fn fill(painter: &Painter, shape: Shape, rect: Rect, color: Color32, edge: Stroke, zoom: f32) {
