@@ -61,6 +61,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
+- A run in hand stays in the program until dropped, so the program is always
+  whole and saving mid-drag is safe. A drop lands in whichever program is
+  shown on release if it still holds the run unchanged; a host switching
+  programs mid-drag calls `cancel_drag`. Going read-only mid-drag lets the run
+  go without dropping it.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Opcodes, type names, input and branch names are printable ASCII without
@@ -86,6 +91,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
+- Laying out a drag without cloning the program. The lifted copy costs about
+  0.23 ms a frame at 2000 blocks (release build), against a layout that
+  already walks the whole program every frame. Caching it would still need a
+  whole-program comparison each frame, since hosts may edit mid-drag.
 
 ## Spelling
 
