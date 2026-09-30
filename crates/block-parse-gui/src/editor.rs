@@ -37,6 +37,7 @@ pub struct BlockEditor {
 #[derive(Debug, Clone)]
 pub struct EditorOptions {
     /// Blocks cannot be moved, added or typed into; the canvas still pans.
+    /// Setting it mid-drag lets any run in hand go.
     pub read_only: bool,
     /// Draw a `RunToolbar` above the canvas.
     pub toolbar: bool,
@@ -215,8 +216,8 @@ impl BlockEditor {
             };
             self.gesture = self.start_drag(press, language, program, t);
         }
-        // Locked mid-drag, as when a run starts: the run goes back rather than
-        // landing in a program the host has made read-only.
+        // Locked mid-drag, as when a run starts: let the run go rather than
+        // drop it into a program the host has made read-only.
         if read_only {
             self.cancel_drag();
         }
@@ -480,12 +481,10 @@ impl BlockEditor {
         Some(lifted)
     }
 
-    /// Lets go of any run in hand, leaving it where it was. The program is
-    /// untouched, so this is safe after the host has switched programs.
-    /// Hosts switching programs mid-drag should call it: otherwise a drop
-    /// lands in whichever program is shown on release, if that program holds
-    /// the same run unchanged, since ids are only unique within a program.
-    /// True if a run was in hand.
+    /// Lets go of any run in hand, leaving the program untouched. Hosts
+    /// switching programs mid-drag call this, since ids are only unique within
+    /// a program and a drop would otherwise land in the new one. True if a run
+    /// was in hand.
     pub fn cancel_drag(&mut self) -> bool {
         matches!(std::mem::take(&mut self.gesture), Gesture::Dragging(_))
     }
