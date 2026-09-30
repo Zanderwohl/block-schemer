@@ -373,7 +373,7 @@ impl BlockEditor {
         if self.settle_edit(&ctx, language, program) {
             output.changed = true;
         }
-        if self.choice_menu(&ctx, &scene, canvas_rect, t, &theme, program) {
+        if self.choice_menu(&ctx, &scene, canvas_rect, t, &theme, overlay, program) {
             output.changed = true;
         }
 
@@ -615,6 +615,7 @@ impl BlockEditor {
 
     /// Shows the open choice's menu, closing it if its field has gone or
     /// scrolled away. True if the program changed.
+    #[allow(clippy::too_many_arguments)]
     fn choice_menu(
         &mut self,
         ctx: &egui::Context,
@@ -622,6 +623,7 @@ impl BlockEditor {
         canvas_rect: Rect,
         t: Transform,
         theme: &Theme,
+        overlay: &Overlay,
         program: &mut Program,
     ) -> bool {
         let id = self.menu_id();
@@ -645,11 +647,16 @@ impl BlockEditor {
             self.choice = None;
             return false;
         };
+        let mut swatch = slot.swatch;
+        if overlay.muted.contains(&slot.parent) {
+            swatch.fill = swatch.muted;
+            swatch.edge = swatch.muted_edge;
+        }
         let menu = Menu {
             id,
             options,
             selected: text,
-            swatch: slot.swatch,
+            swatch,
             shadow: theme.halo,
             // Readable however far out the canvas is zoomed.
             scale: t.zoom.max(1.0),
@@ -1331,6 +1338,7 @@ mod tests {
         for events in click(field.center()) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
         let escape = egui::Event::Key {
             key: Key::Escape,
             physical_key: None,
@@ -1344,6 +1352,7 @@ mod tests {
         for events in click(field.center()) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
         for events in click(pos2(700.0, 500.0)) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }

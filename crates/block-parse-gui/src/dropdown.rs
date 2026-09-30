@@ -222,15 +222,19 @@ mod tests {
 
     #[test]
     fn a_menu_stays_on_screen_sideways_and_points_at_its_anchor() {
-        let anchor = Rect::from_min_size(pos2(760.0, 100.0), vec2(30.0, 22.0));
+        let anchor = Rect::from_min_size(pos2(740.0, 100.0), vec2(30.0, 22.0));
         let placed = place(anchor, vec2(200.0, 100.0), SCREEN, 1.0);
         assert_eq!(placed.body.max.x, SCREEN.max.x);
-        assert!(placed.tip.x <= placed.body.max.x - 2.0 * POINTER);
-        assert!(placed.tip.x > placed.body.min.x);
+        assert_eq!(placed.tip.x, anchor.center().x);
+
+        // So far right the pointer would sit on the corner: held clear of it.
+        let edge = Rect::from_min_size(pos2(790.0, 100.0), vec2(10.0, 22.0));
+        let placed = place(edge, vec2(200.0, 100.0), SCREEN, 1.0);
+        assert_eq!(placed.tip.x, placed.body.max.x - 2.0 * POINTER);
     }
 
     #[test]
-    fn the_check_column_is_reserved_whatever_is_selected() {
+    fn a_menu_fits_its_widest_option_and_the_check_column_but_never_less_than_its_slot() {
         let a = size(50.0, 3, 10.0, 1.0);
         assert_eq!(a.x, TEXT_INSET + 50.0 + CHECK_WIDTH);
         assert_eq!(a.y, 2.0 * INSET + 3.0 * ROW_HEIGHT);

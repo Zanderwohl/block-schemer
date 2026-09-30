@@ -97,6 +97,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
+- Keyboard navigation (arrows, Enter) and accessibility roles for choice
+  menus; Escape closes one.
 
 ## Spelling
 
