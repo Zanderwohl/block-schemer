@@ -1,6 +1,8 @@
-//! Block colors. Each category gives an OKLCH hue; every role is a step from
-//! it in lightness and chroma, so categories read at the same perceived
-//! lightness. Resolved to sRGB, reducing chroma where a step leaves the gamut.
+//! Block colors. Each category, or a block with a color of its own, gives an
+//! OKLCH hue; every role is a step from it in lightness and chroma, so they
+//! read at the same perceived lightness. Resolved to sRGB, reducing chroma where a step leaves the gamut.
+
+use std::collections::BTreeMap;
 
 use block_parse::Language;
 use egui::Color32;
@@ -43,11 +45,14 @@ pub struct Step {
     pub chroma: f32,
 }
 
-/// One per category, in the language's category order.
+/// One per category, in the language's category order, and one for each
+/// block with a color of its own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Swatches {
     pub categories: Vec<Swatch>,
     pub uncategorized: Swatch,
+    /// By opcode. Wins over the block's category.
+    pub blocks: BTreeMap<String, Swatch>,
 }
 
 impl Default for SwatchRecipe {
@@ -113,6 +118,14 @@ impl Swatches {
                 })
                 .collect(),
             uncategorized: recipe.swatch(recipe.neutral_hue, Some(recipe.chroma * 0.15), None),
+            blocks: language
+                .blocks()
+                .iter()
+                .filter_map(|def| {
+                    let color = def.color?;
+                    Some((def.opcode.clone(), recipe.swatch(color.hue, color.chroma, color.lightness)))
+                })
+                .collect(),
         }
     }
 }

@@ -80,7 +80,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
   risk, and escaping text for code generation is the back end's job.
 - Fills are unions of convex pieces (epaint fans closed paths).
-- Colors: a category gives an OKLCH hue, optionally chroma and lightness.
+- Colors: a category gives an OKLCH hue, optionally chroma and lightness. A
+  block may give its own `color`, which replaces its category's for that block
+  alone; it stays under its category in the palette.
   Core only carries that. The GUI resolves it with `palette` into a `Swatch`
   (fill, edge, shadow, highlight, muted, ink) by stepping lightness and chroma,
   so every category sits at the same perceived lightness; displayed as sRGB.

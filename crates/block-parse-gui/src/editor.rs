@@ -10,7 +10,11 @@ use egui::{
 
 use crate::color::{SwatchRecipe, Swatches};
 
-type SwatchKey = (SwatchRecipe, Vec<block_parse::CategoryColor>);
+type SwatchKey = (
+    SwatchRecipe,
+    Vec<block_parse::CategoryColor>,
+    Vec<Option<block_parse::CategoryColor>>,
+);
 use crate::interact::{DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, Press, Pressed, SnapMark};
 use crate::layout::{
     Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
@@ -140,6 +144,7 @@ impl BlockEditor {
         let key: SwatchKey = (
             theme.swatch.clone(),
             language.categories().iter().map(|category| category.color).collect(),
+            language.blocks().iter().map(|def| def.color).collect(),
         );
         if self.swatches.as_ref().is_none_or(|(cached, _)| *cached != key) {
             self.swatches = Some((key, Swatches::resolve(language, &theme.swatch)));

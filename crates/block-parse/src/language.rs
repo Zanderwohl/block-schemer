@@ -98,7 +98,13 @@ pub struct BlockConfig {
     /// saved in the program. Stack blocks only.
     #[serde(default)]
     pub switch: bool,
+    /// Replaces the category's color for this block alone; the block stays
+    /// under its category in the palette.
+    #[serde(default)]
+    pub color: Option<CategoryColor>,
 }
+
+const COLOR_RANGE: &str = "hue 0..360, chroma 0..=0.37, lightness 0..=1";
 
 /// OKLCH. Only the hue is required; the GUI supplies the rest from its theme.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -111,6 +117,16 @@ pub struct CategoryColor {
     /// `0.0..=1.0`.
     #[serde(default)]
     pub lightness: Option<f32>,
+}
+
+impl CategoryColor {
+    fn in_range(&self) -> bool {
+        let within = |value: f32, range: std::ops::RangeInclusive<f32>| value.is_finite() && range.contains(&value);
+        within(self.hue, 0.0..=360.0)
+            && self.hue < 360.0
+            && self.chroma.is_none_or(|c| within(c, 0.0..=0.37))
+            && self.lightness.is_none_or(|l| within(l, 0.0..=1.0))
+    }
 }
 
 /// Outline of a slot and of reporters producing the type.
@@ -215,6 +231,8 @@ pub struct BlockDef {
     /// A URL or a relative path; resolving it is the consumer's business.
     pub documentation: Option<String>,
     pub switch: bool,
+    /// Overrides the category's color.
+    pub color: Option<CategoryColor>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -445,20 +463,10 @@ impl LanguageConfig {
             {
                 problem(None, format!("category `{}` is declared twice", config.name));
             }
-            let CategoryColor { hue, chroma, lightness } = config.color;
-            let in_range = |value: f32, range: std::ops::RangeInclusive<f32>| {
-                value.is_finite() && range.contains(&value)
-            };
-            if !(in_range(hue, 0.0..=360.0) && hue < 360.0)
-                || !chroma.is_none_or(|c| in_range(c, 0.0..=0.37))
-                || !lightness.is_none_or(|l| in_range(l, 0.0..=1.0))
-            {
+            if !config.color.in_range() {
                 problem(
                     None,
-                    format!(
-                        "category `{}` color is out of range (hue 0..360, chroma 0..=0.37, lightness 0..=1)",
-                        config.name
-                    ),
+                    format!("category `{}` color is out of range ({COLOR_RANGE})", config.name),
                 );
             }
             categories.push(Category {
@@ -482,6 +490,9 @@ impl LanguageConfig {
             }
             if config.name.trim().is_empty() {
                 problem(at, "the block needs a name".into());
+            }
+            if config.color.is_some_and(|color| !color.in_range()) {
+                problem(at, format!("color is out of range ({COLOR_RANGE})"));
             }
             let category = match &config.category {
                 Some(name) => {
@@ -575,6 +586,7 @@ impl LanguageConfig {
                 description: config.description,
                 documentation: config.documentation,
                 switch: config.switch,
+                color: config.color,
             });
         }
 
@@ -681,6 +693,26 @@ mod tests {
             .replace("hue: 10.0", "hue: 400.0");
         let problems = compile(&text).unwrap_err();
         assert_eq!(problems.len(), 4, "{problems:#?}");
+    }
+
+    #[test]
+    fn a_block_may_override_its_categorys_color_within_range() {
+        let language = compile(&MINIMAL.replace(
+            r#"category: "C", kind: Hat, spec: "go""#,
+            r#"category: "C", kind: Hat, spec: "go", color: Some((hue: 200.0))"#,
+        ))
+        .unwrap();
+        let go = language.block("go").unwrap();
+        assert_eq!(go.color.map(|color| color.hue), Some(200.0));
+        assert_eq!(go.category, Some(0), "it stays in its category");
+        assert!(language.block("if").unwrap().color.is_none(), "none unless asked for");
+
+        let problems = compile(&MINIMAL.replace(
+            r#"category: "C", kind: Hat, spec: "go""#,
+            r#"category: "C", kind: Hat, spec: "go", color: Some((hue: 400.0))"#,
+        ))
+        .unwrap_err();
+        assert!(problems[0].contains("out of range"), "{problems:#?}");
     }
 
     #[test]

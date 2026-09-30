@@ -326,9 +326,12 @@ impl Layout<'_> {
         let Some(def) = self.language.block(&block.opcode) else {
             return self.unknown(block);
         };
-        let swatch = def
-            .category
-            .and_then(|index| self.swatches.categories.get(index).copied())
+        let swatch = self
+            .swatches
+            .blocks
+            .get(&def.opcode)
+            .or_else(|| def.category.and_then(|index| self.swatches.categories.get(index)))
+            .copied()
             .unwrap_or(self.swatches.uncategorized);
         match &def.kind {
             BlockKind::Reporter(_) => self.reporter(block, def, swatch),
@@ -953,6 +956,29 @@ mod tests {
         let condition = focused.slots().find(|slot| slot.input == "condition").unwrap();
         let SlotContent::Literal { error, .. } = &condition.content else { panic!() };
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn a_block_with_its_own_color_is_drawn_in_it_and_its_neighbors_are_not() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "hues",
+                file: (extension: "h"),
+                categories: [(name: "C", color: (hue: 20.0))],
+                blocks: [
+                    (id: "plain", name: "Plain", category: "C", spec: "plain"),
+                    (id: "odd", name: "Odd", category: "C", spec: "odd", color: Some((hue: 200.0))),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let (program, ids) = with_stack(&language, &["plain", "odd"]);
+        let scene = scene_of(&language, &program);
+        let recipe = SwatchRecipe::default();
+
+        assert_eq!(placed(&scene, ids[0]).swatch, recipe.swatch(20.0, None, None));
+        assert_eq!(placed(&scene, ids[1]).swatch, recipe.swatch(200.0, None, None));
     }
 
     #[test]
