@@ -16,8 +16,9 @@ use crate::{BlockEditor, EditorEvent};
 mod native;
 
 pub struct AppConfig {
-    /// What eframe keys the app's saved state by. The title bar shows the
-    /// file and the language instead.
+    /// What eframe keys the app's saved state by, and on macOS the name in
+    /// the app menu's About and Quit, so make it readable. The title bar
+    /// shows the file and the language instead.
     pub name: String,
     pub language: Language,
     /// Opened if it exists, else written on first save.
@@ -105,10 +106,12 @@ pub fn run(config: AppConfig) -> ExitCode {
         closing: false,
         title: String::new(),
     };
-    let creator: eframe::AppCreator = Box::new(move |_cc| {
+    let creator: eframe::AppCreator = Box::new(move |cc| {
+        #[cfg(not(target_os = "macos"))]
+        let _ = cc;
         #[cfg(target_os = "macos")]
         if app.menus == Menus::Native {
-            match native::NativeMenus::new(&config.name, &_cc.egui_ctx) {
+            match native::NativeMenus::new(&config.name, &cc.egui_ctx) {
                 Ok(menus) => app.native = Some(menus),
                 Err(error) => {
                     eprintln!("native menus: {error}");
@@ -157,8 +160,8 @@ enum Command {
     Redo,
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 impl Command {
+    #[cfg(target_os = "macos")]
     const ALL: [Command; 7] = [
         Command::New,
         Command::Open,
@@ -169,6 +172,7 @@ impl Command {
         Command::Redo,
     ];
 
+    #[cfg(target_os = "macos")]
     fn id(self) -> &'static str {
         match self {
             Command::New => "new",
@@ -275,7 +279,7 @@ impl eframe::App for App {
 
         if self.menus == Menus::Egui {
             egui::Panel::top("menu_bar").show(ui, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
+                egui::MenuBar::new().ui(ui, |ui| self.menu_bar(ui));
             });
         }
         egui::Panel::bottom("status_bar").show(ui, |ui| {
@@ -390,7 +394,7 @@ impl App {
         }
     }
 
-    fn menus(&mut self, ui: &mut egui::Ui) {
+    fn menu_bar(&mut self, ui: &mut egui::Ui) {
         use Command::*;
         for (title, commands) in [
             ("File", &[Some(New), Some(Open), None, Some(Save), Some(SaveAs), None, Some(Quit)][..]),
@@ -405,7 +409,7 @@ impl App {
                     let shortcut = ui.ctx().format_shortcut(&command.shortcut());
                     let button = Button::new(command.label()).shortcut_text(shortcut);
                     if ui.add_enabled(self.enabled(command), button).clicked() {
-                        self.run(command, &ui.ctx().clone());
+                        self.run(command, ui.ctx());
                     }
                 }
             });

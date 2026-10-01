@@ -27,7 +27,17 @@ impl NativeMenus {
             };
             (command, MenuItem::with_id(command.id(), label, true, Some(accelerator)))
         });
-        let [new, open, save, save_as, quit, undo, redo] = &items.each_ref().map(|(_, item)| item);
+        let item = |command| &items.iter().find(|(c, _)| *c == command).expect("every command has an item").1;
+        let [new, open, save, save_as, quit, undo, redo] = [
+            Command::New,
+            Command::Open,
+            Command::Save,
+            Command::SaveAs,
+            Command::Quit,
+            Command::Undo,
+            Command::Redo,
+        ]
+        .map(item);
         let separator = PredefinedMenuItem::separator();
         let about = AboutMetadata {
             name: Some(name.to_owned()),
@@ -47,11 +57,11 @@ impl NativeMenus {
                 &PredefinedMenuItem::show_all(None),
                 &separator,
                 // Not the predefined Quit, whose `terminate:` skips the save prompt.
-                *quit,
+                quit,
             ],
         )?;
-        let file = Submenu::with_items("File", true, &[*new, *open, &separator, *save, *save_as])?;
-        let edit = Submenu::with_items("Edit", true, &[*undo, *redo])?;
+        let file = Submenu::with_items("File", true, &[new, open, &separator, save, save_as])?;
+        let edit = Submenu::with_items("Edit", true, &[undo, redo])?;
         let window = Submenu::with_items(
             "Window",
             true,
@@ -119,7 +129,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_shortcut_becomes_an_accelerator() {
+    fn shortcuts_keep_their_modifiers() {
+        use muda::accelerator::{Code, Modifiers};
+        let cases = [
+            (Command::Save, Modifiers::META, Code::KeyS),
+            (Command::SaveAs, Modifiers::META | Modifiers::SHIFT, Code::KeyS),
+            (Command::Undo, Modifiers::META, Code::KeyZ),
+            (Command::Redo, Modifiers::META | Modifiers::SHIFT, Code::KeyZ),
+            (Command::Quit, Modifiers::META, Code::KeyQ),
+        ];
+        for (command, modifiers, key) in cases {
+            assert_eq!(accelerator(command.shortcut()), Accelerator::new(modifiers, key), "{command:?}");
+        }
         for command in Command::ALL {
             accelerator(command.shortcut());
         }
