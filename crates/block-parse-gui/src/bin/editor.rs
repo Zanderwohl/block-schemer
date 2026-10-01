@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use block_parse::language::Language;
 use block_parse::Validators;
-use block_parse_gui::app::{self, AppConfig};
+use block_parse_gui::app::{self, AppConfig, Menus};
 use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
@@ -16,9 +16,9 @@ struct Args {
     /// The language definition (RON, whatever its extension).
     #[arg(short, long)]
     language: Option<PathBuf>,
-    /// Hide the egui menu bar, for hosts that provide native menus.
-    #[arg(long)]
-    no_menu_bar: bool,
+    /// Where the File and Edit menus go.
+    #[arg(long, value_enum, default_value_t)]
+    menus: Menus,
     /// With `--command snapshot`: pixels per canvas unit.
     #[arg(long, default_value_t = 2.0)]
     scale: f32,
@@ -55,7 +55,7 @@ fn main() -> ExitCode {
         name: "block-parse-editor".into(),
         language,
         program: args.program,
-        menu_bar: !args.no_menu_bar,
+        menus: args.menus,
         runner: None,
         icon: None,
     })

@@ -57,15 +57,18 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     depend on egui. `Runner` needs only `overlay` and `run_block`; the
     debugger methods default to doing nothing.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, rfd, winit (macOS only), the window as a
-  library (`app::run` with an `AppConfig`: name, language, program path, an
-  optional `Runner` and an optional window icon). Feature `cli` adds clap
-  and the `block-parse-editor` binary (`cargo editor -l <language>
-  [program]`). Its File/Edit menus are
-  egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on macOS, Ctrl+Y or
-  Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
-  native menus arrive. On macOS it turns off winit's default menu, whose Quit
-  would skip the save prompt. Feature `snapshot` (off by default) renders
+  by default) adds eframe, rfd, and on macOS winit and muda, the window as a
+  library (`app::run` with an `AppConfig`: name, language, program path,
+  `Menus`, an optional `Runner` and an optional window icon). Feature `cli`
+  adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
+  [program]`). Its File/Edit menus (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
+  macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere) are one `Command` list drawn as
+  `Menus::Native` (the macOS menu bar through muda, with app and Window
+  menus; egui elsewhere), `Egui` or `Hidden` (`--menus`); shortcuts work in
+  all three. Native menus take their own shortcuts, so egui only swallows
+  the ones a disabled item lets through. The app menu's Quit is a custom
+  item and winit's default menu is off, since `terminate:` would skip the
+  save prompt. Feature `snapshot` (off by default) renders
   programs to images offscreen through egui_kittest's wgpu renderer; with it,
   `--command snapshot` (`cargo snapshot -l <language> <out.png>`) writes
   `Layout::grid`, every block in a column per category, instead of opening
@@ -142,7 +145,9 @@ call `block_parse_gui::snapshot::program`.
   `run_block`: `app::run` shows only the bubble a runner gives back at once,
   not its highlights, breakpoints, annotations or later answers.
 - Other ways for the editor binary to choose a language than `--language`.
-- Native OS menus.
+- Native menus off macOS (muda can attach to a Windows window; on Linux
+  it needs GTK, which winit does not use), and Cut/Copy/Paste items, whose
+  predefined selectors winit's view does not answer.
 - A cap on undo history; each step holds a whole copy of the stacks.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice

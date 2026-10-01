@@ -18,4 +18,5 @@ rfd = "0.17"
 egui_kittest = { version = "0.36", features = ["wgpu"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 winit = "0.30"
+muda = { version = "0.21", default-features = false }
 palette = { version = "0.7", default-features = false, features = ["std"] }

@@ -8,7 +8,7 @@ edition.workspace = true
 default = []
 # The standalone editor window. Off by default so embedding the component never
 # pulls in a windowing backend.
-app = ["dep:eframe", "dep:rfd", "dep:winit"]
+app = ["dep:eframe", "dep:rfd", "dep:winit", "dep:muda"]
 # The block-parse-editor binary, which parses its arguments with clap.
 cli = ["app", "dep:clap"]
 # Offscreen images of programs, and the editor's `--command snapshot`.
@@ -24,9 +24,10 @@ rfd = { workspace = true, optional = true }
 egui_kittest = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
 
-# Only to turn off winit's default macOS menu, whose Quit bypasses the save prompt.
 [target.'cfg(target_os = "macos")'.dependencies]
+# Only to turn off winit's default menu, whose Quit bypasses the save prompt.
 winit = { workspace = true, optional = true }
+muda = { workspace = true, optional = true }
 
 [[bin]]
 name = "block-parse-editor"

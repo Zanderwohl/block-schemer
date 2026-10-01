@@ -12,6 +12,9 @@ use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportComma
 
 use crate::{BlockEditor, EditorEvent};
 
+#[cfg(target_os = "macos")]
+mod native;
+
 pub struct AppConfig {
     /// What eframe keys the app's saved state by. The title bar shows the
     /// file and the language instead.
@@ -19,13 +22,25 @@ pub struct AppConfig {
     pub language: Language,
     /// Opened if it exists, else written on first save.
     pub program: Option<PathBuf>,
-    /// Off for hosts that provide native menus.
-    pub menu_bar: bool,
+    pub menus: Menus,
     /// Answers runs; without one, a run says there is no backend.
     pub runner: Option<Box<dyn Runner>>,
     /// The window's, shown in the taskbar or Dock while it runs. See
     /// [`icon_from_png`].
     pub icon: Option<egui::IconData>,
+}
+
+/// Where File and Edit go. Their shortcuts work whichever is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+pub enum Menus {
+    /// The menu bar at the top of the screen on macOS; elsewhere, `egui`.
+    #[default]
+    Native,
+    /// A menu bar drawn by egui at the top of the window.
+    Egui,
+    /// None, for hosts that provide their own.
+    Hidden,
 }
 
 pub fn icon_from_png(png: &[u8]) -> Result<egui::IconData, String> {
@@ -69,7 +84,8 @@ pub fn run(config: AppConfig) -> ExitCode {
     }
 
     let name = config.name.clone();
-    let app = App {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut app = App {
         language: config.language,
         history: History::new(&program),
         program,
@@ -79,12 +95,30 @@ pub fn run(config: AppConfig) -> ExitCode {
         runner: config.runner,
         dirty: false,
         status,
-        menu_bar: config.menu_bar,
+        menus: match config.menus {
+            Menus::Native if !cfg!(target_os = "macos") => Menus::Egui,
+            menus => menus,
+        },
+        #[cfg(target_os = "macos")]
+        native: None,
         pending: None,
         closing: false,
         title: String::new(),
     };
-    match eframe::run_native(&name, options, Box::new(|_| Ok(Box::new(app)))) {
+    let creator: eframe::AppCreator = Box::new(move |_cc| {
+        #[cfg(target_os = "macos")]
+        if app.menus == Menus::Native {
+            match native::NativeMenus::new(&config.name, &_cc.egui_ctx) {
+                Ok(menus) => app.native = Some(menus),
+                Err(error) => {
+                    eprintln!("native menus: {error}");
+                    app.menus = Menus::Egui;
+                }
+            }
+        }
+        Ok(Box::new(app))
+    });
+    match eframe::run_native(&name, options, creator) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
@@ -112,6 +146,79 @@ const COMMAND_SHIFT: Modifiers = Modifiers {
     ..Modifiers::NONE
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Command {
+    New,
+    Open,
+    Save,
+    SaveAs,
+    Quit,
+    Undo,
+    Redo,
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+impl Command {
+    const ALL: [Command; 7] = [
+        Command::New,
+        Command::Open,
+        Command::Save,
+        Command::SaveAs,
+        Command::Quit,
+        Command::Undo,
+        Command::Redo,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            Command::New => "new",
+            Command::Open => "open",
+            Command::Save => "save",
+            Command::SaveAs => "save-as",
+            Command::Quit => "quit",
+            Command::Undo => "undo",
+            Command::Redo => "redo",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Command::New => "New",
+            Command::Open => "Open…",
+            Command::Save => "Save",
+            Command::SaveAs => "Save As…",
+            Command::Quit => "Quit",
+            Command::Undo => "Undo",
+            Command::Redo => "Redo",
+        }
+    }
+
+    /// The one menus show.
+    fn shortcut(self) -> KeyboardShortcut {
+        match self {
+            Command::New => NEW,
+            Command::Open => OPEN,
+            Command::Save => SAVE,
+            Command::SaveAs => SAVE_AS,
+            Command::Quit => QUIT,
+            Command::Undo => UNDO,
+            Command::Redo => REDO,
+        }
+    }
+}
+
+/// Shift variants first: a shortcut matches with extra Shift held.
+const SHORTCUTS: [(KeyboardShortcut, Command); 8] = [
+    (SAVE_AS, Command::SaveAs),
+    (SAVE, Command::Save),
+    (NEW, Command::New),
+    (OPEN, Command::Open),
+    (QUIT, Command::Quit),
+    (REDO_SHIFT, Command::Redo),
+    (REDO, Command::Redo),
+    (UNDO, Command::Undo),
+];
+
 /// Something that would lose unsaved changes, waiting on the save prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pending {
@@ -137,7 +244,9 @@ struct App {
     runner: Option<Box<dyn Runner>>,
     dirty: bool,
     status: String,
-    menu_bar: bool,
+    menus: Menus,
+    #[cfg(target_os = "macos")]
+    native: Option<native::NativeMenus>,
     pending: Option<Pending>,
     /// Set once quitting is agreed, so the close request is let through.
     closing: bool,
@@ -152,11 +261,19 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.pending = Some(Pending::Quit);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &self.native {
+            for command in native.clicked() {
+                if self.pending.is_none() {
+                    self.run(command, &ctx);
+                }
+            }
+        }
         if self.pending.is_none() {
             self.shortcuts(&ctx);
         }
 
-        if self.menu_bar {
+        if self.menus == Menus::Egui {
             egui::Panel::top("menu_bar").show(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| self.menus(ui));
             });
@@ -222,80 +339,77 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
             self.title = title;
         }
+
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &self.native {
+            native.set_enabled(|command| self.pending.is_none() && self.enabled(command));
+        }
     }
 }
 
 impl App {
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        // Shift variants first: a shortcut matches with extra Shift held.
         // Before the editor draws, so a focused field's own undo never sees them.
-        let (save_as, save, new, open, quit, redo, undo) = ctx.input_mut(|i| {
-            (
-                i.consume_shortcut(&SAVE_AS),
-                i.consume_shortcut(&SAVE),
-                i.consume_shortcut(&NEW),
-                i.consume_shortcut(&OPEN),
-                i.consume_shortcut(&QUIT),
-                i.consume_shortcut(&REDO_SHIFT) || i.consume_shortcut(&REDO),
-                i.consume_shortcut(&UNDO),
-            )
+        let commands: Vec<Command> = ctx.input_mut(|i| {
+            SHORTCUTS
+                .iter()
+                .filter(|(shortcut, _)| i.consume_shortcut(shortcut))
+                .map(|&(_, command)| command)
+                .collect()
         });
-        if redo {
-            self.redo(ctx);
-        } else if undo {
-            self.undo(ctx);
+        // Native menus handle their own; one reaching here was disabled.
+        if self.menus == Menus::Native {
+            return;
         }
-        if save_as {
-            self.save_as(ctx);
-        } else if save {
-            self.save(ctx);
+        for command in commands {
+            self.run(command, ctx);
         }
-        if new {
-            self.request(Pending::New, ctx);
+    }
+
+    fn run(&mut self, command: Command, ctx: &egui::Context) {
+        match command {
+            Command::New => self.request(Pending::New, ctx),
+            Command::Open => self.request(Pending::Open, ctx),
+            Command::Save => {
+                self.save(ctx);
+            }
+            Command::SaveAs => {
+                self.save_as(ctx);
+            }
+            Command::Quit => self.request(Pending::Quit, ctx),
+            Command::Undo => self.undo(ctx),
+            Command::Redo => self.redo(ctx),
         }
-        if open {
-            self.request(Pending::Open, ctx);
-        }
-        if quit {
-            self.request(Pending::Quit, ctx);
+    }
+
+    fn enabled(&self, command: Command) -> bool {
+        match command {
+            Command::Undo => self.history.can_undo(&self.program),
+            Command::Redo => self.history.can_redo(&self.program),
+            _ => true,
         }
     }
 
     fn menus(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        let item = |text: &str, shortcut: &KeyboardShortcut| {
-            Button::new(text).shortcut_text(ctx.format_shortcut(shortcut))
-        };
-
-        ui.menu_button("File", |ui| {
-            if ui.add(item("New", &NEW)).clicked() {
-                self.request(Pending::New, &ctx);
-            }
-            if ui.add(item("Open…", &OPEN)).clicked() {
-                self.request(Pending::Open, &ctx);
-            }
-            ui.separator();
-            if ui.add(item("Save", &SAVE)).clicked() {
-                self.save(&ctx);
-            }
-            if ui.add(item("Save As…", &SAVE_AS)).clicked() {
-                self.save_as(&ctx);
-            }
-            ui.separator();
-            if ui.add(item("Quit", &QUIT)).clicked() {
-                self.request(Pending::Quit, &ctx);
-            }
-        });
-        ui.menu_button("Edit", |ui| {
-            let can_undo = self.history.can_undo(&self.program);
-            if ui.add_enabled(can_undo, item("Undo", &UNDO)).clicked() {
-                self.undo(&ctx);
-            }
-            let can_redo = self.history.can_redo(&self.program);
-            if ui.add_enabled(can_redo, item("Redo", &REDO)).clicked() {
-                self.redo(&ctx);
-            }
-        });
+        use Command::*;
+        for (title, commands) in [
+            ("File", &[Some(New), Some(Open), None, Some(Save), Some(SaveAs), None, Some(Quit)][..]),
+            ("Edit", &[Some(Undo), Some(Redo)]),
+        ] {
+            ui.menu_button(title, |ui| {
+                for command in commands {
+                    let Some(command) = *command else {
+                        ui.separator();
+                        continue;
+                    };
+                    let shortcut = ui.ctx().format_shortcut(&command.shortcut());
+                    let button = Button::new(command.label()).shortcut_text(shortcut);
+                    if ui.add_enabled(self.enabled(command), button).clicked() {
+                        self.run(command, &ui.ctx().clone());
+                    }
+                }
+            });
+        }
     }
 
     fn undo(&mut self, ctx: &egui::Context) {

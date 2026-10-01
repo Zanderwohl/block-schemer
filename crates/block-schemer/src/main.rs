@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use block_parse_gui::app::{self, AppConfig};
+use block_parse_gui::app::{self, AppConfig, Menus};
 use block_schemer::{SchemerRunner, Steel};
 
 // eframe sets the Dock icon from this, over the app bundle's, so the Mac one
@@ -21,7 +21,7 @@ fn main() -> ExitCode {
         runner: Some(Box::new(SchemerRunner::new(language.clone(), Steel::new()))),
         language,
         program,
-        menu_bar: true,
+        menus: Menus::Native,
         icon: Some(app::icon_from_png(ICON).expect("the built-in icon is a PNG")),
     })
 }
