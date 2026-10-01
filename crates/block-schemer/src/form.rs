@@ -15,9 +15,7 @@ impl Form {
         Self::Atom(text.to_owned())
     }
 
-    /// Lines of at most `width` columns where breaking can manage it. Forms
-    /// that fit stay on one line; a form with several body forms always
-    /// breaks, one body form to a line.
+    /// Lines of at most `width` columns where breaking can manage it.
     pub fn pretty(&self, width: usize) -> String {
         let mut out = String::new();
         self.layout(width, 0, &mut out);
@@ -41,7 +39,7 @@ impl Form {
             out.push_str("()");
             return;
         };
-        // Each argument after the first few starts a line at `under`.
+        // Arguments past `same_line` start lines at `under`.
         let (same_line, under) = match (self.body_start(), head) {
             // `(define (f x)` then the body indented two.
             (Some(start), _) => (start, column + 2),
@@ -50,7 +48,6 @@ impl Form {
             (None, Self::Atom(name)) if name.chars().count() <= ALIGN_UNDER_FIRST_UP_TO => {
                 (1, column + name.chars().count() + 2)
             }
-            // A long name.
             (None, Self::Atom(_)) => (0, column + 2),
             // A list of lists, such as `let`'s bindings.
             (None, Self::List(_)) => (0, column + 1),

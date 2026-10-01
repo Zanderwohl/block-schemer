@@ -13,7 +13,7 @@ pub struct Theme {
     pub grid: Color32,
     pub palette: Color32,
     pub palette_heading: Color32,
-    /// The edge between palette and canvas, which drags to resize.
+    /// The edges between the canvas and its panels.
     pub divider: Color32,
     pub snap: Color32,
     /// Drawn under accents so they never depend on contrast with the block,

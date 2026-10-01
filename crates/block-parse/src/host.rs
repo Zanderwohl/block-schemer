@@ -49,7 +49,7 @@ pub struct Overlay {
     pub switch_hint: Option<String>,
     /// Speech bubbles, such as what running a block gave back.
     pub bubbles: HashMap<BlockId, String>,
-    /// Shown in the inspector, such as what inspecting a block gave back.
+    /// What inspecting a block gave back.
     pub inspector: String,
 }
 

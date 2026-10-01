@@ -583,8 +583,7 @@ impl App {
         dialog
     }
 
-    /// For a new program: panel sizes stay, the inspector's text is for the
-    /// old one.
+    /// Panel sizes stay; the inspector's text was for the old program.
     fn reset_editor(&mut self) {
         let options = self.editor.options.clone();
         self.editor = BlockEditor::default();

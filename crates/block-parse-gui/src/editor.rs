@@ -58,12 +58,11 @@ pub struct EditorOptions {
     pub start_with_problems: bool,
     /// Offer "Toggle breakpoint" in a block's context menu.
     pub breakpoints: bool,
-    /// `None` fits the widest block. Dragging the palette's edge sets it, so
-    /// a host can read it back to keep it.
+    /// `None` fits the widest block. Dragging the edge sets it, for the host
+    /// to keep.
     pub palette_width: Option<f32>,
     /// Hides the palette without forgetting `palette_width`.
     pub palette_collapsed: bool,
-    /// The inspector, right of the canvas; dragging its edge sets the width.
     pub inspector_width: f32,
     pub inspector_collapsed: bool,
     pub theme: Theme,
@@ -338,7 +337,7 @@ impl BlockEditor {
                 if let Some(at) = input.at {
                     drag.head = t.canvas(at) - drag.grab_offset;
                 }
-                // Nothing can be seen to land under the inspector, so nothing does.
+                // A drop under the inspector could not be seen, so it is canceled.
                 let hidden = input.at.is_some_and(|at| panels.inspector.contains(at));
                 // Every frame, release included, so a quick flick still snaps.
                 let run = layout.run(&drag.fragment.blocks, drag.head);

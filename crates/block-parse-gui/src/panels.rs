@@ -10,7 +10,6 @@ use crate::theme::Theme;
 /// Least widths a panel's edge can be dragged to leave either side.
 const MIN_PANEL_WIDTH: f32 = 80.0;
 pub(crate) const MIN_CANVAS_WIDTH: f32 = 120.0;
-/// A panel's collapse button, half its width inside the canvas from the edge.
 pub(crate) const TOGGLE_SIZE: Vec2 = vec2(16.0, 24.0);
 
 /// Screen rects for one frame.
@@ -60,7 +59,6 @@ impl Panels {
         }
     }
 
-    /// The open panel's edge within grabbing distance of `at`.
     pub fn edge_at(&self, options: &EditorOptions, at: Pos2) -> Option<Edge> {
         let near = |edge| (at.x - self.x(edge)).abs() <= DIVIDER_GRIP;
         if !options.palette_collapsed && near(Edge::Palette) {
@@ -72,13 +70,11 @@ impl Panels {
         }
     }
 
-    /// The pointer's x minus the edge's, so the edge does not jump.
     pub fn grab(&self, edge: Edge, at: Pos2) -> f32 {
         at.x - self.x(edge)
     }
 
-    /// Moves `edge` to `x`, within what leaves the canvas and the other
-    /// panel their room. Takes effect next frame.
+    /// Takes effect next frame.
     pub fn resize(&self, options: &mut EditorOptions, edge: Edge, x: f32) {
         let room = (self.bounds.width() - MIN_CANVAS_WIDTH).max(0.0);
         let clamp = |width: f32, max: f32| width.clamp(MIN_PANEL_WIDTH.min(max), max);
@@ -107,7 +103,7 @@ impl Panels {
         [Edge::Palette, Edge::Inspector].into_iter().any(|edge| self.toggle(edge).contains(at))
     }
 
-    /// The collapse buttons. True if one was clicked.
+    /// True if one was clicked.
     pub fn toggles(&self, ui: &mut egui::Ui, options: &mut EditorOptions) -> bool {
         let mut ui = ui.new_child(UiBuilder::new().max_rect(self.bounds));
         let mut clicked = false;
@@ -126,7 +122,6 @@ impl Panels {
         clicked
     }
 
-    /// Thicker on the edge being dragged or ready to be.
     pub fn edges(&self, painter: &Painter, hot: Option<Edge>, theme: &Theme) {
         for edge in [Edge::Palette, Edge::Inspector] {
             let width = if hot == Some(edge) { 3.0 } else { 1.0 };
@@ -134,8 +129,6 @@ impl Panels {
         }
     }
 
-    /// Wraps rather than scrolling sideways, and fills the panel even when
-    /// short. Read-only, but it can be selected and copied.
     pub fn inspector(&self, ui: &mut egui::Ui, id: egui::Id, text: &str, theme: &Theme) {
         if self.inspector.width() <= 0.0 {
             return;
@@ -147,6 +140,7 @@ impl Panels {
             .id_salt(id.with("inspector"))
             .auto_shrink(false)
             .show(&mut panel, |ui| {
+                // Through `&str`: read-only, but it can be selected and copied.
                 let mut shown = text;
                 let text = TextEdit::multiline(&mut shown)
                     .id(id.with("inspector_text"))

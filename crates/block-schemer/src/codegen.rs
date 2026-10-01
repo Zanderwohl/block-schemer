@@ -19,10 +19,9 @@ pub fn script(language: &Language, script: &Script) -> Result<String, String> {
     Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
 }
 
-/// As [`script`], laid out to read within `width` columns, and never run: a
-/// faulty input is written as its name in angle brackets, `<test>`, a
-/// faulty block as far as it parsed, and a statement with nothing to
-/// recover is left out.
+/// As [`script`] laid out to `width` columns, for reading only: a faulty
+/// input becomes `<name>`, a faulty block what parsed of it, and a statement
+/// with nothing recovered is left out.
 pub fn pretty(language: &Language, script: &Script, width: usize) -> Result<String, String> {
     let forms = forms(language, script, true)?;
     Ok(forms.iter().map(|form| form.pretty(width)).collect::<Vec<_>>().join("\n\n"))
@@ -41,8 +40,7 @@ fn forms(language: &Language, script: &Script, holes: bool) -> Result<Vec<Form>,
     for statement in &script.body {
         let node = match statement {
             Stmt::Node(node) => node,
-            // Errors were refused above unless holes are allowed; either
-            // way, what was recovered is kept.
+            // Errors were refused above unless holes are allowed.
             Stmt::Problem(problem) => match &problem.recovered {
                 Some(node) => node,
                 None => continue,
