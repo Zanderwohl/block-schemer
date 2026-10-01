@@ -50,7 +50,44 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
-  columns, which the inspector wraps if it is narrower.
+  columns, which its tab wraps if it is narrower. Lines typed into the
+  console are echoed until programs can read them.
+
+## Playing the program
+
+Play (`RunCommand::Start`), or double-clicking the `program` block, runs the
+canvas as if it were one file:
+
+- Every stack headed by `define` or `define … taking`, in reading order (top
+  to bottom, then left to right), then the `program` block's expression.
+  Other loose blocks are scratch and left out, so their side effects do not
+  run on every Play.
+- All of it as one source. Steel refuses a name it has not yet seen within a
+  run, so definitions run one at a time could not refer to later ones; in
+  one source they can. They stay at top level, not in a body, so they are
+  in scope for double-clicks afterwards.
+- In a fresh session, so the result never depends on what was run before.
+- A definition with a problem stops the run and is named in the console, as
+  skipping it would only turn up later as an undefined name.
+- With no `program` block, or several, nothing runs and the console says why.
+
+What it displayed, then its value, goes to the Console tab, never a bubble,
+after `> block-schemer <file name>`, or `untitled.scmb` until the program is
+saved: the command that will one day run the file from a shell, which this
+line should then match. A double-click on any other block answers in a
+bubble and also writes `> ` and the expression, on one line, then what it
+said, to the console.
+
+## The harness
+
+What runs is not quite what was entered: `display` writes to the `__out`
+port so the console can show it. Code shown to the user, in Inspect and in
+the console's echo, leaves that out, unless the "Schemer Harness" checkbox
+at the right of the actions bar, a `Toggle` the runner offers, is on. It is
+off at launch and not saved. Flipping it regenerates open inspections; lines
+already in the console stay as they were written.
+Inspect on the `program` block shows the same file, pretty-printed. An error
+from Steel does not say which definition it came from.
 
 ## Special forms
 
@@ -64,7 +101,7 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 | `define_procedure` | `(define (variable formals…) body…)` |
 | `lambda` | `(lambda (formals…) body…)` |
 | `let` | `(let (bindings…) body…)` |
-| `display` | `(display obj __out)` |
+| `display` | `(display obj __out)`, shown as `(display obj)` unless the harness is |
 
 ## Known gaps
 

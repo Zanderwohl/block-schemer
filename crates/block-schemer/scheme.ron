@@ -100,7 +100,7 @@ Language(
             name: "Binding",
             category: "Derived expression types",
             kind: Reporter("binding"),
-            spec: "{variable:symbol} _as_ {init:datum}",
+            spec: "{variable:symbol} _be_ {init:datum}",
         ),
         (
             id: "begin",

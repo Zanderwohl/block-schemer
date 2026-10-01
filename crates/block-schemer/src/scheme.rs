@@ -11,6 +11,9 @@ pub trait Scheme {
     /// Runs `source` and gives back what `display` wrote and the written form
     /// of the last value, empty for none.
     fn run(&mut self, source: &str) -> Result<Answer, String>;
+
+    /// A fresh session, with no definitions but the prelude's.
+    fn reset(&mut self);
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -77,6 +80,10 @@ impl Scheme for Steel {
             Some(value) => value.to_string(),
         };
         Ok(Answer { output, value })
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new();
     }
 }
 

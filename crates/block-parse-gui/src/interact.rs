@@ -28,7 +28,7 @@ pub enum Gesture {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Edge {
     Palette,
-    Inspector,
+    Side,
 }
 
 /// Screen pixels either side of a panel's edge that grab it.

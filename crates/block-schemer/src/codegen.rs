@@ -9,25 +9,32 @@ use block_parse::{Language, Value};
 
 use crate::form::Form;
 
-/// Where `display` writes, so the runner can show it.
+/// Where `display` writes, so the runner can show it. Code generated for
+/// reading names it only when asked to show this harness.
 pub const OUTPUT_PORT: &str = "__out";
 
 /// One expression per statement of `script`, a line each. `Err` holds the
 /// first problem, as a script with any error-level problem is not run.
 pub fn script(language: &Language, script: &Script) -> Result<String, String> {
-    let forms = forms(language, script, false)?;
+    let forms = forms(language, script, false, true)?;
     Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
 }
 
 /// As [`script`] laid out to `width` columns, for reading only: a faulty
 /// input becomes `<name>`, a faulty block what parsed of it, and a statement
-/// with nothing recovered is left out.
-pub fn pretty(language: &Language, script: &Script, width: usize) -> Result<String, String> {
-    let forms = forms(language, script, true)?;
+/// with nothing recovered is left out. `harness` keeps [`OUTPUT_PORT`] in.
+pub fn pretty(language: &Language, script: &Script, width: usize, harness: bool) -> Result<String, String> {
+    let forms = forms(language, script, true, harness)?;
     Ok(forms.iter().map(|form| form.pretty(width)).collect::<Vec<_>>().join("\n\n"))
 }
 
-fn forms(language: &Language, script: &Script, holes: bool) -> Result<Vec<Form>, String> {
+/// As [`pretty`], a line per statement however long, for echoing what ran.
+pub fn flat(language: &Language, script: &Script, harness: bool) -> Result<String, String> {
+    let forms = forms(language, script, true, harness)?;
+    Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
+}
+
+fn forms(language: &Language, script: &Script, holes: bool, harness: bool) -> Result<Vec<Form>, String> {
     let ast = Ast {
         scripts: vec![script.clone()],
     };
@@ -46,7 +53,7 @@ fn forms(language: &Language, script: &Script, holes: bool) -> Result<Vec<Form>,
                 None => continue,
             },
         };
-        forms.push(Generator { language, holes }.node(node)?);
+        forms.push(Generator { language, holes, harness }.node(node)?);
     }
     Ok(forms)
 }
@@ -55,6 +62,7 @@ struct Generator<'a> {
     language: &'a Language,
     /// Write `<name>` for a faulty input instead of failing.
     holes: bool,
+    harness: bool,
 }
 
 impl Generator<'_> {
@@ -79,7 +87,8 @@ impl Generator<'_> {
             }
             "lambda" => wrap([vec![atom("lambda"), wrap(many("formals")?)], many("body")?].concat()),
             "let" => wrap([vec![atom("let"), wrap(many("bindings")?)], many("body")?].concat()),
-            "display" => wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)]),
+            "display" if self.harness => wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)]),
+            "display" => wrap(vec![atom("display"), one("obj")?]),
             opcode => {
                 let mut parts = vec![atom(opcode)];
                 for part in &def.parts {
@@ -204,7 +213,7 @@ mod tests {
 
         fn pretty(&mut self, block: Block) -> Result<String, String> {
             let run = self.stack(block);
-            pretty(&self.language, &run, 80)
+            pretty(&self.language, &run, 80, false)
         }
 
         fn stack(&mut self, block: Block) -> Script {
@@ -282,6 +291,18 @@ mod tests {
         let mut call = b.block("call");
         set(&mut call, Slot::input("operator"), text("f"));
         assert_eq!(b.code(call), Ok("(f)".into()));
+    }
+
+    #[test]
+    fn the_output_port_is_shown_only_with_the_harness() {
+        let mut b = Builder::new();
+        let mut display = b.block("display");
+        set(&mut display, Slot::input("obj"), text("a"));
+        let run = b.stack(display);
+        assert_eq!(script(&b.language, &run), Ok(format!("(display a {OUTPUT_PORT})")), "it always runs with it");
+        assert_eq!(flat(&b.language, &run, false), Ok("(display a)".into()));
+        assert_eq!(pretty(&b.language, &run, 80, false), Ok("(display a)".into()));
+        assert_eq!(pretty(&b.language, &run, 80, true), Ok(format!("(display a {OUTPUT_PORT})")));
     }
 
     #[test]

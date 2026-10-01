@@ -53,20 +53,33 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     records when `EditorOutput::settled`, which a literal being typed holds
     back until its field lets go (`documentation/04-history.md`).
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
-    switch states, speech bubbles, the inspector's text),
-    `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
+    switch states, speech bubbles, the side panel's `Tab`s: each `Text` or a
+    `Console`, closable or not), `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui. `Runner` needs only `overlay` and `run_block`; the
-    debugger methods default to doing nothing, and `inspect` (a script as
-    the back end's text, shown in the editor's inspector) to `None`.
+    debugger methods and `console_input` default to doing nothing, and
+    `inspect` (a block's script as the back end's text, shown in a side
+    panel tab; it gets the program, as `run_block` does) to `None`. `start`
+    and `run_block` also get the program's path, `None` until saved. A
+    runner may offer on/off `Toggle`s (`toggles`, `set_toggle`), its own
+    settings, which the host draws.
 - `crates/block-parse-gui` — egui component `BlockEditor`: the palette, the
-  canvas and, right of it, the inspector, read-only text that starts
-  collapsed. Dragging a panel's edge sets `EditorOptions::palette_width` or
-  `inspector_width`, and a button half its width inside the canvas collapses
-  or restores it at that width (`palette_collapsed`, `inspector_collapsed`). A
-  run dropped over the inspector goes back where it came from. Feature `app`
+  canvas and, right of it, the side panel, which starts collapsed. Dragging a
+  panel's edge sets `EditorOptions::palette_width` or `side_width`, and a
+  button half its width inside the canvas collapses or restores it at that
+  width (`palette_collapsed`, `side_collapsed`). A run dropped over the side
+  panel goes back where it came from. The side panel shows the host's tabs in
+  the editor's order (`tab_order`, `active_tab`): new tabs open after the
+  active one, dragging a tab reorders it, and a closed active tab hands over
+  to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
+  a `Console` tab is monospace output over a line whose Enter sends
+  `EditorEvent::ConsoleInput`, never a shell. Feature `app`
   (off by default) adds eframe, rfd, and on macOS winit and muda, the window
   as a library (`app::run` with an `AppConfig`: name, language, program path,
-  `Menus`, an optional `Runner` and an optional window icon). Feature `cli`
+  `Menus`, an optional `Runner` and an optional window icon). With a runner,
+  an actions bar under the menus holds a `RunToolbar`: Play (⏵) and Stop
+  (⏹), drawn disabled where the runner does not `support` them; ▶ is not
+  in egui's default fonts. The runner's toggles are checkboxes at the bar's
+  right end, not saved; flipping one regenerates the open inspections. Feature `cli`
   adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
   [program]`). Its File/Edit menus (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
   macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere) are one `Command` list drawn as
@@ -80,7 +93,16 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
   column per category, instead of opening the window.
 - `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
-  blocks run in Steel when double-clicked (`cargo schemer [program.scmb]`,
+  blocks run in Steel when double-clicked. Play, or double-clicking the one
+  `program` block, runs the canvas as one file in a fresh session: every
+  `define` stack in reading order, then the program, into a Console tab
+  after `> block-schemer <file>` (`untitled.scmb` until saved), the command
+  that will one day do the same; loose expressions are scratch and left out.
+  Other double-clicks answer in a bubble and echo `> <expression>` and what
+  it said into the console. Code shown in the console or Inspect is as
+  entered, unless the "Schemer Harness" toggle (off by default) shows the
+  `__out` port that carries `display` to the console (`cargo schemer
+  [program.scmb]`,
   `documentation/05-block-schemer.md`). Its language is embedded; its
   `codegen` is the layer that refuses anything the language does not offer
   and escapes strings before Scheme sees them; Inspect shows the same code
@@ -110,8 +132,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   overlay's `bubbles`, which the editor places beside the block where they
   cover least (`documentation/02-bubbles.md`). Inspect in a block's context
   menu requests `EditorEvent::Inspect` with the same script, also in
-  read-only mode; the host answers in the overlay's `inspector` and opens
-  it. `app::run` asks the runner's `inspect`, else shows the AST. Commands and
+  read-only mode; the host answers in the overlay's `tabs` and sets
+  `active_tab`. `app::run` asks the runner's `inspect`, else shows the AST,
+  in one closable tab per block, refreshed by inspecting it again, beside
+  the runner's own tabs, which it asks for after each call to the runner. A
+  console the runner has just written to comes to the front, unless the run
+  also answered in a bubble. Commands and
   events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
@@ -153,9 +179,9 @@ call `block_parse_gui::snapshot::program`.
 
 ## Deferred
 
-- `RunToolbar`, `EditorOptions::toolbar`, and `Runner` dispatch beyond
-  `run_block`: `app::run` shows only the bubble a runner gives back at once,
-  not its highlights, breakpoints, annotations or later answers.
+- `EditorOptions::toolbar`, and `Runner` dispatch beyond `run_block` and
+  `start`: `app::run` shows only the bubbles and tabs a runner gives back at
+  once, not its highlights, breakpoints, annotations or later answers.
 - Other ways for the editor binary to choose a language than `--language`.
 - Native menus off macOS (muda can attach to a Windows window; on Linux
   it needs GTK, which winit does not use), and Cut/Copy/Paste items, whose
@@ -168,8 +194,11 @@ call `block_parse_gui::snapshot::program`.
   it takes drops only.
 - Inserting between list items, and closing holes
   (`documentation/03-variadic.md`).
-- Refreshing the inspector when the inspected blocks change; it keeps what
-  Inspect last gave back until the next Inspect, New or Open.
+- Refreshing an inspection when its blocks change; it keeps what Inspect
+  last gave back until the next Inspect of that block, New or Open.
+- Block Schemer's console: `read-line` fed from `ConsoleInput`, which needs
+  runs off the UI thread; Stop; what Play does with several `program`
+  blocks; a tab per run, if runs become concurrent.
 - A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
   driving an egui context menu headless needs the button's position.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a step limit
