@@ -30,7 +30,9 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 - `scheme`: the `Scheme` trait, `run(source) -> Answer { output, value }`,
   and `Steel`, its implementation on Steel's sandboxed engine. Definitions
   last for the session, as in a REPL. `display` writes to a string port
-  (`__out`), which is why names starting `__` are refused.
+  (`__out`), which is why names starting `__` are refused. A prelude evens
+  out where Steel differs from R7RS: its `=` takes exactly two arguments, so
+  `=` is redefined to take any number.
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run.
@@ -51,7 +53,6 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 
 ## Known gaps
 
-- Steel's `=` takes exactly two arguments, unlike R7RS.
 - A run happens on the UI thread with no step limit, so a loop that never
   ends freezes the window.
 - Steel will be replaced by a Scheme that runs in WASM, for a web version

@@ -19,6 +19,18 @@ pub struct Answer {
     pub value: String,
 }
 
+/// Where Steel differs from R7RS. Its own `=` takes exactly two arguments,
+/// so it is kept under a reserved name and `=` compares neighbors with it.
+/// Run one at a time: in one program, Steel would take the first `=` to mean
+/// the one being defined.
+const STEEL_PRELUDE: [&str; 2] = [
+    "(define __steel= =)",
+    "(define (= first . rest)
+       (let loop ((a first) (rest rest))
+         (or (null? rest)
+             (and (__steel= a (car rest)) (loop (car rest) (cdr rest))))))",
+];
+
 /// Steel's sandboxed engine, which loads no native libraries.
 pub struct Steel {
     engine: Engine,
@@ -27,6 +39,9 @@ pub struct Steel {
 impl Steel {
     pub fn new() -> Self {
         let mut engine = Engine::new_sandboxed();
+        for definition in STEEL_PRELUDE {
+            engine.run(definition).expect("the prelude runs");
+        }
         engine
             .run(format!("(define {OUTPUT_PORT} (open-output-string))"))
             .expect("Steel opens a string port");
@@ -77,5 +92,16 @@ mod tests {
         assert_eq!(answer, Answer { output: "n=".into(), value: "25".into() });
         assert_eq!(steel.run("(sq 2)").unwrap().output, "", "output does not carry over");
         assert!(steel.run("(car '())").is_err());
+    }
+
+    #[test]
+    fn equals_takes_any_number_of_operands() {
+        let mut steel = Steel::new();
+        let value = |steel: &mut Steel, source: &str| steel.run(source).unwrap().value;
+        assert_eq!(value(&mut steel, "(= 2 2 2)"), value(&mut steel, "#t"));
+        assert_eq!(value(&mut steel, "(= 2 2 3)"), value(&mut steel, "#f"));
+        assert_eq!(value(&mut steel, "(= 3 2 2)"), value(&mut steel, "#f"));
+        assert_eq!(value(&mut steel, "(= 1)"), value(&mut steel, "#t"));
+        assert_eq!(value(&mut steel, "(apply = (list 1 1))"), value(&mut steel, "#t"));
     }
 }
