@@ -152,7 +152,7 @@ pub fn hexagon(rect: Rect, head: f32) -> Vec<Pos2> {
     points
 }
 
-/// Clockwise from the top-left, y down, each corner a quarter circle of `radius`.
+/// Clockwise from the top-left, y down.
 pub fn rounded_rect(rect: Rect, radius: f32) -> Vec<Pos2> {
     const SEGMENTS: usize = 6;
     let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0).max(0.0);
@@ -172,8 +172,8 @@ pub fn rounded_rect(rect: Rect, radius: f32) -> Vec<Pos2> {
     points
 }
 
-/// A strip `width` wide just inside a clockwise outline, one quad per side,
-/// each with its outward normal. Mitered, so corners meet like a chamfer's.
+/// A mitered strip `width` wide inside a clockwise outline: one quad per side,
+/// with its outward normal.
 pub fn bevel(outline: &[Pos2], width: f32) -> Vec<(ConvexPiece, Vec2)> {
     let mut points: Vec<Pos2> = Vec::with_capacity(outline.len());
     for &point in outline {

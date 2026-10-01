@@ -42,7 +42,6 @@ impl Transform {
 }
 
 const ACCENT_WIDTH: f32 = 3.0;
-/// The chamfer around a block's face, lit from the top left.
 const BEVEL_WIDTH: f32 = 2.0;
 /// Under every accent, so it never depends on contrast with the block.
 const HALO_WIDTH: f32 = ACCENT_WIDTH + 2.5;
@@ -248,8 +247,7 @@ fn paint_block(
         Form::Reporter { shape, head, .. } => {
             let rect = t.rect(block.rect);
             let head = head * t.zoom;
-            // From points rather than `painter.rect`, which snaps to pixels
-            // and would leave the bevel off by a fraction.
+            // Not `painter.rect`: it snaps to pixels and the bevel would not.
             let points = reporter_outline(*shape, rect, head, t.zoom);
             painter.add(egui::Shape::convex_polygon(points.clone(), body, Stroke::NONE));
             bevel(&points);
@@ -339,8 +337,8 @@ fn hint(painter: &Painter, rect: Rect, text: &str, color: Color32, zoom: f32) {
     painter.text(rect.center(), Align2::CENTER_CENTER, text, font, color);
 }
 
-/// Each side shaded by how squarely it faces the light: full `light` facing up
-/// or left, full `dark` facing down or right, `base` on the diagonal between.
+/// Lit from the top left: sides facing up or left get all of `light`, down or
+/// right all of `dark`, the other diagonal stays `base`.
 fn bevel(painter: &Painter, outline: &[Pos2], width: f32, base: Color32, light: Color32, dark: Color32) {
     let toward_light = vec2(-1.0, -1.0);
     let mut mesh = Mesh::default();
