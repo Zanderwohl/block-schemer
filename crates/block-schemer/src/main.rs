@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use block_parse_gui::app::{self, AppConfig, Menus};
-use block_schemer::{SchemerRunner, Steel};
+use block_schemer::{Native, SchemerRunner, Steel};
 
 // eframe sets the Dock icon from this, over the app bundle's, so the Mac one
 // needs its rounded shape baked in.
@@ -18,7 +18,7 @@ fn main() -> ExitCode {
     let language = block_schemer::language();
     app::run(AppConfig {
         name: "Block Schemer".into(),
-        runner: Some(Box::new(SchemerRunner::new(language.clone(), Steel::new()))),
+        runner: Some(Box::new(SchemerRunner::new(language.clone(), Native::spawn(Steel::new)))),
         language,
         program,
         menus: Menus::Native,

@@ -5,6 +5,7 @@
 //! it for now; another interpreter only needs to implement [`Scheme`].
 
 pub mod codegen;
+pub mod dispatch;
 pub mod form;
 pub mod literals;
 pub mod runner;
@@ -12,6 +13,7 @@ pub mod scheme;
 
 use block_parse::{Language, Validators};
 
+pub use dispatch::{Dispatch, Native};
 pub use runner::SchemerRunner;
 pub use scheme::{Scheme, Steel};
 

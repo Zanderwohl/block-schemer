@@ -61,7 +61,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     panel tab; it gets the program, as `run_block` does) to `None`. `start`
     and `run_block` also get the program's path, `None` until saved. A
     runner may offer on/off `Toggle`s (`toggles`, `set_toggle`), its own
-    settings, which the host draws.
+    settings, which the host draws. A runner that works off the UI thread
+    answers later through `poll`, which the host calls every frame.
 - `crates/block-parse-gui` — egui component `BlockEditor`: the palette, the
   canvas and, right of it, the side panel, which starts collapsed. Dragging a
   panel's edge sets `EditorOptions::palette_width` or `side_width`, and a
@@ -78,9 +79,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `Menus`, an optional `Runner` and an optional window icon). With a runner,
   an actions bar under the menus holds a `RunToolbar`: Play (⏵) and Stop
   (⏹), drawn disabled where the runner does not `support` them; ▶ is not
-  in egui's default fonts. The runner's toggles are checkboxes at the bar's
-  right end, not saved; flipping one regenerates the open inspections. Feature `cli`
-  adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
+  in egui's default fonts. The buttons sit at the bar's right and the
+  runner's toggles at its left, as checkboxes that are not saved; flipping
+  one regenerates the open inspections. Feature `cli` adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
   [program]`). Its File/Edit menus (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
   macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere) are one `Command` list drawn as
   `Menus::Native` (the macOS menu bar through muda, with app and Window menus;
@@ -107,7 +108,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `codegen` is the layer that refuses anything the language does not offer
   and escapes strings before Scheme sees them; Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
-  behind the `Scheme` trait so a WASM Scheme can replace it.
+  behind the `Scheme` trait so a WASM Scheme can replace it. Every run goes
+  through a `dispatch::Dispatch`, which spawns, tracks and kills the workers
+  that run Scheme off the UI thread: `dispatch::native` is one thread owning
+  the session, replaced if it dies; Stop interrupts the run, drops the queue
+  and loses the session, as terminating a Web Worker would.
 - `documentation/` — design notes, numbered.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing), `strict_tiny.ron` (the same language with exact
@@ -135,10 +140,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   read-only mode; the host answers in the overlay's `tabs` and sets
   `active_tab`. `app::run` asks the runner's `inspect`, else shows the AST,
   in one closable tab per block, refreshed by inspecting it again, beside
-  the runner's own tabs, which it asks for after each call to the runner. A
-  console the runner has just written to comes to the front, unless the run
-  also answered in a bubble. Commands and
-  events go out either as a polled list in `EditorOutput` or through a
+  the runner's own tabs, which it asks for after each call to the runner and
+  each `poll` that took in answers, repainting while the runner is not idle.
+  A console a run or Play writes to as it is sent comes to the front,
+  unless that run answered in a bubble; later answers never bring it
+  forward. Commands and events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
 - A run in hand stays in the program until dropped, so the program is always
@@ -179,9 +185,9 @@ call `block_parse_gui::snapshot::program`.
 
 ## Deferred
 
-- `EditorOptions::toolbar`, and `Runner` dispatch beyond `run_block` and
-  `start`: `app::run` shows only the bubbles and tabs a runner gives back at
-  once, not its highlights, breakpoints, annotations or later answers.
+- `EditorOptions::toolbar`, and `Runner` dispatch beyond `run_block`,
+  `start` and `stop`: `app::run` shows only a runner's bubbles and tabs, not
+  its highlights, breakpoints or annotations.
 - Other ways for the editor binary to choose a language than `--language`.
 - Native menus off macOS (muda can attach to a Windows window; on Linux
   it needs GTK, which winit does not use), and Cut/Copy/Paste items, whose
@@ -201,18 +207,25 @@ call `block_parse_gui::snapshot::program`.
   (`documentation/03-variadic.md`).
 - Refreshing an inspection when its blocks change; it keeps what Inspect
   last gave back until the next Inspect of that block, New or Open.
-- Block Schemer's console: `read-line` fed from `ConsoleInput`, which needs
-  runs off the UI thread; Stop; what Play does with several `program`
-  blocks; a tab per run, if runs become concurrent.
+- Block Schemer's console: `read-line` fed from `ConsoleInput` to a worker
+  waiting on it; what Play does with several `program` blocks; a tab per
+  run, if runs become concurrent.
 - A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
   driving an egui context menu headless needs the button's position.
-- Tests of `app::run`'s tab bookkeeping (which console was written to,
-  bringing it forward only without a bubble, `refresh_inspections`,
-  `CloseTab` removing only inspections); it lives in `App`, which needs a
-  window. Moving it out, or a stub `Runner`, would make it testable.
-- Block Schemer: opening `.scm` files as blocks, auto-formatted; a step limit
-  or worker thread so a runaway run cannot freeze the window; a web build
-  once a WASM Scheme replaces Steel.
+- Tests of `app::run`'s tab and run bookkeeping (which console was written
+  to, bringing it forward only without a bubble, `refresh_inspections`,
+  `CloseTab` removing only inspections; an outline kept while a run is
+  pending, a late bubble only for a block still outlined, an outline with
+  no bubble dropped once the runner is idle); it lives in `App`, which
+  needs a window. Moving it out, or a stub `Runner`, would make it
+  testable.
+- `dispatch::native` replaces a dead worker inside `poll`, on the UI
+  thread: building Steel's prelude blocks a frame, and a `make` that panics
+  takes the UI down with it.
+- Block Schemer: opening `.scm` files as blocks, auto-formatted; a web build
+  once a WASM Scheme replaces Steel, with a Web Worker `Dispatch`. A native
+  run stuck outside Steel's safepoints cannot be interrupted; its worker
+  would have to be abandoned.
 
 ## Spelling
 

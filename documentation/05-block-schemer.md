@@ -83,7 +83,7 @@ said, to the console.
 What runs is not quite what was entered: `display` writes to the `__out`
 port so the console can show it. Code shown to the user, in Inspect and in
 the console's echo, leaves that out, unless the "Schemer Harness" checkbox
-at the right of the actions bar, a `Toggle` the runner offers, is on. It is
+at the left of the actions bar, a `Toggle` the runner offers, is on. It is
 off at launch and not saved. Flipping it regenerates open inspections; lines
 already in the console stay as they were written.
 Inspect on the `program` block shows the same file, pretty-printed. An error
@@ -103,10 +103,35 @@ from Steel does not say which definition it came from.
 | `let` | `(let (bindings…) body…)` |
 | `display` | `(display obj __out)`, shown as `(display obj)` unless the harness is |
 
+## Dispatch
+
+No run happens on the UI thread. The runner hands generated source to a
+`dispatch::Dispatch` and takes answers back in `Runner::poll`, which the app
+calls every frame:
+
+- Jobs run one at a time, in the order sent, in one session; a Play's job
+  asks for a fresh one first. Every job gets exactly one answer.
+- Stop ends the running job and drops the queued ones, each answering
+  "Stopped.", and the next job starts a fresh session. A Web Worker can only
+  be stopped by terminating it, so losing the session is the rule for every
+  implementation.
+- `dispatch::native` is one thread that builds and owns the Scheme, so the
+  Scheme need not be `Send`. Stop sets Steel's interrupt, through
+  `Scheme::interrupter`, which Steel checks as it runs: an endless loop of
+  calls stops within milliseconds. The interrupt stays set until the worker
+  clears it before the next job, so one that lands just before a run starts
+  still stops it. The worker remembers which stop its session dates from,
+  so a stop while idle also loses it. A worker that dies answers its queue
+  with an error and is replaced.
+
+While a job runs, Play is disabled and Stop enabled. A double-click's echo
+and answer reach the console together when it is answered; a Play's
+`> block-schemer` line goes there at once. Only the latest double-click's
+answer becomes a bubble; an earlier one still answering goes to the
+console alone.
+
 ## Known gaps
 
-- A run happens on the UI thread with no step limit, so a loop that never
-  ends freezes the window.
 - Steel will be replaced by a Scheme that runs in WASM, for a web version
   with no file system and a smaller library. Only `Scheme` needs a new
   implementation; the rest does not touch Steel.

@@ -5,6 +5,9 @@
 //! in reading order, then the program block's expression, run as one source
 //! in a fresh session. Steel refuses a name it has not yet seen within a run,
 //! so definitions run one at a time could not refer forward.
+//!
+//! Every run goes to a [`Dispatch`], so the UI never waits on one; answers
+//! come back through `poll`.
 
 use std::collections::HashMap;
 
@@ -12,12 +15,13 @@ use std::cmp::Ordering;
 use std::path::Path;
 
 use block_parse::ast::{Ast, Script};
-use block_parse::host::{Overlay, RunCommand, Runner, Tab, TabContent, TabId, Toggle};
+use block_parse::host::{Overlay, RunCommand, RunStatus, Runner, Tab, TabContent, TabId, Toggle};
 use block_parse::program::{Block, BlockId, Program};
 use block_parse::Language;
 
 use crate::codegen;
-use crate::scheme::{Answer, Scheme};
+use crate::dispatch::{Dispatch, Job, Ticket};
+use crate::scheme::Answer;
 
 /// Columns `inspect` lays code out to; its tab wraps anything wider.
 const INSPECT_WIDTH: usize = 48;
@@ -28,29 +32,34 @@ const DEFINITIONS: [&str; 2] = ["define", "define_procedure"];
 const PROGRAM: &str = "program";
 const HARNESS: &str = "harness";
 
-pub struct SchemerRunner<S> {
+pub struct SchemerRunner<D> {
     language: Language,
-    scheme: S,
+    dispatch: D,
+    pending: HashMap<Ticket, Pending>,
+    /// The latest double-click's; an earlier one's answer is not a bubble.
+    latest: Option<Ticket>,
     answers: HashMap<BlockId, String>,
     console: String,
     /// Show the `__out` port in echoed and inspected code.
     harness: bool,
 }
 
-impl<S: Scheme> SchemerRunner<S> {
-    pub fn new(language: Language, scheme: S) -> Self {
+enum Pending {
+    Evaluate { block: BlockId, echo: Option<String> },
+    Play,
+}
+
+impl<D: Dispatch> SchemerRunner<D> {
+    pub fn new(language: Language, dispatch: D) -> Self {
         Self {
             language,
-            scheme,
+            dispatch,
+            pending: HashMap::new(),
+            latest: None,
             answers: HashMap::new(),
             console: String::new(),
             harness: false,
         }
-    }
-
-    fn run(&mut self, script: &Script) -> Result<Answer, String> {
-        let source = codegen::script(&self.language, script).map_err(|problem| format!("Can't run: {problem}"))?;
-        self.scheme.run(&source)
     }
 
     /// Everything the console has shown, input echoed.
@@ -118,35 +127,56 @@ impl<S: Scheme> SchemerRunner<S> {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("untitled.{}", self.language.file.extension));
         self.write(&format!("> block-schemer {file}"));
-        let text = match self.file(program, codegen::script) {
+        match self.file(program, codegen::script) {
             Ok(parts) => {
-                self.scheme.reset();
-                self.scheme.run(&parts.join("\n")).map_or_else(|error| error, |answer| shown(&answer))
+                let ticket = self.dispatch.send(Job {
+                    source: parts.join("\n"),
+                    fresh: true,
+                });
+                self.pending.insert(ticket, Pending::Play);
             }
-            Err(why) => why,
-        };
-        self.write(&text);
+            Err(why) => self.write(&why),
+        }
     }
 
-    /// Echoes into the console; gives back the bubble's text.
-    fn evaluate(&mut self, script: &Script) -> String {
+    /// Echoed with its answer, so the echo and what it said stay together.
+    fn evaluate(&mut self, block: BlockId, script: &Script) {
         // Nothing to echo when even the reading form fails; the error follows.
-        if let Ok(echo) = codegen::flat(&self.language, script, self.harness)
-            && !echo.is_empty()
-        {
+        let echo = codegen::flat(&self.language, script, self.harness)
+            .ok()
+            .filter(|echo| !echo.is_empty());
+        match codegen::script(&self.language, script) {
+            Ok(source) => {
+                let ticket = self.dispatch.send(Job { source, fresh: false });
+                self.latest = Some(ticket);
+                self.pending.insert(ticket, Pending::Evaluate { block, echo });
+            }
+            Err(problem) => {
+                self.latest = None;
+                self.answer(block, echo, Err(format!("Can't run: {problem}")), true);
+            }
+        }
+    }
+
+    /// The console is a transcript, so it gets every answer; a bubble, only
+    /// the `latest`.
+    fn answer(&mut self, block: BlockId, echo: Option<String>, result: Result<Answer, String>, latest: bool) {
+        if let Some(echo) = echo {
             self.write(&format!("> {echo}"));
         }
-        let (said, bubble) = match self.run(script) {
+        let (said, bubble) = match result {
             Ok(answer) if answer == Answer::default() => (String::new(), "ok".into()),
             Ok(answer) => (shown(&answer), shown(&answer)),
             Err(error) => (error.clone(), error),
         };
         self.write(&said);
-        bubble
+        if latest {
+            self.answers.insert(block, bubble);
+        }
     }
 }
 
-impl<S: Scheme> Runner for SchemerRunner<S> {
+impl<D: Dispatch> Runner for SchemerRunner<D> {
     fn overlay(&self) -> Overlay {
         Overlay {
             bubbles: self.answers.clone(),
@@ -162,8 +192,35 @@ impl<S: Scheme> Runner for SchemerRunner<S> {
         }
     }
 
+    fn status(&self) -> RunStatus {
+        match self.dispatch.busy() {
+            true => RunStatus::Running,
+            false => RunStatus::Idle,
+        }
+    }
+
     fn supports(&self, command: RunCommand) -> bool {
-        command == RunCommand::Start
+        matches!(command, RunCommand::Start | RunCommand::Stop)
+    }
+
+    fn poll(&mut self) -> bool {
+        let answers = self.dispatch.poll();
+        let changed = !answers.is_empty();
+        for (ticket, result) in answers {
+            match self.pending.remove(&ticket) {
+                Some(Pending::Evaluate { block, echo }) => {
+                    let latest = self.latest == Some(ticket);
+                    self.answer(block, echo, result, latest);
+                }
+                Some(Pending::Play) => self.write(&result.map_or_else(|error| error, |answer| shown(&answer))),
+                None => {}
+            }
+        }
+        changed
+    }
+
+    fn stop(&mut self) {
+        self.dispatch.stop();
     }
 
     /// With several program blocks, which one is meant is not yet decided,
@@ -192,15 +249,13 @@ impl<S: Scheme> Runner for SchemerRunner<S> {
         self.write(&format!("{line}\n"));
     }
 
-    /// Only the latest answer is kept: the app shows it straight away and
-    /// dismisses it on the next edit or click. The program block plays.
+    /// The program block plays.
     fn run_block(&mut self, program: &Program, path: Option<&Path>, block: BlockId, script: &Script) {
         self.answers.clear();
         if is_program(program, block) {
             self.play(program, path);
         } else {
-            let bubble = self.evaluate(script);
-            self.answers.insert(block, bubble);
+            self.evaluate(block, script);
         }
     }
 
@@ -230,29 +285,49 @@ fn is_program(program: &Program, block: BlockId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::Steel;
+    use std::time::{Duration, Instant};
 
-    fn example() -> (Language, Program, SchemerRunner<Steel>) {
+    use super::*;
+    use crate::{Native, Steel};
+
+    type Tested = SchemerRunner<Native<Steel>>;
+
+    fn runner(language: &Language) -> Tested {
+        SchemerRunner::new(language.clone(), Native::spawn(Steel::new))
+    }
+
+    /// Polls until every run is answered.
+    fn settle(runner: &mut Tested) {
+        let start = Instant::now();
+        while runner.status() == RunStatus::Running {
+            assert!(start.elapsed() < Duration::from_secs(20), "still running");
+            runner.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn example() -> (Language, Program, Tested) {
         let language = crate::language();
         let program = Program::from_ron(include_str!("../examples/sum-of-squares.scmb")).unwrap();
         assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
-        let runner = SchemerRunner::new(language.clone(), Steel::new());
+        let runner = runner(&language);
         (language, program, runner)
     }
 
     /// Double-clicks `id`, and gives back its bubble and what the console gained.
-    fn double_click(runner: &mut SchemerRunner<Steel>, language: &Language, program: &Program, id: u64) -> (Option<String>, String) {
+    fn double_click(runner: &mut Tested, language: &Language, program: &Program, id: u64) -> (Option<String>, String) {
         let before = runner.console().len();
         let script = program.script_at(language, BlockId(id)).unwrap();
         runner.run_block(program, None, BlockId(id), &script);
+        settle(runner);
         let bubble = runner.overlay().bubbles.get(&BlockId(id)).cloned();
         (bubble, runner.console()[before..].to_owned())
     }
 
-    fn play(runner: &mut SchemerRunner<Steel>, language: &Language, program: &Program) -> String {
+    fn play(runner: &mut Tested, language: &Language, program: &Program) -> String {
         let before = runner.console().len();
         runner.start(program, None, &program.ast(language));
+        settle(runner);
         runner.console()[before..].to_owned()
     }
 
@@ -272,7 +347,7 @@ mod tests {
         assert!(bubble.unwrap().contains("before its definition"), "a reporter inside runs alone, outside its `let`");
         assert!(console.starts_with("> (* a a)\nError: "), "{console}");
 
-        let shown = |runner: &mut SchemerRunner<Steel>| {
+        let shown = |runner: &mut Tested| {
             let console = double_click(runner, &language, &program, 10).1;
             console.lines().next().unwrap().to_owned()
         };
@@ -297,6 +372,7 @@ mod tests {
         let before = runner.console().len();
         let path = Path::new("/somewhere/sums.scmb");
         runner.start(&program, Some(path), &program.ast(&language));
+        settle(&mut runner);
         assert_eq!(&runner.console()[before..], "> block-schemer sums.scmb\n14\n");
     }
 
@@ -383,5 +459,44 @@ mod tests {
         assert!(runner.inspect(&program, BlockId(10), &script).unwrap().contains(codegen::OUTPUT_PORT));
         assert!(runner.overlay().bubbles.is_empty());
         assert!(runner.console().is_empty());
+    }
+
+    #[test]
+    fn only_the_latest_double_click_answers_in_a_bubble() {
+        let (language, program, mut runner) = example();
+        for id in [10, 1] {
+            let script = program.script_at(&language, BlockId(id)).unwrap();
+            runner.run_block(&program, None, BlockId(id), &script);
+        }
+        settle(&mut runner);
+        let bubbles = runner.overlay().bubbles;
+        assert_eq!(bubbles.get(&BlockId(1)).map(String::as_str), Some("ok"));
+        assert!(!bubbles.contains_key(&BlockId(10)), "superseded before it answered");
+        assert!(runner.console().contains("hypotenuse squared:\n25\n"), "the transcript keeps it");
+    }
+
+    #[test]
+    fn a_run_answers_later_and_stop_ends_a_runaway_one() {
+        let language = crate::language();
+        let program = Program::from_ron(
+            r#"Program(language: "Block Schemer", version: 2, stacks: [
+                (pos: (0.0, 0.0), blocks: [(id: 1, opcode: "define_procedure",
+                    inputs: {"variable": (literal: "spin")},
+                    lists: {"body": [(block: (id: 2, opcode: "call", inputs: {"operator": (literal: "spin")}))]})]),
+                (pos: (0.0, 100.0), blocks: [(id: 3, opcode: "program",
+                    inputs: {"main": (block: (id: 4, opcode: "call", inputs: {"operator": (literal: "spin")}))})]),
+            ])"#,
+        )
+        .unwrap();
+        let mut runner = runner(&language);
+        runner.start(&program, None, &program.ast(&language));
+        assert_eq!(runner.console(), "> block-schemer untitled.scmb\n", "written at once, before the answer");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!runner.poll());
+        assert_eq!(runner.status(), RunStatus::Running);
+
+        runner.stop();
+        settle(&mut runner);
+        assert!(runner.console().ends_with("\nStopped.\n"), "{}", runner.console());
     }
 }
