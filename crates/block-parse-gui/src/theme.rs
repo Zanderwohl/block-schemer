@@ -21,6 +21,7 @@ pub struct Theme {
     pub selected: Color32,
     pub related: Color32,
     pub active: Color32,
+    pub dispatched: Color32,
     /// For `HighlightStyle::Custom`; an index past the end uses `selected`.
     pub custom: Vec<Color32>,
     pub error: Color32,
@@ -43,6 +44,7 @@ impl Default for Theme {
             selected: Color32::WHITE,
             related: Color32::from_rgb(0xf2, 0xc4, 0x3d),
             active: Color32::from_rgb(0x4a, 0xe0, 0x6a),
+            dispatched: Color32::from_rgb(0xff, 0xd8, 0x1a),
             custom: Vec::new(),
             error: Color32::from_rgb(0xe5, 0x48, 0x4d),
             warning: Color32::from_rgb(0xf5, 0xa5, 0x24),
@@ -58,6 +60,7 @@ impl Theme {
             HighlightStyle::Selected => self.selected,
             HighlightStyle::Related => self.related,
             HighlightStyle::Active => self.active,
+            HighlightStyle::Dispatched => self.dispatched,
             HighlightStyle::Custom(index) => self
                 .custom
                 .get(usize::from(index))

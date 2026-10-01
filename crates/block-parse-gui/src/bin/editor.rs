@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use block_parse::host::{Highlight, HighlightStyle, Overlay};
 use block_parse::language::Language;
 use block_parse::program::Program;
 use block_parse::Validators;
@@ -71,6 +72,8 @@ struct App {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     editor: BlockEditor,
+    /// With no backend, a run can only say so.
+    overlay: Overlay,
     dirty: bool,
     status: String,
     menu_bar: bool,
@@ -131,6 +134,7 @@ fn main() -> ExitCode {
         program,
         path: args.program,
         editor: BlockEditor::default(),
+        overlay: Overlay::default(),
         dirty: false,
         status,
         menu_bar: !args.no_menu_bar,
@@ -203,17 +207,30 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            let output = self.editor.show(ui, &self.language, &mut self.program);
+            let output = self.editor.show_with(ui, &self.language, &mut self.program, &self.overlay);
             if output.changed {
                 self.dirty = true;
+                self.dismiss_runs();
             }
             for event in output.events {
-                if let EditorEvent::OpenDocumentation { link, .. } = event {
-                    if link.starts_with("http://") || link.starts_with("https://") {
-                        ctx.open_url(egui::OpenUrl::new_tab(link));
-                    } else {
-                        self.status = format!("documentation: {link}");
+                match event {
+                    EditorEvent::OpenDocumentation { link, .. } => {
+                        if link.starts_with("http://") || link.starts_with("https://") {
+                            ctx.open_url(egui::OpenUrl::new_tab(link));
+                        } else {
+                            self.status = format!("documentation: {link}");
+                        }
                     }
+                    EditorEvent::BlockClicked(_) => self.dismiss_runs(),
+                    EditorEvent::Run { block, .. } => {
+                        self.overlay.bubbles.insert(block, "No backend configured.".to_owned());
+                        self.overlay.highlights.push(Highlight {
+                            block,
+                            style: HighlightStyle::Dispatched,
+                            label: None,
+                        });
+                    }
+                    _ => {}
                 }
             }
         });
@@ -425,6 +442,11 @@ impl App {
             dialog = dialog.set_directory(folder);
         }
         dialog
+    }
+
+    fn dismiss_runs(&mut self) {
+        self.overlay.bubbles.clear();
+        self.overlay.highlights.retain(|h| h.style != HighlightStyle::Dispatched);
     }
 
     fn display_name(&self) -> String {

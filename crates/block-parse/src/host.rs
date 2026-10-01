@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Ast, Severity};
+use crate::ast::{Ast, Script, Severity};
 use crate::program::{BlockId, Program};
 
 /// The consumer defines what each means; the editor only sends them.
@@ -47,6 +47,8 @@ pub struct Overlay {
     /// Shown on hovering a disabled switch on the canvas: why it is disabled,
     /// which only the host knows.
     pub switch_hint: Option<String>,
+    /// Speech bubbles, such as what running a block gave back.
+    pub bubbles: HashMap<BlockId, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,6 +67,9 @@ pub enum HighlightStyle {
     Related,
     /// Running or paused here, one per thread.
     Active,
+    /// Sent off by `EditorEvent::Run`, until the request is done with and
+    /// its bubble, if any, is gone.
+    Dispatched,
     /// An index into the theme's extra colors.
     Custom(u8),
 }
@@ -95,4 +100,8 @@ pub trait Runner {
 
     /// A request; the next `overlay` says what the runner decided.
     fn toggle_breakpoint(&mut self, block: BlockId);
+
+    /// Run one block: `script` is [`Program::script_at`] for it. Anything to
+    /// say back goes in the overlay's `bubbles`.
+    fn run_block(&mut self, program: &Program, block: BlockId, script: &Script);
 }

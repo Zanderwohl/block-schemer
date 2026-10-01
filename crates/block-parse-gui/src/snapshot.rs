@@ -19,20 +19,28 @@ const MARGIN: f32 = 24.0;
 /// egui-wgpu's device limit; a larger texture panics inside wgpu.
 const MAX_PIXELS: f32 = 8192.0;
 
-/// `program` cropped to its blocks, at `scale` pixels per canvas unit.
-pub fn program(language: &Language, program: &Program, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
-    render(language, theme, scale, |layout| layout.program(program))
+/// `program` cropped to its blocks, at `scale` pixels per canvas unit. The
+/// overlay's bubbles stay inside the margin where they fit.
+pub fn program(
+    language: &Language,
+    program: &Program,
+    overlay: &Overlay,
+    theme: &Theme,
+    scale: f32,
+) -> Result<RgbaImage, String> {
+    render(language, overlay, theme, scale, |layout| layout.program(program))
 }
 
 /// Every block in the language, laid out by [`Layout::grid`].
 pub fn grid(language: &Language, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
-    render(language, theme, scale, |layout| layout.program(&layout.grid()))
+    render(language, &Overlay::default(), theme, scale, |layout| layout.program(&layout.grid()))
 }
 
 /// Text is measured by the harness's own fonts, so the scene is laid out
 /// inside a frame and the harness resized to fit before the one that renders.
 fn render(
     language: &Language,
+    overlay: &Overlay,
     theme: &Theme,
     scale: f32,
     scene: impl Fn(&Layout) -> Scene,
@@ -53,20 +61,24 @@ fn render(
                 validate: true,
                 lifted: None,
             });
-            let bounds = if scene.blocks.is_empty() {
-                egui::Rect::ZERO
+            let painter = ctx.layer_painter(LayerId::background());
+            let (bounds, bubbles) = if scene.blocks.is_empty() {
+                (egui::Rect::ZERO, Vec::new())
             } else {
-                scene.bounds
+                let bubbles = paint::place_bubbles(&painter, &scene, 1.0, theme, overlay, scene.bounds.expand(MARGIN));
+                let bounds = bubbles.iter().fold(scene.bounds, |bounds, (bubble, _)| bounds.union(bubble.body));
+                (bounds, bubbles)
             };
             *size = bounds.size() + vec2(2.0, 2.0) * MARGIN;
             let t = Transform {
                 origin: (vec2(MARGIN, MARGIN) - bounds.min.to_vec2()).to_pos2(),
                 zoom: 1.0,
             };
-            let painter = ctx.layer_painter(LayerId::background());
             painter.rect_filled(ctx.content_rect(), 0.0, theme.canvas);
-            paint::scene(&painter, &scene, t, theme, false, &Overlay::default());
+            paint::scene(&painter, &scene, t, theme, false, overlay);
             paint::error_tags(&painter, &scene, t, theme);
+            paint::markers(&painter, &scene, t, theme, overlay);
+            paint::bubbles(&painter, bubbles, t, theme);
         },
         Vec2::ZERO,
     );
