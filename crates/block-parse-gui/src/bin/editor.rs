@@ -264,7 +264,7 @@ impl eframe::App for App {
 impl App {
     fn shortcuts(&mut self, ctx: &egui::Context) {
         // Shift variants first: a shortcut matches with extra Shift held.
-        // Taken before the editor draws, so a focused field's own undo never sees them.
+        // Before the editor draws, so a focused field's own undo never sees them.
         let (save_as, save, new, open, quit, redo, undo) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&SAVE_AS),

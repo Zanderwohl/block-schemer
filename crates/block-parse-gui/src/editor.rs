@@ -79,9 +79,8 @@ impl Default for EditorOptions {
 pub struct EditorOutput {
     /// Any AST the consumer holds is stale.
     pub changed: bool,
-    /// An undo step ends here: record the program in a
-    /// [`History`](block_parse::History). False while a literal is being
-    /// typed, so its keystrokes make one step when the field lets go.
+    /// Record the program in a [`History`](block_parse::History) now. Held
+    /// back while a literal is typed, so the entry is one step.
     pub settled: bool,
     /// Empty when shown with a `Runner`, which already received them.
     pub commands: Vec<RunCommand>,
@@ -1524,7 +1523,6 @@ mod tests {
         (language, program, id, ctx, editor, field)
     }
 
-    /// One frame, recording in `history` when it settles.
     fn recorded(
         ctx: &egui::Context,
         editor: &mut BlockEditor,

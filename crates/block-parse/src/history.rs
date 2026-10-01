@@ -4,8 +4,6 @@
 
 use crate::program::{Program, Stack};
 
-/// Starts at the program as opened and lives only in memory. Recording while
-/// undone drops everything after the cursor.
 #[derive(Debug, Clone)]
 pub struct History {
     /// Only stacks: restoring leaves the program's id counter alone, so an
@@ -26,9 +24,8 @@ impl History {
         }
     }
 
-    /// Ends a step at `program`. Nothing happens if it matches the current
-    /// state, so a change that came to nothing keeps the redo line. True if a
-    /// step was added.
+    /// A `program` matching the current state is not a step, so the redo line
+    /// survives it. True if a step was added.
     pub fn record(&mut self, program: &Program) -> bool {
         if !self.is_pending(program) {
             return false;
@@ -74,14 +71,12 @@ impl History {
         true
     }
 
-    /// `program` has just been written to disk.
     pub fn mark_saved(&mut self, program: &Program) {
         self.record(program);
         self.saved = Some(self.cursor);
     }
 
-    /// True if `program` matches what was last written, as after undoing back
-    /// to it.
+    /// True if `program` matches what was last written.
     pub fn is_saved(&self, program: &Program) -> bool {
         self.saved == Some(self.cursor) && !self.is_pending(program)
     }
