@@ -83,7 +83,9 @@ about 10% margin, follow each `-resize` in the loop with
 
 ## Where they go
 
-- **The running window:** `main` embeds `icon-512.png` and passes it as
+- **The running window:** `main` embeds `icon-512.png` (on macOS, the
+  iconset's rounded `icon_512x512.png`, since eframe's icon replaces the
+  bundle's in the Dock) and passes it as
   `AppConfig::icon`. eframe shows it in the taskbar, the title bar or the
   Dock while the app runs.
 - **The Windows executable:** `build.rs` embeds `block-schemer.ico` with

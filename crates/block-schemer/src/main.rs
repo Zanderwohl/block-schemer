@@ -6,6 +6,11 @@ use std::process::ExitCode;
 use block_parse_gui::app::{self, AppConfig};
 use block_schemer::{SchemerRunner, Steel};
 
+// eframe sets the Dock icon from this, over the app bundle's, so the Mac one
+// needs its rounded shape baked in.
+#[cfg(target_os = "macos")]
+const ICON: &[u8] = include_bytes!("../assets/icons/block-schemer.iconset/icon_512x512.png");
+#[cfg(not(target_os = "macos"))]
 const ICON: &[u8] = include_bytes!("../assets/icons/icon-512.png");
 
 fn main() -> ExitCode {
