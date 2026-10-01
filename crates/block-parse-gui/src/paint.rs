@@ -2,13 +2,15 @@
 //! through a [`Transform`] here, fonts included.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use block_parse::host::{Highlight, Overlay};
 use block_parse::language::{LiteralKind, Shape};
 use block_parse::program::BlockId;
 use egui::epaint::Mesh;
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 
+use crate::bubble::{self, Bubble};
 use crate::interact::SnapMark;
 use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
@@ -119,6 +121,49 @@ fn tag(painter: &Painter, left_center: Pos2, text: &str, fill: Color32, ink: Col
     let rect = Rect::from_min_size(left_center - vec2(0.0, size.y / 2.0), size);
     painter.rect_filled(rect, radius(3.0 * zoom), fill);
     painter.galley(rect.min + vec2(4.0, 2.0) * zoom, galley, ink);
+}
+
+const BUBBLE_SIZE: f32 = 13.0;
+/// Canvas units; longer text wraps.
+const BUBBLE_WRAP: f32 = 220.0;
+const BUBBLE_SHADOW: f32 = 2.0;
+
+/// In canvas units, each kept off earlier ones. Text is laid out at `zoom`.
+pub fn place_bubbles(
+    painter: &Painter,
+    scene: &Scene,
+    zoom: f32,
+    theme: &Theme,
+    overlay: &Overlay,
+    visible: Rect,
+) -> Vec<(Bubble, Arc<Galley>)> {
+    let mut obstacles: Vec<Rect> = scene.blocks.iter().flat_map(|block| block.hit.iter().copied()).collect();
+    let mut placed = Vec::new();
+    for block in &scene.blocks {
+        let Some(text) = overlay.bubbles.get(&block.id) else {
+            continue;
+        };
+        let font = FontId::proportional(BUBBLE_SIZE * zoom);
+        let galley = painter.layout(text.clone(), font, theme.literal_ink, BUBBLE_WRAP * zoom);
+        let size = galley.size() / zoom + 2.0 * bubble::PADDING;
+        let head = block.hit.first().copied().unwrap_or(block.rect);
+        let bubble = bubble::place(head, block.rect, size, &obstacles, visible);
+        obstacles.push(bubble.body);
+        placed.push((bubble, galley));
+    }
+    placed
+}
+
+/// Bubbles from [`place_bubbles`] at the same zoom.
+pub fn bubbles(painter: &Painter, placed: Vec<(Bubble, Arc<Galley>)>, t: Transform, theme: &Theme) {
+    for (bubble, galley) in placed {
+        let shadow = bubble.translate(vec2(0.0, BUBBLE_SHADOW));
+        fill_pieces(painter, shadow.fill().into_iter().map(|piece| t.points(piece)), theme.halo);
+        fill_pieces(painter, bubble.fill().into_iter().map(|piece| t.points(piece)), theme.literal_fill);
+        let edge = Stroke::new(t.zoom.max(1.0), theme.halo);
+        painter.add(egui::Shape::closed_line(t.points(bubble.outline()), edge));
+        painter.galley(t.pos(bubble.body.min + bubble::PADDING), galley, theme.literal_ink);
+    }
 }
 
 pub fn error_tags(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme) {

@@ -34,9 +34,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
     parsed in `recovered`. Only unreadable RON is fatal. A stack of one
     reporter is a loose expression, not a problem; warnings (unknown inputs
-    and branches) leave `is_clean` true.
+    and branches) leave `is_clean` true. `Program::script_at` builds the same
+    for what running one block covers.
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
-    switch states),
+    switch states, speech bubbles),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
@@ -49,6 +50,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `--command snapshot` (`cargo snapshot -l <language> <out.png>`) writes
   `Layout::grid`, every block in a column per category, instead of opening
   the window.
+- `documentation/` — design notes, numbered.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing) and `strict_tiny.ron` (the same language with exact
   types and explicit conversions).
@@ -58,13 +60,18 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `BlockId` is the only handle the outside world has on a block: AST nodes,
   problems, breakpoints and pauses all use it.
 - The editor runs nothing and stores no host state. Breakpoints, highlights
-  (semantic styles the theme colors; pauses are `Active`), annotations and
+  (semantic styles the theme colors; pauses are `Active`, runs awaiting
+  or showing an answer `Dispatched`), annotations and
   muted blocks and switch states come from the host each frame as an
   `Overlay`. A block with `switch: true` shows a checkbox whose state is the
   host's, never saved; clicking requests `EditorEvent::Switched`, even in
   read-only mode, and a switch with no state is drawn disabled; pressing
   one does nothing rather than grabbing its block, and hovering one shows
-  the host's `switch_hint`, if it gives one. Commands and
+  the host's `switch_hint`, if it gives one. A second click on the same
+  block within the double-click delay requests `EditorEvent::Run` with
+  `script_at` that block, even in read-only mode; the host answers in the
+  overlay's `bubbles`, which the editor places beside the block where they
+  cover least (`documentation/02-bubbles.md`). Commands and
   events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.

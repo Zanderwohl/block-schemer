@@ -26,6 +26,20 @@ impl Program {
                 .collect(),
         }
     }
+
+    /// What running from `id` covers, as a script of its own: the block and
+    /// those below it (a hat's whole script), or a lone expression for a
+    /// reporter, even one in a slot.
+    pub fn script_at(&self, language: &Language, id: BlockId) -> Option<Script> {
+        let run = self.run_at(id)?;
+        let mut builder = Builder {
+            language,
+            seen: HashSet::new(),
+        };
+        Some(Script {
+            body: builder.stack(&run.blocks),
+        })
+    }
 }
 
 struct Builder<'a> {
@@ -488,6 +502,25 @@ mod tests {
         let mut scratch = Program::new(&language);
         let ast = one_stack(vec![block(&mut scratch, &language, "add")]).ast(&language);
         assert!(ast.is_clean());
+    }
+
+    #[test]
+    fn a_script_at_a_block_runs_from_it_and_a_plugged_reporter_alone() {
+        let language = language();
+        let mut scratch = Program::new(&language);
+        let go = block(&mut scratch, &language, "go");
+        let mut wait = block(&mut scratch, &language, "wait");
+        let add = block(&mut scratch, &language, "add");
+        let (go_id, wait_id, add_id) = (go.id, wait.id, add.id);
+        plug(&mut wait, "s", add);
+        let program = one_stack(vec![go, wait, block(&mut scratch, &language, "end")]);
+
+        assert_eq!(program.script_at(&language, go_id).unwrap(), program.ast(&language).scripts[0]);
+        let from_wait = program.script_at(&language, wait_id).unwrap();
+        assert_eq!(from_wait.body.len(), 2);
+        let reporter = program.script_at(&language, add_id).unwrap();
+        assert!(matches!(&reporter.body[..], [Stmt::Node(node)] if node.id == add_id));
+        assert!(program.script_at(&language, BlockId(999)).is_none());
     }
 
     #[test]

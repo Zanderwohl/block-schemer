@@ -1,3 +1,4 @@
+use block_parse::ast::Script;
 use block_parse::host::{Overlay, RunCommand};
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, LiteralKind};
@@ -39,6 +40,9 @@ pub struct BlockEditor {
     swatches: Option<(SwatchKey, Swatches)>,
     /// The block the context menu was opened on.
     menu: Option<BlockId>,
+    /// A first click awaiting its second; any other press clears it. egui's
+    /// own double-click becomes a triple when it follows another closely.
+    last_click: Option<(BlockId, f64)>,
     id: egui::Id,
 }
 
@@ -86,6 +90,10 @@ pub enum EditorEvent {
     ToggleBreakpoint(BlockId),
     /// Clicked, not dragged.
     BlockClicked(BlockId),
+    /// Double-clicked: a request to run `script`, [`Program::script_at`] the
+    /// block. Sent in read-only mode too. Anything the host has to say back
+    /// goes in its `Overlay::bubbles`.
+    Run { block: BlockId, script: Script },
     /// The user asked for a block's `documentation`. The editor never opens
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
@@ -103,6 +111,8 @@ impl Default for BlockEditor {
 struct PointerInput {
     at: Option<Pos2>,
     pressed: bool,
+    time: f64,
+    double_click_delay: f64,
     down: bool,
     secondary: bool,
     delta: Vec2,
@@ -122,6 +132,7 @@ impl BlockEditor {
             palette_scroll: 0.0,
             swatches: None,
             menu: None,
+            last_click: None,
             id: egui::Id::new(id),
         }
     }
@@ -177,9 +188,12 @@ impl BlockEditor {
         let palette_rect = Rect::from_min_size(bounds.min, vec2(palette_width, bounds.height()));
         let canvas_rect = Rect::from_min_max(pos2(palette_rect.max.x, bounds.min.y), bounds.max);
 
+        let double_click_delay = ctx.options(|o| o.input_options.max_double_click_delay);
         let input = ctx.input(|i| PointerInput {
             at: i.pointer.hover_pos(),
             pressed: i.pointer.primary_pressed(),
+            time: i.time,
+            double_click_delay,
             down: i.pointer.primary_down(),
             secondary: i.pointer.secondary_pressed(),
             delta: i.pointer.delta(),
@@ -226,10 +240,11 @@ impl BlockEditor {
             let Gesture::Pressed(press) = std::mem::take(&mut self.gesture) else {
                 unreachable!()
             };
+            self.last_click = None;
             self.gesture = self.start_drag(press, language, program, t);
         }
         // A drop now would edit a program the host has locked.
-        if read_only {
+        if read_only && self.is_dragging() {
             self.cancel_drag();
         }
         layout.lifted = self.lifted();
@@ -256,6 +271,17 @@ impl BlockEditor {
             Gesture::Idle => {
                 if let Some(at) = over.filter(|_| input.pressed) {
                     self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
+                    // Only an uninterrupted pair of clicks on one block runs it.
+                    let same = match &self.gesture {
+                        Gesture::Pressed(Press {
+                            on: Pressed::Block { id, .. },
+                            ..
+                        }) => self.last_click.is_some_and(|(last, _)| last == *id),
+                        _ => false,
+                    };
+                    if !same {
+                        self.last_click = None;
+                    }
                 }
             }
             Gesture::Pressed(press) => {
@@ -263,6 +289,15 @@ impl BlockEditor {
                     self.gesture = Gesture::Pressed(press);
                 } else if let Pressed::Block { id, .. } = press.on {
                     output.events.push(EditorEvent::BlockClicked(id));
+                    let second = self
+                        .last_click
+                        .take()
+                        .is_some_and(|(last, at)| last == id && input.time - at <= input.double_click_delay);
+                    if !second {
+                        self.last_click = Some((id, input.time));
+                    } else if let Some(script) = program.script_at(language, id) {
+                        output.events.push(EditorEvent::Run { block: id, script });
+                    }
                 }
             }
             Gesture::Panning => {
@@ -370,6 +405,10 @@ impl BlockEditor {
                 }
             }
         }
+        // Over the fields on this layer; under the menu and run in hand on theirs.
+        let visible = Rect::from_min_max(t.canvas(canvas_rect.min), t.canvas(canvas_rect.max));
+        let bubbles = paint::place_bubbles(fields.painter(), &scene, t.zoom, &theme, overlay, visible);
+        paint::bubbles(fields.painter(), bubbles, t, &theme);
         if self.settle_edit(&ctx, language, program) {
             output.changed = true;
         }
@@ -1261,6 +1300,100 @@ mod tests {
         let mut live = hinted.clone();
         live.switches.insert(codon, true);
         assert!(!hover(switch, &live), "a live switch needs no excuse");
+    }
+
+    /// What a fresh read-only editor sends for clicks at `(point, time)`.
+    fn clicks(
+        ctx: &egui::Context,
+        language: &Language,
+        program: &mut Program,
+        clicks: &[(Pos2, f64)],
+    ) -> Vec<EditorEvent> {
+        let mut editor = codon_editor();
+        editor.options.read_only = true;
+        let mut events = Vec::new();
+        for &(at, time) in clicks {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            for input in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                    time: Some(time),
+                    events: input,
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    events.extend(editor.show_with(ui, language, program, &Overlay::default()).events);
+                });
+                out.textures_delta.clear();
+            }
+        }
+        events
+    }
+
+    fn runs(events: &[EditorEvent]) -> Vec<(BlockId, usize)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EditorEvent::Run { block, script } => Some((*block, script.body.len())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_second_quick_click_on_the_same_block_runs_it_and_nothing_else_does() {
+        let (language, mut program, ctx, _, label) = codon_on_canvas();
+        let codon = program.stacks[0].blocks[0].id;
+        let other = program.instantiate(&language, "start").unwrap();
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 100.0],
+            blocks: vec![other],
+        });
+        let below = label + vec2(0.0, 100.0);
+        let empty = label + vec2(400.0, 300.0);
+        // One context throughout, whose clock cannot go back.
+        let mut start = 0.0;
+        let mut run = |sequence: &[(Pos2, f64)]| {
+            start += 10.0;
+            let sequence: Vec<_> = sequence.iter().map(|&(at, time)| (at, start + time)).collect();
+            runs(&clicks(&ctx, &language, &mut program, &sequence))
+        };
+
+        assert_eq!(run(&[(label, 1.0)]), vec![]);
+        assert_eq!(run(&[(label, 1.0), (label, 1.1)]), vec![(codon, 1)]);
+        assert_eq!(run(&[(label, 1.0), (label, 2.0)]), vec![], "too slow");
+        assert_eq!(run(&[(label, 1.0), (below, 1.1)]), vec![], "two blocks");
+        assert_eq!(run(&[(label, 1.0), (empty, 1.05), (label, 1.1)]), vec![], "interrupted");
+        assert_eq!(
+            run(&[(label, 1.0), (label, 1.1), (label, 1.2)]),
+            vec![(codon, 1)],
+            "a third click starts a new pair"
+        );
+    }
+
+    #[test]
+    fn a_read_only_canvas_still_pans() {
+        let (language, mut program, ctx, _, label) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.read_only = true;
+        let before = editor.view.pan;
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), label + vec2(400.0, 300.0));
+        assert_ne!(editor.view.pan, before);
+    }
+
+    #[test]
+    fn the_hosts_bubbles_are_drawn() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut overlay = Overlay::default();
+        overlay.bubbles.insert(program.stacks[0].blocks[0].id, "ran fine".into());
+        let mut editor = codon_editor();
+        let texts = frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        assert!(texts.iter().any(|text| text == "ran fine"), "{texts:?}");
     }
 
     /// A block with a choice of "red", "green" and "blue" at the canvas origin,
