@@ -81,8 +81,11 @@ pub enum Form {
     Stack(StackForm),
     Reporter {
         shape: Shape,
-        /// The first row's height, which sizes the ends however many rows follow.
+        /// Sizes the ends however many rows follow: the first row's height,
+        /// up to `MAX_END`.
         head: f32,
+        /// The first row's center, from the top; markers point at it.
+        first_row: f32,
     },
 }
 
@@ -430,14 +433,20 @@ impl Layout<'_> {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
             (inner + 6.0).max(REPORTER_HEIGHT)
         };
+        let first = rows.first().map_or(REPORTER_HEIGHT, |row| height_of(row));
         // Capped so a row holding a tall block keeps modest ends.
-        let head = rows.first().map_or(REPORTER_HEIGHT, |row| height_of(row)).min(MAX_END);
+        let head = first.min(MAX_END);
         let padding = match shape {
             Shape::Round => (head * 0.4).max(ROW_PADDING),
             Shape::Hexagon => head * 0.5 + 2.0,
             Shape::Square => 8.0,
         };
-        let mut laid = Laid::new(block.id, Form::Reporter { shape, head }, swatch);
+        let form = Form::Reporter {
+            shape,
+            head,
+            first_row: first / 2.0,
+        };
+        let mut laid = Laid::new(block.id, form, swatch);
         let (mut y, mut width) = (0.0_f32, head);
         for (index, row) in rows.into_iter().enumerate() {
             let height = height_of(&row);
@@ -898,7 +907,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
                 hit,
             )
         }
-        Form::Reporter { shape, head } => (Form::Reporter { shape: *shape, head: *head }, vec![rect]),
+        Form::Reporter { .. } => (laid.form.clone(), vec![rect]),
     };
 
     let index = scene.blocks.len();
@@ -1199,6 +1208,21 @@ mod tests {
         assert!(rows.iter().all(|row| row.min.x == rows[0].min.x && row.min.y > head));
         assert!(rows[0].min.x > block.labels[0].at.x, "indented");
         assert!(matches!(block.form, Form::Reporter { head, .. } if head < block.rect.height()));
+    }
+
+    #[test]
+    fn markers_point_at_a_tall_first_row_not_its_capped_ends() {
+        let language = scheme();
+        let (mut program, ids) = with_stack(&language, &["map"]);
+        let lambda = program.instantiate(&language, "lambda").unwrap();
+        let map = program.find_mut(ids[0]).unwrap();
+        map.inputs.get_mut("procedure").unwrap().block = Some(Box::new(lambda));
+        let scene = scene_of(&language, &program);
+        let map = placed(&scene, ids[0]);
+        let Form::Reporter { head, first_row, .. } = map.form else { panic!() };
+        assert_eq!(head, MAX_END);
+        assert_eq!(first_row, map.rect.height() / 2.0, "one row, so its center");
+        assert!(first_row > head / 2.0);
     }
 
     #[test]

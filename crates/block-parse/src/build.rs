@@ -485,10 +485,6 @@ mod tests {
         program
     }
 
-    fn items(inputs: Vec<Input>) -> Vec<Input> {
-        inputs
-    }
-
     fn literal(text: &str) -> Input {
         Input {
             literal: Some(text.into()),
@@ -512,7 +508,7 @@ mod tests {
         let sum_id = sum.id;
         sum.lists.insert(
             "xs".into(),
-            items(vec![literal("1.5"), Input::default(), reporter(inner), literal("x")]),
+            vec![literal("1.5"), Input::default(), reporter(inner), literal("x")],
         );
         let mut say = block(&mut scratch, &language, "say");
         plug(&mut say, "text", sum);
@@ -550,7 +546,7 @@ mod tests {
         let mut scratch = Program::new(&language);
         let mut all = block(&mut scratch, &language, "all");
         let yes = block(&mut scratch, &language, "yes");
-        all.lists.insert("old".into(), items(vec![reporter(yes)]));
+        all.lists.insert("old".into(), vec![reporter(yes)]);
         all.inputs.insert("cs".into(), literal("true"));
 
         let ast = one_stack(vec![all]).ast(&language);

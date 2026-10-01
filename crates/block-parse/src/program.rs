@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::edit::Location;
 use crate::language::{Language, Part, ron_options};
 
-pub const FORMAT_VERSION: u32 = 1;
+/// 2 added list inputs.
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
@@ -14,10 +15,10 @@ pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DEPTH: usize = 120;
 
 /// RON's recursion limit for program loads. Measured: a level of nesting
-/// costs RON 6 through a branch and 7 through an input, plus about 8 for the
-/// file around it, so its default of 128 stops loads near depth 17. Only a
-/// file nested past this is a fatal syntax error.
-pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 7 + 16;
+/// costs RON 6 through a branch, 7 through an input and 9 through a list
+/// item, plus about 8 for the file around it, so its default of 128 stops
+/// loads near depth 13. Only a file nested past this is a fatal syntax error.
+pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 9 + 16;
 
 /// Only stack positions are stored; block positions are derived, so a language
 /// whose labels change width re-flows old files instead of overlapping them.
@@ -295,14 +296,15 @@ impl Program {
             block.inputs.entry(slot.input.clone()).or_default().literal = Some(text);
             return true;
         };
-        let items = block.lists.entry(slot.input.clone()).or_default();
-        if index > items.len() {
+        let len = block.lists.get(&slot.input).map_or(0, Vec::len);
+        if index > len {
             return false;
         }
-        if index == items.len() {
-            if text.is_empty() {
-                return true;
-            }
+        if index == len && text.is_empty() {
+            return true;
+        }
+        let items = block.lists.entry(slot.input.clone()).or_default();
+        if index == len {
             items.push(Input::default());
         }
         items[index].literal = (!text.is_empty()).then_some(text);
@@ -324,6 +326,9 @@ impl Block {
         match slot.item {
             None => Some(self.inputs.entry(slot.input.clone()).or_default()),
             Some(index) => {
+                if index > self.lists.get(&slot.input).map_or(0, Vec::len) {
+                    return None;
+                }
                 let items = self.lists.entry(slot.input.clone()).or_default();
                 if index == items.len() {
                     items.push(Input::default());
@@ -343,12 +348,15 @@ impl Block {
         items.len() - items.iter().rev().take_while(|input| empty(input)).count()
     }
 
+    /// Drops trailing holes, and lists left empty, which a fresh block has
+    /// none of.
     pub(crate) fn trim_lists(&mut self) {
         for items in self.lists.values_mut() {
             while items.last().is_some_and(Input::is_hole) {
                 items.pop();
             }
         }
+        self.lists.retain(|_, items| !items.is_empty());
     }
 
     fn trim_all(&mut self) {

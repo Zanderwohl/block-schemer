@@ -15,8 +15,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     and `{args:datum*}` (or `+`, at least one) a list of inputs. A block's
     `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
     later ones and later lists' items on indented rows of their own
-    (`documentation/03-variadic.md`). A blank slot shows its input's name in
-    gray, or the block's `hints` text for it; a list's empty slot shows it
+    (`documentation/03-variadic.md`). A blank slot shows its input's name as a
+    faded hint, or the block's `hints` text for it; a list's empty slot shows it
     with `…`. A `Slot` addresses an input, or a list item by index; the
     index one past the last item appends.
     `file.extension` names the language's program files (RON inside,
@@ -95,7 +95,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   spaces; names used in specs also exclude `{ } [ ] : = * +`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
   problems and attaching checks the combined depth. Program loads raise RON's
-  recursion limit to `RON_RECURSION_LIMIT` (RON spends 6–7 levels per block);
+  recursion limit to `RON_RECURSION_LIMIT` (RON spends 6–9 levels per block);
   only nesting past that is a fatal syntax error.
 - The editor never opens documentation links; it emits
   `EditorEvent::OpenDocumentation`. Untrusted language files are the user's
@@ -126,6 +126,10 @@ call `block_parse_gui::snapshot::program`.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice
   menus; Escape closes one.
+- Ticking or choosing into a `Bool` or `Choice` list's empty slot to append;
+  it takes drops only.
+- Inserting between list items, and closing holes
+  (`documentation/03-variadic.md`).
 
 ## Spelling
 

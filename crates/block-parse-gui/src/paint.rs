@@ -110,7 +110,7 @@ fn first_row_center(block: &PlacedBlock) -> f32 {
             Some(Section::Row { top, bottom } | Section::Branch { top, bottom }) => (top + bottom) / 2.0,
             None => block.rect.center().y,
         },
-        Form::Reporter { head, .. } => block.rect.min.y + head / 2.0,
+        Form::Reporter { first_row, .. } => block.rect.min.y + first_row,
     }
 }
 
@@ -239,7 +239,7 @@ fn paint_block(
                 }
             }
         }
-        Form::Reporter { shape, head } => {
+        Form::Reporter { shape, head, .. } => {
             let rect = t.rect(block.rect);
             let head = head * t.zoom;
             fill(painter, *shape, rect, head, body, edge, t.zoom);

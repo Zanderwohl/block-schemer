@@ -734,6 +734,8 @@ mod tests {
         assert_eq!(items(&program, ids[0], "args"), ["_", "2"]);
         program.set_literal(ids[0], &item(1), "".into());
         assert!(items(&program, ids[0], "args").is_empty());
+        let fresh = program.instantiate(&language, "add").unwrap();
+        assert_eq!(program.find(ids[0]).unwrap().lists, fresh.lists, "no empty list is left behind");
     }
 
     #[test]
@@ -863,6 +865,27 @@ mod tests {
 
         let next = program.fresh_id();
         assert!(next.0 > ids[1].0, "{next:?} reuses {:?}", ids[1]);
+    }
+
+    #[test]
+    fn programs_nested_to_the_limit_through_list_items_load() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["list"]);
+        let mut innermost = ids[0];
+        for _ in 1..MAX_DEPTH {
+            let inner = fresh(&mut program, &language, "list");
+            let id = inner.blocks[0].id;
+            let target = Target::Input {
+                parent: innermost,
+                slot: Slot::item("items", 0),
+            };
+            program.attach(&language, inner, target).unwrap();
+            innermost = id;
+        }
+        assert_eq!(program.depth_of(innermost), Some(MAX_DEPTH));
+        let back = Program::from_ron(&program.to_ron()).unwrap();
+        assert_eq!(back.depth_of(innermost), Some(MAX_DEPTH));
     }
 
     #[test]

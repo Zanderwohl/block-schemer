@@ -133,7 +133,7 @@ does not swell into a huge pill.
 
 ## Hints
 
-A blank slot shows a hint in gray: the input's name, or free text from the
+A blank slot shows a hint: the input's name, or free text from the
 block's `hints`, keyed by input or list name:
 
 ```ron
@@ -141,7 +141,10 @@ block's `hints`, keyed by input or list name:
 ```
 
 A slot is blank when it holds no reporter and, for a typed literal, no text;
-checkboxes and choices are never blank. Every hole in a list shows the list's
+checkboxes and choices are never blank. A literal's field shows it in the
+theme's gray `placeholder`; a slot that takes only reporters, drawn in the
+block's shadow, shows it in a faded tint of the block's ink, which gray would
+not stand out from. Every hole in a list shows the list's
 hint, and its empty slot shows it followed by `…`, drawn as an outline in the
 type's shape. A blank slot is sized to fit its hint, so it does not shrink to
 nothing. The hint is painted under a live field rather than as egui's hint
@@ -153,6 +156,9 @@ text, which forces its own color.
 
 ## Deferred
 
+- **Ticking or choosing to append.** A `Bool` or `Choice` list's empty slot
+  takes drops only; it would show the checkbox or menu in its blank state, and
+  changing it would append.
 - **Closing holes.** Dragging the last thing out of an item, or clearing its
   field, would remove the item and close the gap rather than leave a hole.
   Waits on inserting between items, so that a gap can be closed without
