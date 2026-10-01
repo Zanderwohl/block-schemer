@@ -22,11 +22,20 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   editor shows text they refuse as a problem, and the code generator emits
   text they accept as typed.
 - `codegen`: AST to Scheme text, the layer between untrusted blocks and the
-  interpreter. A script with any error-level problem is not generated. Only
+  interpreter. `script`, what runs, refuses a script with any error-level
+  problem. `pretty`, for Inspect and never run, writes each missing or
+  faulty input as its name in angle brackets (`<test>`), a faulty block as
+  far as it parsed, and leaves out a statement with nothing to recover. Only
   opcodes in the language reach it, so offering a user fewer blocks, such as
   a smaller language file for non-admins, limits what they can run. The text
   of a `string` block is escaped here; control characters other than
   newline, tab and return are refused.
+- `form`: generated code as a tree of atoms and lists, printed on one line
+  to run or laid out to read. Forms that fit stay on one line; `define`,
+  `lambda`, `let` and the like keep their first argument on the head's line
+  and indent their body two, one body form to a line when there are several;
+  other calls line their arguments up under the first, or indent two under
+  a name longer than ten characters.
 - `scheme`: the `Scheme` trait, `run(source) -> Answer { output, value }`,
   and `Steel`, its implementation on Steel's sandboxed engine. Definitions
   last for the session, as in a REPL. `display` writes to a string port
@@ -35,7 +44,8 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   `=` is redefined to take any number.
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
-  the reason it could not run.
+  the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
+  columns, which the inspector wraps if it is narrower.
 
 ## Special forms
 

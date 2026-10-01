@@ -7,61 +7,83 @@ use block_parse::ast::{Ast, Expr, Node, Script, Severity, Stmt};
 use block_parse::language::{BlockDef, Part};
 use block_parse::{Language, Value};
 
+use crate::form::Form;
+
 /// Where `display` writes, so the runner can show it.
 pub const OUTPUT_PORT: &str = "__out";
 
-/// One expression per statement of `script`. `Err` holds the first problem,
-/// as a script with any error-level problem is not run.
+/// One expression per statement of `script`, a line each. `Err` holds the
+/// first problem, as a script with any error-level problem is not run.
 pub fn script(language: &Language, script: &Script) -> Result<String, String> {
+    let forms = forms(language, script, false)?;
+    Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
+}
+
+/// As [`script`], laid out to read within `width` columns, and never run: a
+/// faulty input is written as its name in angle brackets, `<test>`, a
+/// faulty block as far as it parsed, and a statement with nothing to
+/// recover is left out.
+pub fn pretty(language: &Language, script: &Script, width: usize) -> Result<String, String> {
+    let forms = forms(language, script, true)?;
+    Ok(forms.iter().map(|form| form.pretty(width)).collect::<Vec<_>>().join("\n\n"))
+}
+
+fn forms(language: &Language, script: &Script, holes: bool) -> Result<Vec<Form>, String> {
     let ast = Ast {
         scripts: vec![script.clone()],
     };
-    if let Some(problem) = ast.problems().into_iter().find(|problem| problem.severity == Severity::Error) {
+    if !holes
+        && let Some(problem) = ast.problems().into_iter().find(|problem| problem.severity == Severity::Error)
+    {
         return Err(problem.message.clone());
     }
     let mut forms = Vec::new();
     for statement in &script.body {
         let node = match statement {
             Stmt::Node(node) => node,
-            // Errors were refused above; a warning keeps what it recovered.
+            // Errors were refused above unless holes are allowed; either
+            // way, what was recovered is kept.
             Stmt::Problem(problem) => match &problem.recovered {
                 Some(node) => node,
                 None => continue,
             },
         };
-        forms.push(Generator { language }.node(node)?);
+        forms.push(Generator { language, holes }.node(node)?);
     }
-    Ok(forms.join("\n"))
+    Ok(forms)
 }
 
 struct Generator<'a> {
     language: &'a Language,
+    /// Write `<name>` for a faulty input instead of failing.
+    holes: bool,
 }
 
 impl Generator<'_> {
-    fn node(&self, node: &Node) -> Result<String, String> {
+    fn node(&self, node: &Node) -> Result<Form, String> {
         let def = self
             .language
             .block(&node.opcode)
             .ok_or_else(|| format!("no block `{}`", node.opcode))?;
         let one = |name: &str| self.arg(def, node, name);
         let many = |name: &str| self.list(def, node, name);
-        let wrap = |parts: Vec<String>| format!("({})", parts.join(" "));
+        let wrap = Form::List;
+        let atom = Form::atom;
         Ok(match node.opcode.as_str() {
             "program" => one("main")?,
-            "string" => string(&self.text(node, "text")?)?,
+            "string" => Form::Atom(self.text(node, "text")?),
             "variable" => one("name")?,
             "call" => wrap([vec![one("procedure")?], many("args")?].concat()),
             "binding" => wrap(vec![one("name")?, one("value")?]),
             "define_procedure" => {
                 let head = wrap([vec![one("name")?], many("params")?].concat());
-                wrap([vec!["define".into(), head], many("body")?].concat())
+                wrap([vec![atom("define"), head], many("body")?].concat())
             }
-            "lambda" => wrap([vec!["lambda".into(), wrap(many("params")?)], many("body")?].concat()),
-            "let" => wrap([vec!["let".into(), wrap(many("bindings")?)], many("body")?].concat()),
-            "display" => wrap(vec!["display".into(), one("value")?, OUTPUT_PORT.into()]),
+            "lambda" => wrap([vec![atom("lambda"), wrap(many("params")?)], many("body")?].concat()),
+            "let" => wrap([vec![atom("let"), wrap(many("bindings")?)], many("body")?].concat()),
+            "display" => wrap(vec![atom("display"), one("value")?, atom(OUTPUT_PORT)]),
             opcode => {
-                let mut parts = vec![opcode.to_owned()];
+                let mut parts = vec![atom(opcode)];
                 for part in &def.parts {
                     match part {
                         Part::Input(input) => parts.push(one(&input.name)?),
@@ -74,37 +96,53 @@ impl Generator<'_> {
         })
     }
 
-    fn arg(&self, def: &BlockDef, node: &Node, name: &str) -> Result<String, String> {
-        let expr = node.arg(name).ok_or_else(|| format!("`{}` has no `{name}`", def.name))?;
+    fn arg(&self, def: &BlockDef, node: &Node, name: &str) -> Result<Form, String> {
+        let Some(expr) = node.arg(name) else {
+            return match self.holes {
+                true => Ok(hole(name)),
+                false => Err(format!("`{}` has no `{name}`", def.name)),
+            };
+        };
         let ty = def.input(name).map(|input| input.ty.as_str());
-        self.expr(expr, ty)
+        self.expr(expr, ty, name)
     }
 
-    fn list(&self, def: &BlockDef, node: &Node, name: &str) -> Result<Vec<String>, String> {
+    fn list(&self, def: &BlockDef, node: &Node, name: &str) -> Result<Vec<Form>, String> {
         let ty = def.list(name).map(|list| list.ty.as_str());
         let items = node.list(name).unwrap_or_default();
-        items.iter().map(|item| self.expr(item, ty)).collect()
+        let mut forms: Vec<Form> = items.iter().map(|item| self.expr(item, ty, name)).collect::<Result<_, _>>()?;
+        let min = def.list(name).map_or(0, |list| list.min);
+        if self.holes && forms.len() < min {
+            forms.resize(min, hole(name));
+        }
+        Ok(forms)
     }
 
     fn text(&self, node: &Node, name: &str) -> Result<String, String> {
         match node.arg(name) {
-            Some(Expr::Literal(Value::Text(text))) => Ok(text.clone()),
+            Some(Expr::Literal(Value::Text(text))) => Ok(string(text)?),
+            _ if self.holes => Ok(hole(name).to_string()),
             _ => Err(format!("`{}` needs text in `{name}`", node.opcode)),
         }
     }
 
-    fn expr(&self, expr: &Expr, ty: Option<&str>) -> Result<String, String> {
+    /// `name` is the input or list `expr` fills, for its hole.
+    fn expr(&self, expr: &Expr, ty: Option<&str>, name: &str) -> Result<Form, String> {
         match expr {
             Expr::Literal(value) => literal(value, ty),
             Expr::Node(node) => self.node(node),
-            Expr::Convert { value, .. } => self.expr(value, ty),
+            Expr::Convert { value, .. } => self.expr(value, ty, name),
+            Expr::Problem(problem) if self.holes => match &problem.recovered {
+                Some(node) => self.node(node),
+                None => Ok(hole(name)),
+            },
             Expr::Problem(problem) => Err(problem.message.clone()),
         }
     }
 }
 
-fn literal(value: &Value, ty: Option<&str>) -> Result<String, String> {
-    Ok(match value {
+fn literal(value: &Value, ty: Option<&str>) -> Result<Form, String> {
+    Ok(Form::Atom(match value {
         Value::Text(text) if ty == Some("string") => string(text)?,
         Value::Text(text) => text.clone(),
         Value::Bool(true) => "#t".into(),
@@ -112,7 +150,11 @@ fn literal(value: &Value, ty: Option<&str>) -> Result<String, String> {
         Value::Integer(n) | Value::Currency(n) => n.to_string(),
         Value::Unsigned(n) => n.to_string(),
         Value::Float(x) => format!("{x:?}"),
-    })
+    }))
+}
+
+fn hole(name: &str) -> Form {
+    Form::Atom(format!("<{name}>"))
 }
 
 /// A string literal. Control characters other than newline, tab and return
@@ -158,13 +200,22 @@ mod tests {
         }
 
         fn code(&mut self, block: Block) -> Result<String, String> {
+            let run = self.stack(block);
+            script(&self.language, &run)
+        }
+
+        fn pretty(&mut self, block: Block) -> Result<String, String> {
+            let run = self.stack(block);
+            pretty(&self.language, &run, 80)
+        }
+
+        fn stack(&mut self, block: Block) -> Script {
             let id = block.id;
             self.program.stacks.push(Stack {
                 pos: [0.0, 0.0],
                 blocks: vec![block],
             });
-            let run = self.program.script_at(&self.language, id).unwrap();
-            script(&self.language, &run)
+            self.program.script_at(&self.language, id).unwrap()
         }
     }
 
@@ -254,5 +305,20 @@ mod tests {
 
         let minus = b.block("-");
         assert!(b.code(minus).is_err(), "`-` needs an operand");
+    }
+
+    #[test]
+    fn inspecting_writes_faulty_inputs_as_their_names() {
+        let mut b = Builder::new();
+        let mut choose = b.block("if");
+        set(&mut choose, Slot::input("consequent"), text("yes"));
+        let minus = b.block("-");
+        set(&mut choose, Slot::input("alternate"), plug(minus));
+        assert_eq!(b.pretty(choose), Ok("(if <test> yes (- <args>))".into()));
+
+        let mut add = b.block("+");
+        set(&mut add, item("args"), text("(exit)"));
+        assert_eq!(b.pretty(add.clone()), Ok("(+ <args>)".into()));
+        assert!(b.code(add).is_err(), "running still refuses it");
     }
 }

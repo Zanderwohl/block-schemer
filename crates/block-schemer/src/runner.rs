@@ -11,6 +11,9 @@ use block_parse::Language;
 use crate::codegen;
 use crate::scheme::Scheme;
 
+/// Columns `inspect` lays code out to; the inspector wraps anything wider.
+const INSPECT_WIDTH: usize = 48;
+
 pub struct SchemerRunner<S> {
     language: Language,
     scheme: S,
@@ -60,6 +63,11 @@ impl<S: Scheme> Runner for SchemerRunner<S> {
         self.answers.clear();
         self.answers.insert(block, answer);
     }
+
+    fn inspect(&mut self, script: &Script) -> Option<String> {
+        let text = codegen::pretty(&self.language, script, INSPECT_WIDTH);
+        Some(text.unwrap_or_else(|problem| format!("Can't generate: {problem}")))
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +93,15 @@ mod tests {
         assert_eq!(run(20), "14");
         assert_eq!(run(10), "hypotenuse squared:\n25");
         assert!(run(16).contains("before its definition"), "a reporter inside runs alone, outside its `let`");
+    }
+
+    #[test]
+    fn inspecting_shows_the_generated_scheme_without_running_it() {
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/sum-of-squares.scmb")).unwrap();
+        let mut runner = SchemerRunner::new(language.clone(), Steel::new());
+        let script = program.script_at(&language, BlockId(16)).unwrap();
+        assert_eq!(runner.inspect(&script).as_deref(), Some("(* a a)"));
+        assert!(runner.overlay().bubbles.is_empty());
     }
 }

@@ -10,7 +10,7 @@ use block_parse::language::Language;
 use block_parse::program::Program;
 use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportCommand};
 
-use crate::{BlockEditor, EditorEvent};
+use crate::{BlockEditor, EditorEvent, EditorOptions};
 
 #[cfg(target_os = "macos")]
 mod native;
@@ -326,6 +326,11 @@ impl eframe::App for App {
                             label: None,
                         });
                     }
+                    EditorEvent::Inspect { script, .. } => {
+                        let text = self.runner.as_mut().and_then(|runner| runner.inspect(&script));
+                        self.overlay.inspector = text.unwrap_or_else(|| format!("{script:#?}"));
+                        self.editor.options.inspector_collapsed = false;
+                    }
                     _ => {}
                 }
             }
@@ -454,9 +459,7 @@ impl App {
                 self.history = History::new(&self.program);
                 self.path = None;
                 self.dirty = false;
-                self.editor = BlockEditor::default();
-                // Ids are only unique within a program.
-                self.dismiss_runs();
+                self.reset_editor();
                 self.status.clear();
             }
             Pending::Open => self.open(),
@@ -562,9 +565,7 @@ impl App {
                 self.program = program;
                 self.path = Some(path);
                 self.dirty = false;
-                self.editor = BlockEditor::default();
-                // Ids are only unique within a program.
-                self.dismiss_runs();
+                self.reset_editor();
                 self.status = join(&warnings);
             }
             Err(error) => self.status = format!("could not open {}: {error}", path.display()),
@@ -580,6 +581,20 @@ impl App {
             dialog = dialog.set_directory(folder);
         }
         dialog
+    }
+
+    /// For a new program: panel sizes stay, the inspector's text is for the
+    /// old one.
+    fn reset_editor(&mut self) {
+        let options = self.editor.options.clone();
+        self.editor = BlockEditor::default();
+        self.editor.options = EditorOptions {
+            inspector_collapsed: true,
+            ..options
+        };
+        self.overlay.inspector.clear();
+        // Ids are only unique within a program.
+        self.dismiss_runs();
     }
 
     fn dismiss_runs(&mut self) {

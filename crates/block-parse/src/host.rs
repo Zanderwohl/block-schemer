@@ -49,6 +49,8 @@ pub struct Overlay {
     pub switch_hint: Option<String>,
     /// Speech bubbles, such as what running a block gave back.
     pub bubbles: HashMap<BlockId, String>,
+    /// Shown in the inspector, such as what inspecting a block gave back.
+    pub inspector: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,4 +113,10 @@ pub trait Runner {
     /// Run one block: `script` is [`Program::script_at`] for it. Anything to
     /// say back goes in the overlay's `bubbles`.
     fn run_block(&mut self, program: &Program, block: BlockId, script: &Script);
+
+    /// `script` as the back end would see it, such as generated source.
+    /// `None` leaves it to the host.
+    fn inspect(&mut self, _script: &Script) -> Option<String> {
+        None
+    }
 }

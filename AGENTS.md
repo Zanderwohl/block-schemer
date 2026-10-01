@@ -52,33 +52,39 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     records when `EditorOutput::settled`, which a literal being typed holds
     back until its field lets go (`documentation/04-history.md`).
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
-    switch states, speech bubbles),
+    switch states, speech bubbles, the inspector's text),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui. `Runner` needs only `overlay` and `run_block`; the
-    debugger methods default to doing nothing.
-- `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, rfd, and on macOS winit and muda, the window as a
-  library (`app::run` with an `AppConfig`: name, language, program path,
+    debugger methods default to doing nothing, and `inspect` (a script as
+    the back end's text, shown in the editor's inspector) to `None`.
+- `crates/block-parse-gui` — egui component `BlockEditor`: the palette, the
+  canvas and, right of it, the inspector, read-only text that starts
+  collapsed. Dragging a panel's edge sets `EditorOptions::palette_width` or
+  `inspector_width`, and a button half its width inside the canvas collapses
+  or restores it at that width (`palette_collapsed`, `inspector_collapsed`). A
+  run dropped over the inspector goes back where it came from. Feature `app`
+  (off by default) adds eframe, rfd, and on macOS winit and muda, the window
+  as a library (`app::run` with an `AppConfig`: name, language, program path,
   `Menus`, an optional `Runner` and an optional window icon). Feature `cli`
   adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
   [program]`). Its File/Edit menus (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
   macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere) are one `Command` list drawn as
-  `Menus::Native` (the macOS menu bar through muda, with app and Window
-  menus; egui elsewhere), `Egui` or `Hidden` (`--menus`); shortcuts work in
-  all three. Native menus take their own shortcuts, so egui only swallows
-  the ones a disabled item lets through. The app menu's Quit is a custom
-  item and winit's default menu is off, since `terminate:` would skip the
-  save prompt. Feature `snapshot` (off by default) renders
-  programs to images offscreen through egui_kittest's wgpu renderer; with it,
-  `--command snapshot` (`cargo snapshot -l <language> <out.png>`) writes
-  `Layout::grid`, every block in a column per category, instead of opening
-  the window.
+  `Menus::Native` (the macOS menu bar through muda, with app and Window menus;
+  egui elsewhere), `Egui` or `Hidden` (`--menus`); shortcuts work in all
+  three. Native menus take their own shortcuts, so egui only swallows the ones
+  a disabled item lets through. The app menu's Quit is a custom item and
+  winit's default menu is off, since `terminate:` would skip the save prompt.
+  Feature `snapshot` (off by default) renders programs to images offscreen
+  through egui_kittest's wgpu renderer; with it, `--command snapshot` (`cargo
+  snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
+  column per category, instead of opening the window.
 - `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
   blocks run in Steel when double-clicked (`cargo schemer [program.scmb]`,
   `documentation/05-block-schemer.md`). Its language is embedded; its
   `codegen` is the layer that refuses anything the language does not offer
-  and escapes strings before Scheme sees them. Steel sits behind the
-  `Scheme` trait so a WASM Scheme can replace it.
+  and escapes strings before Scheme sees them; Inspect shows the same code
+  pretty-printed, with `<name>` for each missing or faulty input. Steel sits
+  behind the `Scheme` trait so a WASM Scheme can replace it.
 - `documentation/` — design notes, numbered.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing), `strict_tiny.ron` (the same language with exact
@@ -101,7 +107,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   block within the double-click delay requests `EditorEvent::Run` with
   `script_at` that block, even in read-only mode; the host answers in the
   overlay's `bubbles`, which the editor places beside the block where they
-  cover least (`documentation/02-bubbles.md`). Commands and
+  cover least (`documentation/02-bubbles.md`). Inspect in a block's context
+  menu requests `EditorEvent::Inspect` with the same script, also in
+  read-only mode; the host answers in the overlay's `inspector` and opens
+  it. `app::run` asks the runner's `inspect`, else shows the AST. Commands and
   events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
@@ -158,6 +167,10 @@ call `block_parse_gui::snapshot::program`.
   it takes drops only.
 - Inserting between list items, and closing holes
   (`documentation/03-variadic.md`).
+- Refreshing the inspector when the inspected blocks change; it keeps what
+  Inspect last gave back until the next Inspect, New or Open.
+- A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
+  driving an egui context menu headless needs the button's position.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a step limit
   or worker thread so a runaway run cannot freeze the window; a web build
   once a WASM Scheme replaces Steel.

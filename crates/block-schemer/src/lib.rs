@@ -5,6 +5,7 @@
 //! it for now; another interpreter only needs to implement [`Scheme`].
 
 pub mod codegen;
+pub mod form;
 pub mod literals;
 pub mod runner;
 pub mod scheme;

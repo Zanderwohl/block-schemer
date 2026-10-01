@@ -1,12 +1,12 @@
 use block_parse::ast::Script;
 use block_parse::host::{Overlay, RunCommand};
 use block_parse::edit::{Fragment, Target};
-use block_parse::language::{Fit, LiteralKind};
+use block_parse::language::LiteralKind;
 use block_parse::program::{BlockId, Program, Slot};
 use block_parse::Language;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Frame, Key, LayerId, Margin, Modifiers, Order, Pos2,
-    Rect, RichText, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2,
+    Rect, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 
 use crate::color::{SwatchRecipe, Swatches};
@@ -18,20 +18,15 @@ type SwatchKey = (
 );
 use crate::dropdown::Menu;
 use crate::interact::{
-    DIVIDER_GRIP, DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, SnapMark,
+    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
 };
 use crate::layout::{
-    Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
+    Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Scene, SlotContent,
 };
 use crate::paint::{self, Transform};
+use crate::panels::Panels;
 use crate::theme::Theme;
 use crate::view::View;
-
-/// Least widths the palette's edge can be dragged to leave either side.
-const MIN_PALETTE_WIDTH: f32 = 80.0;
-const MIN_CANVAS_WIDTH: f32 = 120.0;
-/// The palette's collapse button, which sits half its width right of the edge.
-const TOGGLE_SIZE: Vec2 = vec2(16.0, 24.0);
 
 /// Holds only view and interaction state. Program, language and debug state
 /// are passed in each frame.
@@ -68,6 +63,9 @@ pub struct EditorOptions {
     pub palette_width: Option<f32>,
     /// Hides the palette without forgetting `palette_width`.
     pub palette_collapsed: bool,
+    /// The inspector, right of the canvas; dragging its edge sets the width.
+    pub inspector_width: f32,
+    pub inspector_collapsed: bool,
     pub theme: Theme,
 }
 
@@ -80,6 +78,8 @@ impl Default for EditorOptions {
             breakpoints: true,
             palette_width: None,
             palette_collapsed: false,
+            inspector_width: 320.0,
+            inspector_collapsed: true,
             theme: Theme::default(),
         }
     }
@@ -110,6 +110,9 @@ pub enum EditorEvent {
     /// The user asked for a block's `documentation`. The editor never opens
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
+    /// A request to show `script`, [`Program::script_at`] the block, as the
+    /// host's text in its `Overlay::inspector`. Sent in read-only mode too.
+    Inspect { block: BlockId, script: Script },
     /// A request to set a block's switch; the host's next `Overlay` has the
     /// answer. Sent in read-only mode too.
     Switched(BlockId, bool),
@@ -194,14 +197,8 @@ impl BlockEditor {
             lifted: None,
         }
         .palette();
-        let max_width = (bounds.width() - MIN_CANVAS_WIDTH).max(0.0);
-        let palette_width = match self.options.palette_width {
-            _ if self.options.palette_collapsed => 0.0,
-            Some(width) => width.min(max_width),
-            None => palette.width.clamp(180.0, 360.0).min(bounds.width() * 0.5),
-        };
-        let palette_rect = Rect::from_min_size(bounds.min, vec2(palette_width, bounds.height()));
-        let canvas_rect = Rect::from_min_max(pos2(palette_rect.max.x, bounds.min.y), bounds.max);
+        let panels = Panels::new(bounds, &self.options, palette.width);
+        let (palette_rect, canvas_rect) = (panels.palette, panels.canvas);
 
         let double_click_delay = ctx.options(|o| o.input_options.max_double_click_delay);
         let input = ctx.input(|i| PointerInput {
@@ -220,13 +217,10 @@ impl BlockEditor {
         let over = input
             .at
             .filter(|&at| bounds.contains(at) && ctx.layer_id_at(at) == Some(ui.layer_id()));
-        let toggle_rect = Rect::from_min_size(
-            pos2(palette_rect.max.x + TOGGLE_SIZE.x / 2.0, bounds.min.y + TOGGLE_SIZE.x / 2.0),
-            TOGGLE_SIZE,
-        );
-        let on_toggle = over.is_some_and(|at| toggle_rect.contains(at));
-        let on_divider = !self.options.palette_collapsed
-            && over.is_some_and(|at| (at.x - palette_rect.max.x).abs() <= DIVIDER_GRIP);
+        let divider = over.and_then(|at| panels.edge_at(&self.options, at));
+        // The inspector's widgets take what lands on them.
+        let over = over.filter(|at| divider.is_some() || !panels.inspector.contains(*at));
+        let on_toggle = over.is_some_and(|at| panels.on_toggle(at));
 
         if let Some(at) = over {
             if palette_rect.contains(at) {
@@ -291,10 +285,9 @@ impl BlockEditor {
 
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
-                if let Some(at) = over.filter(|_| input.pressed && on_divider) {
-                    self.gesture = Gesture::Resizing {
-                        grab: at.x - palette_rect.max.x,
-                    };
+                if let Some((at, edge)) = over.zip(divider).filter(|_| input.pressed) {
+                    let grab = panels.grab(edge, at);
+                    self.gesture = Gesture::Resizing { edge, grab };
                     self.last_click = None;
                 } else if let Some(at) = over.filter(|_| input.pressed && !on_toggle) {
                     self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
@@ -333,26 +326,28 @@ impl BlockEditor {
                     self.gesture = Gesture::Panning;
                 }
             }
-            Gesture::Resizing { grab } => {
-                // Takes effect next frame; this one is already laid out.
+            Gesture::Resizing { edge, grab } => {
                 if let Some(at) = input.at {
-                    let width = at.x - grab - bounds.min.x;
-                    self.options.palette_width = Some(width.clamp(MIN_PALETTE_WIDTH.min(max_width), max_width));
+                    panels.resize(&mut self.options, edge, at.x - grab);
                 }
                 if input.down {
-                    self.gesture = Gesture::Resizing { grab };
+                    self.gesture = Gesture::Resizing { edge, grab };
                 }
             }
             Gesture::Dragging(mut drag) => {
                 if let Some(at) = input.at {
                     drag.head = t.canvas(at) - drag.grab_offset;
                 }
+                // Nothing can be seen to land under the inspector, so nothing does.
+                let hidden = input.at.is_some_and(|at| panels.inspector.contains(at));
                 // Every frame, release included, so a quick flick still snaps.
                 let run = layout.run(&drag.fragment.blocks, drag.head);
-                drag.snap = find_snap(language, program, &scene, &drag.fragment, &run);
+                drag.snap = (!hidden)
+                    .then(|| find_snap(language, program, &scene, &drag.fragment, &run))
+                    .flatten();
                 if input.down {
                     self.gesture = Gesture::Dragging(drag);
-                } else {
+                } else if !hidden {
                     // Checked before the snap, so dragging out to delete never
                     // catches a seam on the way.
                     let delete = input.at.is_some_and(|at| palette_rect.contains(at));
@@ -402,13 +397,11 @@ impl BlockEditor {
         }
         paint::error_tags(&canvas, &scene, t, &theme);
         paint::markers(&canvas, &scene, t, &theme, overlay);
-        let resizing = matches!(self.gesture, Gesture::Resizing { .. });
-        let hot = resizing || (on_divider && !self.is_dragging());
-        ui.painter_at(bounds).vline(
-            palette_rect.max.x,
-            bounds.y_range(),
-            (if hot { 3.0 } else { 1.0 }, theme.divider),
-        );
+        let hot = match self.gesture {
+            Gesture::Resizing { edge, .. } => Some(edge),
+            Gesture::Idle => divider,
+            _ => None,
+        };
 
         let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
         fields.set_clip_rect(canvas_rect);
@@ -458,14 +451,12 @@ impl BlockEditor {
         let visible = Rect::from_min_max(t.canvas(canvas_rect.min), t.canvas(canvas_rect.max));
         let bubbles = paint::place_bubbles(fields.painter(), &scene, t.zoom, &theme, overlay, visible);
         paint::bubbles(fields.painter(), bubbles, t, &theme);
-        let collapsed = self.options.palette_collapsed;
-        let mut toggle = ui.new_child(UiBuilder::new().max_rect(bounds));
-        let button = egui::Button::new(if collapsed { "⏵" } else { "⏴" }).min_size(TOGGLE_SIZE);
-        let tip = if collapsed { "Show the palette" } else { "Hide the palette" };
-        if toggle.put(toggle_rect, button).on_hover_text(tip).clicked() {
-            self.options.palette_collapsed = !collapsed;
+        if panels.toggles(ui, &mut self.options) {
             ctx.request_repaint();
         }
+        panels.inspector(ui, self.id, &overlay.inspector, &theme);
+        // After the inspector, whose fill would cover half the line.
+        panels.edges(&ui.painter_at(bounds), hot, &theme);
         if self.settle_edit(&ctx, language, program) {
             output.changed = true;
         }
@@ -480,7 +471,7 @@ impl BlockEditor {
             let run = layout.run(&drag.fragment.blocks, drag.head);
             paint::scene(&floating, &run.scene, t, &theme, false, &Overlay::default());
             ctx.set_cursor_icon(CursorIcon::Grabbing);
-        } else if hot {
+        } else if hot.is_some() {
             ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
         } else if on_toggle {
         } else if let Some(at) = over {
@@ -653,10 +644,6 @@ impl BlockEditor {
             return;
         };
         let def = language.block(&block.opcode);
-        if let Some(def) = def {
-            ui.label(RichText::new(&def.name).strong());
-            ui.separator();
-        }
         if !self.options.read_only {
             if ui.button("Duplicate").clicked() {
                 let at = scene
@@ -670,15 +657,23 @@ impl BlockEditor {
                 }
                 ui.close();
             }
-            if ui.button("Delete block").clicked() {
+            if ui.button("Delete").clicked() {
                 program.remove(id);
                 output.changed = true;
                 self.menu = None;
                 ui.close();
+                return;
             }
+            ui.separator();
         }
         if self.options.breakpoints && ui.button("Toggle breakpoint").clicked() {
             output.events.push(EditorEvent::ToggleBreakpoint(id));
+            ui.close();
+        }
+        if ui.button("Inspect").clicked() {
+            if let Some(script) = program.script_at(language, id) {
+                output.events.push(EditorEvent::Inspect { block: id, script });
+            }
             ui.close();
         }
         if let Some(def) = def
@@ -878,69 +873,6 @@ impl BlockEditor {
     }
 }
 
-fn find_snap(
-    language: &Language,
-    program: &Program,
-    scene: &Scene,
-    fragment: &Fragment,
-    run: &Run,
-) -> Option<(Target, SnapMark)> {
-    let head = fragment.blocks.first()?;
-    let def = language.block(&head.opcode)?;
-    let head_rect = run.scene.blocks.first()?.rect;
-    let mut best: Option<(f32, Target, SnapMark)> = None;
-    let mut consider = |distance: f32, target: Target, mark: SnapMark| {
-        if distance <= SNAP_RADIUS
-            && best.as_ref().is_none_or(|(nearest, ..)| distance < *nearest)
-            // A palette block's fresh id is in no program: `can_attach` for it.
-            && program.can_move(language, fragment, &target).is_ok()
-        {
-            best = Some((distance, target, mark));
-        }
-    };
-
-    if let Some(output) = def.kind.output() {
-        let probe = pos2(head_rect.min.x, head_rect.center().y);
-        for slot in scene.slots() {
-            if language.fit(output, &slot.ty) == Fit::No {
-                continue;
-            }
-            let distance = probe.distance(pos2(slot.rect.min.x, slot.rect.center().y));
-            let target = Target::Input {
-                parent: slot.parent,
-                slot: slot.slot.clone(),
-            };
-            let mark = SnapMark::Slot {
-                rect: slot.rect,
-                shape: slot.shape,
-            };
-            consider(distance, target, mark);
-        }
-    } else {
-        let probe = head_rect.min;
-        for seam in &scene.seams {
-            let mark = SnapMark::Seam {
-                at: seam.at,
-                width: head_rect.width(),
-            };
-            consider(probe.distance(seam.at), seam.target.clone(), mark);
-        }
-        for stack in scene.heads.iter().filter(|stack| !stack.is_hat) {
-            let at = stack.top_left - vec2(0.0, run.size.y);
-            let target = Target::Above {
-                head: stack.block,
-                pos: [at.x, at.y],
-            };
-            let mark = SnapMark::Seam {
-                at: stack.top_left,
-                width: stack.width,
-            };
-            consider(probe.distance(at), target, mark);
-        }
-    }
-    best.map(|(_, target, mark)| (target, mark))
-}
-
 /// A checkbox sized to the zoom, like the disabled one painted in its place.
 fn checkbox(ui: &mut egui::Ui, center: Pos2, zoom: f32, value: &mut bool) -> egui::Response {
     let size = 14.0 * zoom;
@@ -962,44 +894,6 @@ fn switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<(BlockId, 
         .rev()
         .find(|block| block.switch.is_some_and(|rect| rect.contains(point)))
         .map(|block| (block.id, overlay.switches.contains_key(&block.id)))
-}
-
-/// A reporter pushed out of a slot lands just below it.
-/// Delete drops the run instead of placing it. A canvas run that no longer
-/// matches the program, as when the host switched programs mid-drag, is left
-/// alone. True if the program changed.
-fn drop_run(language: &Language, program: &mut Program, drag: Drag, delete: bool) -> bool {
-    let mut next = program.clone();
-    let fragment = match &drag.source {
-        DragSource::Canvas { head } => match next.detach(*head) {
-            Some(fragment) if fragment == drag.fragment => fragment,
-            _ => return false,
-        },
-        _ if delete => return false,
-        DragSource::Palette { opcode } => match next.instantiate(language, opcode) {
-            Some(block) => Fragment { blocks: vec![block] },
-            None => return false,
-        },
-    };
-    if !delete {
-        let head = [drag.head.x, drag.head.y];
-        let (target, eject) = match drag.snap {
-            Some((target, SnapMark::Slot { rect, .. })) => (target, rect.min + vec2(16.0, 40.0)),
-            Some((target, SnapMark::Seam { .. })) => (target, drag.head),
-            None => (Target::Free { pos: head }, drag.head),
-        };
-        match next.attach(language, fragment, target) {
-            Ok(Some(ejected)) => {
-                let _ = next.attach(language, ejected, Target::Free { pos: [eject.x, eject.y] });
-            }
-            Ok(None) => {}
-            Err((_, fragment)) => {
-                let _ = next.attach(language, fragment, Target::Free { pos: head });
-            }
-        }
-    }
-    *program = next;
-    true
 }
 
 fn grid(painter: &egui::Painter, area: Rect, t: Transform, color: Color32) {
@@ -1051,6 +945,7 @@ impl Measure for EguiMeasure<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panels::{MIN_CANVAS_WIDTH, TOGGLE_SIZE};
     use crate::dropdown;
 
     fn send_and_sync<T: Send + Sync>() {}
@@ -1370,6 +1265,55 @@ mod tests {
         click(&mut editor, toggle(0.0));
         assert!(!editor.options.palette_collapsed);
         assert_eq!(editor.options.palette_width, Some(200.0));
+    }
+
+    #[test]
+    fn the_inspector_keeps_presses_and_drops_from_the_canvas() {
+        let (language, mut program, ctx, _, label) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.inspector_collapsed = false;
+        let pan = editor.view.pan;
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), pos2(1100.0, 300.0));
+        assert_eq!(editor.view.pan, pan, "a drag over the inspector panned the canvas");
+
+        let before = program.clone();
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), label);
+        assert!(editor.is_dragging());
+        let over = pos2(1100.0, 300.0);
+        let release = egui::Event::PointerButton {
+            pos: over,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        for events in [vec![egui::Event::PointerMoved(over)], vec![release]] {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(!editor.is_dragging());
+        assert_eq!(program.stacks, before.stacks, "a run dropped on the inspector should stay where it was");
+    }
+
+    #[test]
+    fn the_inspector_opens_and_its_edge_drags() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = BlockEditor::default();
+        assert!(editor.options.inspector_collapsed);
+        let at = pos2(1200.0 - TOGGLE_SIZE.x, TOGGLE_SIZE.x / 2.0 + TOGGLE_SIZE.y / 2.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for events in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
+            frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
+        }
+        assert!(!editor.options.inspector_collapsed);
+
+        let edge = pos2(1200.0 - 320.0 + 1.0, 300.0);
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), edge);
+        assert!(!editor.is_dragging());
+        assert_eq!(editor.options.inspector_width, 320.0 - 65.0);
     }
 
     #[test]

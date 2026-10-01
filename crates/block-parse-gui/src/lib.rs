@@ -10,6 +10,7 @@ pub mod editor;
 pub mod interact;
 pub mod layout;
 pub mod paint;
+mod panels;
 pub mod shape;
 #[cfg(feature = "snapshot")]
 pub mod snapshot;
