@@ -90,8 +90,7 @@ pub struct PlacedSlot {
     /// The owning block's, for empty slots and edges.
     pub swatch: Swatch,
     pub content: SlotContent,
-    /// A later stack lies over the slot, so it is drawn but takes no typing:
-    /// a live widget would paint over that stack and take its clicks.
+    /// Under a later stack: drawn static, as a live widget would take that stack's clicks.
     pub covered: bool,
 }
 

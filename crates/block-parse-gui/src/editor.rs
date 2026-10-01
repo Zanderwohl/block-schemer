@@ -405,8 +405,7 @@ impl BlockEditor {
         let canvas = ui.painter_at(canvas_rect);
         canvas.rect_filled(canvas_rect, 0.0, theme.canvas);
         grid(&canvas, canvas_rect, t, theme.grid);
-        // Fields share the canvas's layer, which paints in call order: each
-        // block's widgets go in right after it, under every later block.
+        // On the canvas's layer, which paints in call order, so later blocks cover them.
         let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
         fields.set_clip_rect(canvas_rect);
         paint::scene_with(&canvas, &scene, t, &theme, !read_only, overlay, |block| {
@@ -774,7 +773,6 @@ impl BlockEditor {
         tidied != text && program.set_literal(edit.block, &edit.slot, tidied)
     }
 
-    /// A block's switch and fields.
     #[allow(clippy::too_many_arguments)]
     fn block_widgets(
         &mut self,

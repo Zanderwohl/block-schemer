@@ -52,9 +52,8 @@ pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live
     scene_with(painter, scene, t, theme, live, overlay, |_| {});
 }
 
-/// Calls `widgets` after painting each block, so a block's widgets sit over
-/// it and under every block drawn after it. A stack's tags and markers go over
-/// that stack and under later ones.
+/// Calls `widgets` after each block and draws each stack's tags and markers
+/// after it, so later stacks cover both.
 pub fn scene_with(
     painter: &Painter,
     scene: &Scene,
