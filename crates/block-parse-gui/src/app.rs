@@ -12,7 +12,6 @@ use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportComma
 
 use crate::{BlockEditor, EditorEvent};
 
-/// What the window opens with.
 pub struct AppConfig {
     /// What eframe keys the app's saved state by. The title bar shows the
     /// file and the language instead.
@@ -29,7 +28,6 @@ pub struct AppConfig {
     pub icon: Option<egui::IconData>,
 }
 
-/// An icon from PNG bytes, such as an `include_bytes!` of the app's icon.
 pub fn icon_from_png(png: &[u8]) -> Result<egui::IconData, String> {
     eframe::icon_data::from_png_bytes(png).map_err(|error| error.to_string())
 }

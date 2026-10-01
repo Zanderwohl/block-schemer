@@ -716,8 +716,6 @@ impl Layout<'_> {
             LaidContent::Empty
         } else {
             let focused = self.editing == Some((block.id, &slot));
-            // A blank slot shows its hint: not filled in yet is not wrong yet.
-            // The AST still reports it, so running says what is missing.
             let error = if self.validate && !focused && !is_blank(&text) {
                 self.language.parse_literal(ty_name, &text).err()
             } else {
