@@ -12,7 +12,6 @@ pub use native::Native;
 
 use crate::scheme::Answer;
 
-/// What a stopped job answers.
 pub const STOPPED: &str = "Stopped.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

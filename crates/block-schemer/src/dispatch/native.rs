@@ -60,8 +60,8 @@ impl Worker {
                     return;
                 }
                 let stopped = |sent| generation.load(Ordering::SeqCst) != sent;
-                // The generation this session belongs to; a job from a later
-                // one, as after any stop, even while idle, gets a fresh session.
+                // A job from a later generation, as after any stop, even one
+                // while idle, gets a fresh session.
                 let mut session = generation.load(Ordering::SeqCst);
                 for (ticket, sent, job) in inbox {
                     // Reset before clearing, and clear before the check, so a

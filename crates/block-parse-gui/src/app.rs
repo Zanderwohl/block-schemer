@@ -744,9 +744,8 @@ impl App {
         }
     }
 
-    /// Answers that came back since the last frame. Only blocks still
-    /// outlined get their bubble, so one dismissed meanwhile stays gone; one
-    /// that answered elsewhere loses its outline once the runner is idle.
+    /// Only blocks still outlined get their bubble, so one dismissed
+    /// meanwhile stays gone.
     fn poll_runner(&mut self) {
         let Some(runner) = &mut self.runner else {
             return;

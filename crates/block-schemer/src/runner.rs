@@ -44,7 +44,6 @@ pub struct SchemerRunner<D> {
     harness: bool,
 }
 
-/// What a ticket's answer is for.
 enum Pending {
     Evaluate { block: BlockId, echo: Option<String> },
     Play,
@@ -250,8 +249,7 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
         self.write(&format!("{line}\n"));
     }
 
-    /// Only the latest run's answer is kept as a bubble, as the app dismisses
-    /// bubbles on the next edit or click. The program block plays.
+    /// The program block plays.
     fn run_block(&mut self, program: &Program, path: Option<&Path>, block: BlockId, script: &Script) {
         self.answers.clear();
         if is_program(program, block) {
