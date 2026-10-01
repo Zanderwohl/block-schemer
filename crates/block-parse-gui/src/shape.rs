@@ -131,17 +131,25 @@ pub fn top_edge(x0: f32, width: f32, y: f32, top: TopEdge) -> Vec<Pos2> {
     points
 }
 
-pub fn hexagon(rect: Rect) -> Vec<Pos2> {
-    let half = rect.height() / 2.0;
-    let mid = rect.center().y;
-    vec![
+/// Pointed beside a first row `head` tall, with straight sides below.
+pub fn hexagon(rect: Rect, head: f32) -> Vec<Pos2> {
+    let half = (head / 2.0).min(rect.height() / 2.0);
+    let mid = rect.min.y + half;
+    let low = rect.max.y - half;
+    let mut points = vec![
         pos2(rect.min.x, mid),
         pos2(rect.min.x + half, rect.min.y),
         pos2(rect.max.x - half, rect.min.y),
         pos2(rect.max.x, mid),
-        pos2(rect.max.x - half, rect.max.y),
-        pos2(rect.min.x + half, rect.max.y),
-    ]
+    ];
+    if low > mid {
+        points.push(pos2(rect.max.x, low));
+    }
+    points.extend([pos2(rect.max.x - half, rect.max.y), pos2(rect.min.x + half, rect.max.y)]);
+    if low > mid {
+        points.push(pos2(rect.min.x, low));
+    }
+    points
 }
 
 /// A menu body with a pointer out to `tip`, from the top edge when `tip` is
@@ -344,8 +352,18 @@ mod tests {
     #[test]
     fn hexagons_are_as_tall_as_their_rect() {
         let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 22.0));
-        let points = hexagon(rect);
+        let points = hexagon(rect, 22.0);
+        assert_eq!(points.len(), 6);
         assert_eq!(points[1].y, 0.0);
         assert_eq!(points[4].y, 22.0);
+    }
+
+    #[test]
+    fn a_taller_hexagon_keeps_its_points_beside_the_first_row() {
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 70.0));
+        let points = hexagon(rect, 22.0);
+        assert_eq!(points.len(), 8);
+        assert_eq!((points[0].y, points[3].y), (11.0, 11.0));
+        assert_eq!((points[4], points[7].y), (pos2(60.0, 59.0), 59.0));
     }
 }

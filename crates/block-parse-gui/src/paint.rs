@@ -12,7 +12,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Galley, Painter, Pos2, Rect, S
 
 use crate::bubble::{self, Bubble};
 use crate::interact::SnapMark;
-use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
+use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, append_text, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
 use crate::theme::Theme;
 
@@ -110,7 +110,7 @@ fn first_row_center(block: &PlacedBlock) -> f32 {
             Some(Section::Row { top, bottom } | Section::Branch { top, bottom }) => (top + bottom) / 2.0,
             None => block.rect.center().y,
         },
-        Form::Reporter(_) => block.rect.center().y,
+        Form::Reporter { first_row, .. } => block.rect.min.y + first_row,
     }
 }
 
@@ -192,7 +192,10 @@ pub fn snap_mark(painter: &Painter, mark: &SnapMark, t: Transform, theme: &Theme
             let edge = shape::top_edge(at.x, *width, at.y, TopEdge::Notched);
             painter.add(egui::Shape::line(t.points(edge), stroke));
         }
-        SnapMark::Slot { rect, shape } => outline(painter, *shape, t.rect(*rect), stroke, t.zoom),
+        SnapMark::Slot { rect, shape } => {
+            let rect = t.rect(*rect);
+            outline(painter, *shape, rect, rect.height(), stroke, t.zoom);
+        }
     }
 }
 
@@ -236,12 +239,13 @@ fn paint_block(
                 }
             }
         }
-        Form::Reporter(shape) => {
+        Form::Reporter { shape, head, .. } => {
             let rect = t.rect(block.rect);
-            fill(painter, *shape, rect, body, edge, t.zoom);
+            let head = head * t.zoom;
+            fill(painter, *shape, rect, head, body, edge, t.zoom);
             if let Some(accent) = accent {
                 for stroke in strokes(accent) {
-                    outline(painter, *shape, rect, stroke, t.zoom);
+                    outline(painter, *shape, rect, head, stroke, t.zoom);
                 }
             }
         }
@@ -262,7 +266,13 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     let (kind, text, error) = match &slot.content {
         SlotContent::Plugged(_) => return,
         SlotContent::Empty => {
-            fill(painter, slot.shape, rect, slot.swatch.shadow, edge, t.zoom);
+            fill(painter, slot.shape, rect, rect.height(), slot.swatch.shadow, edge, t.zoom);
+            hint(painter, rect, &slot.hint, slot.swatch.ink.gamma_multiply(0.6), t.zoom);
+            return;
+        }
+        SlotContent::Append { .. } => {
+            outline(painter, slot.shape, rect.shrink(edge.width), rect.height(), edge, t.zoom);
+            hint(painter, rect, &append_text(&slot.hint), slot.swatch.ink.gamma_multiply(0.75), t.zoom);
             return;
         }
         SlotContent::Literal { kind, text, error } => (kind, text, error),
@@ -273,11 +283,16 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     } else {
         theme.literal_fill
     };
-    fill(painter, slot.shape, rect, background, edge, t.zoom);
+    fill(painter, slot.shape, rect, rect.height(), background, edge, t.zoom);
     if error.is_some() {
-        outline(painter, slot.shape, rect, Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
+        outline(painter, slot.shape, rect, rect.height(), Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
     }
-    if live && !matches!(kind, LiteralKind::Choice(_)) {
+    // Under a live field too: the field is transparent and draws no hint.
+    if text.is_empty() && !matches!(kind, LiteralKind::Bool | LiteralKind::Choice(_)) {
+        hint(painter, rect, &slot.hint, theme.placeholder, t.zoom);
+        return;
+    }
+    if live && slot.is_field() && !matches!(kind, LiteralKind::Choice(_)) {
         return;
     }
 
@@ -308,6 +323,11 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     }
 }
 
+fn hint(painter: &Painter, rect: Rect, text: &str, color: Color32, zoom: f32) {
+    let font = FontId::proportional(LITERAL_SIZE * zoom);
+    painter.text(rect.center(), Align2::CENTER_CENTER, text, font, color);
+}
+
 /// Screen-space convex pieces as one mesh, so shared edges leave no seams.
 pub fn fill_pieces(painter: &Painter, pieces: impl IntoIterator<Item = Vec<Pos2>>, color: Color32) {
     let mut mesh = Mesh::default();
@@ -334,30 +354,31 @@ pub fn tick(painter: &Painter, center: Pos2, size: f32, stroke: Stroke) {
     painter.add(egui::Shape::line(tick.to_vec(), stroke));
 }
 
-fn fill(painter: &Painter, shape: Shape, rect: Rect, color: Color32, edge: Stroke, zoom: f32) {
+/// `head` sizes the ends.
+fn fill(painter: &Painter, shape: Shape, rect: Rect, head: f32, color: Color32, edge: Stroke, zoom: f32) {
     match shape {
         Shape::Round => {
-            painter.rect(rect, radius(rect.height() / 2.0), color, edge, StrokeKind::Inside);
+            painter.rect(rect, radius(head / 2.0), color, edge, StrokeKind::Inside);
         }
         Shape::Square => {
             painter.rect(rect, radius(3.0 * zoom), color, edge, StrokeKind::Inside);
         }
         Shape::Hexagon => {
-            painter.add(egui::Shape::convex_polygon(shape::hexagon(rect), color, edge));
+            painter.add(egui::Shape::convex_polygon(shape::hexagon(rect, head), color, edge));
         }
     }
 }
 
-fn outline(painter: &Painter, shape: Shape, rect: Rect, stroke: Stroke, zoom: f32) {
+fn outline(painter: &Painter, shape: Shape, rect: Rect, head: f32, stroke: Stroke, zoom: f32) {
     match shape {
         Shape::Round => {
-            painter.rect_stroke(rect, radius(rect.height() / 2.0), stroke, StrokeKind::Outside);
+            painter.rect_stroke(rect, radius(head / 2.0), stroke, StrokeKind::Outside);
         }
         Shape::Square => {
             painter.rect_stroke(rect, radius(3.0 * zoom), stroke, StrokeKind::Outside);
         }
         Shape::Hexagon => {
-            painter.add(egui::Shape::closed_line(shape::hexagon(rect), stroke));
+            painter.add(egui::Shape::closed_line(shape::hexagon(rect, head), stroke));
         }
     }
 }

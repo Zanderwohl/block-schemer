@@ -2,7 +2,7 @@
 
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::Shape;
-use block_parse::program::BlockId;
+use block_parse::program::{BlockId, Slot};
 use egui::{Pos2, Rect, Vec2};
 
 /// Screen pixels the pointer must travel before a press becomes a drag, so a
@@ -71,20 +71,20 @@ pub enum SnapMark {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LiteralEdit {
     pub block: BlockId,
-    pub input: String,
+    pub slot: Slot,
 }
 
 /// The choice literal whose menu is open. Keyed by id, like [`LiteralEdit`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenChoice {
     pub block: BlockId,
-    pub input: String,
+    pub slot: Slot,
     /// Screen pixels, when the menu is cut short to fit.
     pub scroll: f32,
 }
 
 impl OpenChoice {
-    pub fn is(&self, block: BlockId, input: &str) -> bool {
-        self.block == block && self.input == input
+    pub fn is(&self, block: BlockId, slot: &Slot) -> bool {
+        self.block == block && self.slot == *slot
     }
 }

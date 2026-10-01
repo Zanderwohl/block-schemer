@@ -3,9 +3,9 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Arg, Ast, Branch, Expr, Node, Problem, ProblemCode, Script, Severity, Stmt};
-use crate::language::{BlockDef, BlockKind, Fit, InputDef, Language, LiteralKind};
-use crate::program::{Block, BlockId, MAX_DEPTH, Program};
+use crate::ast::{Arg, Ast, Branch, Expr, List, Node, Problem, ProblemCode, Script, Severity, Stmt};
+use crate::language::{BlockDef, BlockKind, Fit, Language, LiteralKind};
+use crate::program::{Block, BlockId, Input, MAX_DEPTH, Program, Slot};
 use crate::value::Value;
 
 impl Program {
@@ -128,8 +128,8 @@ impl Builder<'_> {
             ));
         }
         let duplicate = !self.seen.insert(block.id);
-        let node = match self.language.block(&block.opcode) {
-            Some(def) => self.node(block, def, depth),
+        let (node, def) = match self.language.block(&block.opcode) {
+            Some(def) => (self.node(block, def, depth), def),
             None => {
                 let raw = self.raw(block, depth);
                 return Err(problem(
@@ -146,6 +146,16 @@ impl Builder<'_> {
                 Some(node),
             ));
         }
+        for list in def.lists() {
+            let count = block.lists.get(&list.name).map_or(0, Vec::len);
+            if count < list.min {
+                return Err(problem(
+                    ProblemCode::TooFewItems,
+                    format!("`{}` needs at least {} in `{}`", def.name, list.min, list.name),
+                    Some(node),
+                ));
+            }
+        }
         Ok(node)
     }
 
@@ -154,28 +164,54 @@ impl Builder<'_> {
             .inputs()
             .map(|input| Arg {
                 name: input.name.clone(),
-                value: self.arg(block, def, input, depth),
+                value: self.value(
+                    block,
+                    def,
+                    Slot::input(input.name.clone()),
+                    &input.ty,
+                    block.inputs.get(&input.name),
+                    input.default.as_deref(),
+                    depth,
+                ),
             })
             .collect();
         for (name, stored) in &block.inputs {
-            if def.input(name).is_some() {
+            if def.input(name).is_none() {
+                let value = self.unknown(block, def, Slot::input(name.clone()), stored, depth);
+                args.push(Arg { name: name.clone(), value });
+            }
+        }
+
+        let mut lists: Vec<List> = def
+            .lists()
+            .map(|list| {
+                let stored = block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[]);
+                let items = stored
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| {
+                        let slot = Slot::item(list.name.clone(), index);
+                        self.value(block, def, slot, &list.ty, Some(item), None, depth)
+                    })
+                    .collect();
+                List {
+                    name: list.name.clone(),
+                    items,
+                }
+            })
+            .collect();
+        for (name, stored) in &block.lists {
+            if def.list(name).is_some() {
                 continue;
             }
-            let recovered = stored.block.as_deref().and_then(|inner| self.recover(inner, depth + 1));
-            let literal = match &stored.literal {
-                Some(text) => format!(" (it held {text:?})"),
-                None => String::new(),
-            };
-            args.push(Arg {
+            let items = stored
+                .iter()
+                .enumerate()
+                .map(|(index, item)| self.unknown(block, def, Slot::item(name.clone(), index), item, depth))
+                .collect();
+            lists.push(List {
                 name: name.clone(),
-                value: Expr::Problem(Box::new(Problem {
-                    block: None,
-                    slot: Some((block.id, name.clone())),
-                    code: ProblemCode::UnknownInput,
-                    severity: Severity::Warning,
-                    message: format!("`{}` has no input `{name}`{literal}", def.name),
-                    recovered: recovered.map(Box::new),
-                })),
+                items,
             });
         }
 
@@ -213,13 +249,49 @@ impl Builder<'_> {
             id: block.id,
             opcode: block.opcode.clone(),
             args,
+            lists,
             branches,
         }
     }
 
-    fn arg(&mut self, block: &Block, def: &BlockDef, input: &InputDef, depth: usize) -> Expr {
-        let stored = block.inputs.get(&input.name);
-        let slot = Some((block.id, input.name.clone()));
+    /// What a slot the block does not define held, kept under a warning.
+    fn unknown(&mut self, block: &Block, def: &BlockDef, slot: Slot, stored: &Input, depth: usize) -> Expr {
+        let recovered = stored.block.as_deref().and_then(|inner| self.recover(inner, depth + 1));
+        let literal = match &stored.literal {
+            Some(text) => format!(" (it held {text:?})"),
+            None => String::new(),
+        };
+        let what = if slot.item.is_some() { "list" } else { "input" };
+        let message = format!("`{}` has no {what} `{}`{literal}", def.name, slot.input);
+        Expr::Problem(Box::new(Problem {
+            block: None,
+            slot: Some((block.id, slot)),
+            code: ProblemCode::UnknownInput,
+            severity: Severity::Warning,
+            message,
+            recovered: recovered.map(Box::new),
+        }))
+    }
+
+    /// A single input or list item of type `ty`. `default` stands in for a
+    /// single input the file lacks; a list item holding nothing is a hole.
+    #[allow(clippy::too_many_arguments)]
+    fn value(
+        &mut self,
+        block: &Block,
+        def: &BlockDef,
+        slot: Slot,
+        ty: &str,
+        stored: Option<&Input>,
+        default: Option<&str>,
+        depth: usize,
+    ) -> Expr {
+        let label = match slot.item {
+            Some(index) => format!("item {} of `{}`", index + 1, slot.input),
+            None => format!("`{}`", slot.input),
+        };
+        let hole = slot.item.is_some() && stored.is_none_or(Input::is_hole);
+        let slot = Some((block.id, slot));
         let problem = |code, message: String, at: Option<BlockId>, recovered: Option<Node>| {
             Expr::Problem(Box::new(Problem {
                 block: at,
@@ -240,24 +312,21 @@ impl Builder<'_> {
             let Some(output) = self.kind(inner).and_then(BlockKind::output).map(str::to_owned) else {
                 return problem(
                     ProblemCode::StatementAsInput,
-                    format!("`{inner_name}` does not report a value, so it cannot fill `{}`", input.name),
+                    format!("`{inner_name}` does not report a value, so it cannot fill {label}"),
                     Some(inner.id),
                     Some(node),
                 );
             };
-            return match self.language.fit(&output, &input.ty) {
+            return match self.language.fit(&output, ty) {
                 Fit::Exact => Expr::Node(Box::new(node)),
                 Fit::Convert => Expr::Convert {
                     from: output,
-                    to: input.ty.clone(),
+                    to: ty.to_owned(),
                     value: Box::new(Expr::Node(Box::new(node))),
                 },
                 Fit::No => problem(
                     ProblemCode::TypeMismatch,
-                    format!(
-                        "`{inner_name}` reports {output}, but `{}` of `{}` takes {}",
-                        input.name, def.name, input.ty
-                    ),
+                    format!("`{inner_name}` reports {output}, but {label} of `{}` takes {ty}", def.name),
                     Some(inner.id),
                     Some(node),
                 ),
@@ -266,12 +335,20 @@ impl Builder<'_> {
 
         let takes_literal = self
             .language
-            .ty(&input.ty)
+            .ty(ty)
             .is_some_and(|ty| ty.literal != LiteralKind::None);
+        if hole {
+            return problem(
+                ProblemCode::MissingInput,
+                format!("{label} of `{}` is empty", def.name),
+                None,
+                None,
+            );
+        }
         if !takes_literal {
             return problem(
                 ProblemCode::MissingInput,
-                format!("`{}` needs a block in `{}`", def.name, input.name),
+                format!("`{}` needs a block in {label}", def.name),
                 None,
                 None,
             );
@@ -280,13 +357,13 @@ impl Builder<'_> {
         // its default.
         let text = stored
             .and_then(|stored| stored.literal.as_deref())
-            .or(input.default.as_deref())
+            .or(default)
             .unwrap_or_default();
-        match self.language.parse_literal(&input.ty, text) {
+        match self.language.parse_literal(ty, text) {
             Ok(value) => Expr::Literal(value),
             Err(message) => problem(
                 ProblemCode::InvalidLiteral,
-                format!("`{}` of `{}`: {message}", input.name, def.name),
+                format!("{label} of `{}`: {message}", def.name),
                 None,
                 None,
             ),
@@ -296,21 +373,27 @@ impl Builder<'_> {
     /// A block whose opcode the language lacks, kept as written: literals as
     /// text, plugged blocks and branches parsed.
     fn raw(&mut self, block: &Block, depth: usize) -> Node {
+        let mut raw = |stored: &Input| match (&stored.block, &stored.literal) {
+            (Some(inner), _) => match self.block(inner, depth + 1) {
+                Ok(node) => Expr::Node(Box::new(node)),
+                Err(problem) => Expr::Problem(Box::new(problem)),
+            },
+            (None, literal) => Expr::Literal(Value::Text(literal.clone().unwrap_or_default())),
+        };
         let args = block
             .inputs
             .iter()
-            .map(|(name, stored)| {
-                let value = match (&stored.block, &stored.literal) {
-                    (Some(inner), _) => match self.block(inner, depth + 1) {
-                        Ok(node) => Expr::Node(Box::new(node)),
-                        Err(problem) => Expr::Problem(Box::new(problem)),
-                    },
-                    (None, literal) => Expr::Literal(Value::Text(literal.clone().unwrap_or_default())),
-                };
-                Arg {
-                    name: name.clone(),
-                    value,
-                }
+            .map(|(name, stored)| Arg {
+                name: name.clone(),
+                value: raw(stored),
+            })
+            .collect();
+        let lists = block
+            .lists
+            .iter()
+            .map(|(name, items)| List {
+                name: name.clone(),
+                items: items.iter().map(&mut raw).collect(),
             })
             .collect();
         let branches = block
@@ -325,6 +408,7 @@ impl Builder<'_> {
             id: block.id,
             opcode: block.opcode.clone(),
             args,
+            lists,
             branches,
         }
     }
@@ -371,6 +455,8 @@ mod tests {
             (id: "end", name: "End", kind: Cap, spec: "end"),
             (id: "add", name: "Add", kind: Reporter("number"), spec: "{a:number=1} + {b:number=2}"),
             (id: "yes", name: "Yes", kind: Reporter("bool"), spec: "yes"),
+            (id: "sum", name: "Sum", kind: Reporter("number"), spec: "sum {xs:number+}"),
+            (id: "all", name: "All", kind: Reporter("bool"), spec: "all {cs:bool*}"),
         ],
     )"#;
 
@@ -397,6 +483,78 @@ mod tests {
             blocks,
         });
         program
+    }
+
+    fn literal(text: &str) -> Input {
+        Input {
+            literal: Some(text.into()),
+            block: None,
+        }
+    }
+
+    fn reporter(block: Block) -> Input {
+        Input {
+            literal: None,
+            block: Some(Box::new(block)),
+        }
+    }
+
+    #[test]
+    fn list_items_parse_like_inputs_and_holes_are_missing() {
+        let language = language();
+        let mut scratch = Program::new(&language);
+        let mut sum = block(&mut scratch, &language, "sum");
+        let inner = block(&mut scratch, &language, "add");
+        let sum_id = sum.id;
+        sum.lists.insert(
+            "xs".into(),
+            vec![literal("1.5"), Input::default(), reporter(inner), literal("x")],
+        );
+        let mut say = block(&mut scratch, &language, "say");
+        plug(&mut say, "text", sum);
+
+        let ast = one_stack(vec![say]).ast(&language);
+        let Stmt::Node(say) = &ast.scripts[0].body[0] else { panic!() };
+        let Some(Expr::Convert { value, .. }) = say.arg("text") else { panic!("{say:#?}") };
+        let Expr::Node(sum) = value.as_ref() else { panic!() };
+        let xs = sum.list("xs").unwrap();
+        assert_eq!(xs.len(), 4, "indices match the program's");
+        assert_eq!(xs[0], Expr::Literal(Value::Float(1.5)));
+        assert!(matches!(&xs[2], Expr::Node(node) if node.opcode == "add"));
+        let problems = ast.problems();
+        assert_eq!(codes(&ast), [ProblemCode::MissingInput, ProblemCode::InvalidLiteral]);
+        assert_eq!(problems[0].slot, Some((sum_id, Slot::item("xs", 1))));
+        assert!(problems[0].message.contains("item 2 of `xs`"), "{}", problems[0].message);
+        assert_eq!(problems[1].slot, Some((sum_id, Slot::item("xs", 3))));
+    }
+
+    #[test]
+    fn a_plus_list_with_no_items_is_too_few() {
+        let language = language();
+        let mut scratch = Program::new(&language);
+        let sum = block(&mut scratch, &language, "sum");
+        let all = block(&mut scratch, &language, "all");
+        let ast = one_stack(vec![sum]).ast(&language);
+        assert_eq!(codes(&ast), [ProblemCode::TooFewItems]);
+        assert!(ast.problems()[0].recovered.is_some());
+        assert!(one_stack(vec![all]).ast(&language).is_clean(), "`*` may be empty");
+    }
+
+    #[test]
+    fn lists_the_block_lacks_are_kept_under_warnings() {
+        let language = language();
+        let mut scratch = Program::new(&language);
+        let mut all = block(&mut scratch, &language, "all");
+        let yes = block(&mut scratch, &language, "yes");
+        all.lists.insert("old".into(), vec![reporter(yes)]);
+        all.inputs.insert("cs".into(), literal("true"));
+
+        let ast = one_stack(vec![all]).ast(&language);
+        assert!(ast.is_clean());
+        assert_eq!(codes(&ast), [ProblemCode::UnknownInput, ProblemCode::UnknownInput], "a list as an input too");
+        let Stmt::Node(all) = &ast.scripts[0].body[0] else { panic!() };
+        let Some([Expr::Problem(problem)]) = all.list("old") else { panic!("{all:#?}") };
+        assert!(problem.recovered.as_ref().is_some_and(|node| node.opcode == "yes"));
     }
 
     #[test]
@@ -452,7 +610,7 @@ mod tests {
             [ProblemCode::MissingInput, ProblemCode::InvalidLiteral, ProblemCode::TypeMismatch]
         );
         let problems = ast.problems();
-        assert_eq!(problems[0].slot, Some((empty_id, "c".to_owned())));
+        assert_eq!(problems[0].slot, Some((empty_id, Slot::input("c"))));
         assert_eq!(problems[2].block, Some(add_id));
         assert!(problems[2].recovered.is_some(), "the misplaced reporter still parses");
         assert!(!ast.is_clean());
@@ -550,6 +708,7 @@ mod tests {
                     block: None,
                 },
             )]),
+            lists: BTreeMap::new(),
             branches: BTreeMap::from([("then".to_owned(), vec![inner])]),
         };
 
