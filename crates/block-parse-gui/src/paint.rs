@@ -261,9 +261,10 @@ fn paint_block(
     }
 
     for label in &block.labels {
-        let (size, ink) = match label.faint {
-            true => (FAINT_SIZE, swatch.ink.gamma_multiply(0.6)),
-            false => (LABEL_SIZE, swatch.ink),
+        let (size, ink) = if label.faint {
+            (FAINT_SIZE, swatch.ink.gamma_multiply(0.6))
+        } else {
+            (LABEL_SIZE, swatch.ink)
         };
         let font = FontId::proportional(size * t.zoom);
         painter.text(t.pos(label.at), Align2::LEFT_CENTER, &label.text, font, ink);

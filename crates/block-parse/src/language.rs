@@ -272,7 +272,7 @@ pub enum Part {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Label {
     pub text: String,
-    /// Drawn smaller and fainter.
+    /// A reading aid, not part of the language.
     pub faint: bool,
 }
 

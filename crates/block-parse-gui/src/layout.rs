@@ -46,7 +46,6 @@ pub trait Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Font {
     Label,
-    /// A faint label's.
     Faint,
     Literal,
 }
@@ -1061,6 +1060,46 @@ mod tests {
 
     fn placed(scene: &Scene, id: BlockId) -> &PlacedBlock {
         scene.blocks.iter().find(|block| block.id == id).unwrap()
+    }
+
+    #[test]
+    fn faint_labels_are_measured_and_placed_as_faint() {
+        /// Faint text half as wide as plain.
+        struct ByFont;
+        impl Measure for ByFont {
+            fn text_width(&self, text: &str, font: Font) -> f32 {
+                let per_char = if font == Font::Faint { 3.5 } else { 7.0 };
+                per_char * text.chars().count() as f32
+            }
+        }
+        let language = Language::from_ron(
+            r#"Language(
+                name: "t",
+                file: (extension: "t"),
+                types: { "n": (literal: Text) },
+                blocks: [(id: "if", name: "If", spec: "if {a:n} _then_ {b:n}")],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let (program, ids) = with_stack(&language, &["if"]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &ByFont,
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        }
+        .program(&program);
+
+        let block = placed(&scene, ids[0]);
+        let faint: Vec<_> = block.labels.iter().map(|label| (label.text.as_str(), label.faint)).collect();
+        assert_eq!(faint, [("if", false), ("then", true)]);
+        let then = &block.labels[1];
+        let next = block.slots.iter().find(|slot| slot.slot == Slot::input("b")).unwrap();
+        assert_eq!(next.rect.min.x - then.at.x, 3.5 * 4.0 + ITEM_GAP);
     }
 
     #[test]

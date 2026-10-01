@@ -18,8 +18,8 @@ Language(
 
     categories: [
         (name: "Program structure", color: (hue: 95.0)),
-        (name: "Primitive expressions", color: (hue: 60.0)),
-        (name: "Derived expressions", color: (hue: 25.0)),
+        (name: "Primitive expression types", color: (hue: 60.0)),
+        (name: "Derived expression types", color: (hue: 25.0)),
         (name: "Control features", color: (hue: 260.0)),
         (name: "Numbers", color: (hue: 145.0)),
         (name: "Pairs and lists", color: (hue: 330.0)),
@@ -54,14 +54,14 @@ Language(
             layout: Body(2),
         ),
 
-        // Primitive expressions
-        (id: "variable", name: "Variable", category: "Primitive expressions", kind: Reporter("datum"), spec: "{variable:symbol}"),
-        (id: "quote", name: "Quote", category: "Primitive expressions", kind: Reporter("datum"), spec: "quote {datum:datum}"),
-        (id: "string", name: "String", category: "Primitive expressions", kind: Reporter("datum"), spec: "\"{text:string}\""),
+        // Primitive expression types
+        (id: "variable", name: "Variable", category: "Primitive expression types", kind: Reporter("datum"), spec: "{variable:symbol}"),
+        (id: "quote", name: "Quote", category: "Primitive expression types", kind: Reporter("datum"), spec: "quote {datum:datum}"),
+        (id: "string", name: "String", category: "Primitive expression types", kind: Reporter("datum"), spec: "\"{text:string}\""),
         (
             id: "call",
             name: "Call",
-            category: "Primitive expressions",
+            category: "Primitive expression types",
             kind: Reporter("datum"),
             spec: "{operator:datum} {operands:datum*}",
             hints: {"operands": "operand"},
@@ -70,7 +70,7 @@ Language(
         (
             id: "lambda",
             name: "Lambda",
-            category: "Primitive expressions",
+            category: "Primitive expression types",
             kind: Reporter("datum"),
             spec: "lambda {formals:symbol*} {body:datum+}",
             hints: {"formals": "variable", "body": "expression"},
@@ -79,17 +79,17 @@ Language(
         (
             id: "if",
             name: "If",
-            category: "Primitive expressions",
+            category: "Primitive expression types",
             kind: Reporter("datum"),
             spec: "if {test:datum} _then_ {consequent:datum} _else_ {alternate:datum}",
             layout: Body(1),
         ),
 
-        // Derived expressions
+        // Derived expression types
         (
             id: "let",
             name: "Let",
-            category: "Derived expressions",
+            category: "Derived expression types",
             kind: Reporter("datum"),
             spec: "let {bindings:binding*} {body:datum+}",
             hints: {"bindings": "binding", "body": "expression"},
@@ -98,14 +98,14 @@ Language(
         (
             id: "binding",
             name: "Binding",
-            category: "Derived expressions",
+            category: "Derived expression types",
             kind: Reporter("binding"),
             spec: "{variable:symbol} _as_ {init:datum}",
         ),
         (
             id: "begin",
             name: "Begin",
-            category: "Derived expressions",
+            category: "Derived expression types",
             kind: Reporter("datum"),
             spec: "begin {expressions:datum+}",
             hints: {"expressions": "expression"},

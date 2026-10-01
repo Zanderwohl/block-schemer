@@ -19,8 +19,9 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   names, so most blocks generate `(opcode arguments…)` in spec order.
   Categories are R7RS's section titles and inputs its argument names
   (`proc`, `formals`, `z`), except `cons`, whose inputs are `car` and `cdr`.
-  Words that are not Scheme, such as `if`'s `then` and `else`, are faint.
-  `fold` is SRFI 1's, with its names; Steel's takes one list.
+  Connecting words that are not Scheme, such as `if`'s `then` and `else`,
+  are faint. `fold` is SRFI 1's, with its names, filed under Pairs and lists;
+  Steel's takes one list.
 - `literals`: validators for the `datum` type (a number, boolean, character,
   string in quotes or symbol) and the `symbol` type (an identifier). The
   editor shows text they refuse as a problem, and the code generator emits

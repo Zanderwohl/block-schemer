@@ -14,9 +14,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     / Reporter(type); a spec string like
     `"repeat {times:number=10} [body]"` gives inputs and C-block branches,
     `{args:datum*}` (or `+`, at least one) a list of inputs, and a word
-    wrapped in underscores (`_then_`) a faint label, smaller and dimmer. A block's
-    `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
-    later ones and later lists' items on indented rows of their own
+    wrapped in underscores (`_then_`) a faint label, smaller and dimmer. A
+    block's `layout` is `Inline` or `Body(n)`: the first `n` inputs on the
+    first row, later ones and later lists' items on indented rows of their own
     (`documentation/03-variadic.md`). A blank slot shows its input's name as a
     faded hint, or the block's `hints` text for it, and no validation error
     until there is text to check; a list's empty slot shows it
