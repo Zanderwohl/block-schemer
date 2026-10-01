@@ -6,6 +6,8 @@ Steel is currently mostly r5rs-compliant, and is working toward r7rs compliance.
 
 ![A view of Block Schemer](./readme/sum-of-squares.png)
 
+![A speech bubble example](./readme/speech-bubble.png)
+
 ## Releases
 
 To-do!
