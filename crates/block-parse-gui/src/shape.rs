@@ -2,7 +2,7 @@
 //! Fills are split into convex pieces: epaint fills a closed path as a
 //! triangle fan, which would fill a concave notch back in.
 
-use egui::{Pos2, Rect, pos2};
+use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
 use crate::layout::{Section, StackForm};
 
@@ -150,6 +150,65 @@ pub fn hexagon(rect: Rect, head: f32) -> Vec<Pos2> {
         points.push(pos2(rect.min.x, low));
     }
     points
+}
+
+/// Clockwise from the top-left, y down, each corner a quarter circle of `radius`.
+pub fn rounded_rect(rect: Rect, radius: f32) -> Vec<Pos2> {
+    const SEGMENTS: usize = 6;
+    let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0).max(0.0);
+    let centers = [
+        pos2(rect.min.x + r, rect.min.y + r),
+        pos2(rect.max.x - r, rect.min.y + r),
+        pos2(rect.max.x - r, rect.max.y - r),
+        pos2(rect.min.x + r, rect.max.y - r),
+    ];
+    let mut points = Vec::with_capacity(4 * (SEGMENTS + 1));
+    for (corner, center) in centers.into_iter().enumerate() {
+        for i in 0..=SEGMENTS {
+            let angle = std::f32::consts::FRAC_PI_2 * (corner as f32 + 2.0 + i as f32 / SEGMENTS as f32);
+            points.push(center + r * Vec2::angled(angle));
+        }
+    }
+    points
+}
+
+/// A strip `width` wide just inside a clockwise outline, one quad per side,
+/// each with its outward normal. Mitered, so corners meet like a chamfer's.
+pub fn bevel(outline: &[Pos2], width: f32) -> Vec<(ConvexPiece, Vec2)> {
+    let mut points: Vec<Pos2> = Vec::with_capacity(outline.len());
+    for &point in outline {
+        if points.last().is_none_or(|last| last.distance(point) > 1e-3) {
+            points.push(point);
+        }
+    }
+    while points.len() > 1 && points[0].distance(points[points.len() - 1]) <= 1e-3 {
+        points.pop();
+    }
+    let n = points.len();
+    if n < 3 {
+        return Vec::new();
+    }
+    let normal = |i: usize| {
+        let d = (points[(i + 1) % n] - points[i]).normalized();
+        vec2(d.y, -d.x)
+    };
+    let normals: Vec<Vec2> = (0..n).map(normal).collect();
+    let inner: Vec<Pos2> = (0..n)
+        .map(|i| {
+            let (before, after) = (normals[(i + n - 1) % n], normals[i]);
+            let sum = before + after;
+            let miter = if sum.length() > 1e-3 { sum.normalized() } else { after };
+            // Long miters at sharp corners would cross the strip opposite.
+            let reach = width / miter.dot(after).max(0.5);
+            points[i] - miter * reach
+        })
+        .collect();
+    (0..n)
+        .map(|i| {
+            let j = (i + 1) % n;
+            (vec![points[i], points[j], inner[j], inner[i]], normals[i])
+        })
+        .collect()
 }
 
 /// A menu body with a pointer out to `tip`, from the top edge when `tip` is
@@ -347,6 +406,20 @@ mod tests {
         for (a, b) in tab.iter().zip(&notch) {
             assert!(a.distance(*b) < 1e-4, "{tab:?} vs {notch:?}");
         }
+    }
+
+    #[test]
+    fn a_bevel_lies_inside_its_outline_facing_outward() {
+        for form in forms() {
+            let outline = stack_outline(rect(&form), &form);
+            for (piece, normal) in bevel(&outline, 2.0) {
+                let (outer, inner) = (piece[0], piece[3]);
+                assert!((outer - inner).dot(normal) > 1.0, "{piece:?} {normal:?}");
+            }
+        }
+        let sides = bevel(&corners(Rect::from_min_size(pos2(0.0, 0.0), vec2(40.0, 20.0))), 2.0);
+        assert_eq!(sides[0].1, vec2(0.0, -1.0));
+        assert!(sides[0].0[3].distance(pos2(2.0, 2.0)) < 1e-4);
     }
 
     #[test]

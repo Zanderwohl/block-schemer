@@ -42,6 +42,8 @@ impl Transform {
 }
 
 const ACCENT_WIDTH: f32 = 3.0;
+/// The chamfer around a block's face, lit from the top left.
+const BEVEL_WIDTH: f32 = 2.0;
 /// Under every accent, so it never depends on contrast with the block.
 const HALO_WIDTH: f32 = ACCENT_WIDTH + 2.5;
 
@@ -211,10 +213,13 @@ fn paint_block(
     muted: bool,
 ) {
     let swatch = block.swatch;
-    let (body, edge_color) = if muted {
-        (swatch.muted, swatch.muted_edge)
+    let (body, edge_color, light, dark) = if muted {
+        (swatch.muted, swatch.muted_edge, swatch.muted_highlight, swatch.muted_shadow)
     } else {
-        (swatch.fill, swatch.edge)
+        (swatch.fill, swatch.edge, swatch.highlight, swatch.shadow)
+    };
+    let bevel = |outline: &[Pos2]| {
+        bevel(painter, outline, BEVEL_WIDTH * t.zoom, body, light, dark);
     };
     let edge = Stroke::new((1.0 * t.zoom).max(1.0), edge_color);
     let strokes = |accent: Color32| {
@@ -228,6 +233,7 @@ fn paint_block(
             let pieces = shape::stack_fill(block.rect, form).into_iter().map(|piece| t.points(piece));
             fill_pieces(painter, pieces, body);
             let outline = t.points(shape::stack_outline(block.rect, form));
+            bevel(&outline);
             match accent {
                 Some(accent) => {
                     for stroke in strokes(accent) {
@@ -242,7 +248,9 @@ fn paint_block(
         Form::Reporter { shape, head, .. } => {
             let rect = t.rect(block.rect);
             let head = head * t.zoom;
-            fill(painter, *shape, rect, head, body, edge, t.zoom);
+            fill(painter, *shape, rect, head, body, Stroke::NONE, t.zoom);
+            bevel(&polygon(*shape, rect, head, t.zoom));
+            fill(painter, *shape, rect, head, Color32::TRANSPARENT, edge, t.zoom);
             if let Some(accent) = accent {
                 for stroke in strokes(accent) {
                     outline(painter, *shape, rect, head, stroke, t.zoom);
@@ -328,6 +336,28 @@ fn hint(painter: &Painter, rect: Rect, text: &str, color: Color32, zoom: f32) {
     painter.text(rect.center(), Align2::CENTER_CENTER, text, font, color);
 }
 
+/// Each side shaded by how squarely it faces the light: full `light` facing up
+/// or left, full `dark` facing down or right, `base` on the diagonal between.
+fn bevel(painter: &Painter, outline: &[Pos2], width: f32, base: Color32, light: Color32, dark: Color32) {
+    let toward_light = vec2(-1.0, -1.0);
+    let mut mesh = Mesh::default();
+    for (piece, normal) in shape::bevel(outline, width) {
+        let facing = normal.dot(toward_light).clamp(-1.0, 1.0);
+        let color = if facing >= 0.0 {
+            base.lerp_to_gamma(light, facing)
+        } else {
+            base.lerp_to_gamma(dark, -facing)
+        };
+        let first = mesh.vertices.len() as u32;
+        for point in piece {
+            mesh.colored_vertex(point, color);
+        }
+        mesh.add_triangle(first, first + 1, first + 2);
+        mesh.add_triangle(first, first + 2, first + 3);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 /// Screen-space convex pieces as one mesh, so shared edges leave no seams.
 pub fn fill_pieces(painter: &Painter, pieces: impl IntoIterator<Item = Vec<Pos2>>, color: Color32) {
     let mut mesh = Mesh::default();
@@ -367,6 +397,16 @@ fn fill(painter: &Painter, shape: Shape, rect: Rect, head: f32, color: Color32, 
             painter.add(egui::Shape::convex_polygon(shape::hexagon(rect, head), color, edge));
         }
     }
+}
+
+/// The outline [`fill`] draws, as points.
+fn polygon(shape: Shape, rect: Rect, head: f32, zoom: f32) -> Vec<Pos2> {
+    let corner = match shape {
+        Shape::Round => head / 2.0,
+        Shape::Square => 3.0 * zoom,
+        Shape::Hexagon => return shape::hexagon(rect, head),
+    };
+    shape::rounded_rect(rect, radius(corner).nw as f32)
 }
 
 fn outline(painter: &Painter, shape: Shape, rect: Rect, head: f32, stroke: Stroke, zoom: f32) {
