@@ -121,6 +121,7 @@ call `block_parse_gui::snapshot::program`.
 - `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
 - Native OS menus.
+- A cap on undo history; each step holds a whole copy of the stacks.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice
   menus; Escape closes one.

@@ -282,9 +282,9 @@ impl App {
             self.undo(ctx);
         }
         if save_as {
-            self.save_as();
+            self.save_as(ctx);
         } else if save {
-            self.save();
+            self.save(ctx);
         }
         if new {
             self.request(Pending::New, ctx);
@@ -312,10 +312,10 @@ impl App {
             }
             ui.separator();
             if ui.add(item("Save", &SAVE)).clicked() {
-                self.save();
+                self.save(&ctx);
             }
             if ui.add(item("Save As…", &SAVE_AS)).clicked() {
-                self.save_as();
+                self.save_as(&ctx);
             }
             ui.separator();
             if ui.add(item("Quit", &QUIT)).clicked() {
@@ -414,7 +414,7 @@ impl App {
             // A canceled Save As dialog cancels the whole action.
             Some(Choice::Save) => {
                 self.pending = None;
-                if self.save() {
+                if self.save(ctx) {
                     self.perform(action, ctx);
                 }
             }
@@ -428,14 +428,14 @@ impl App {
     }
 
     /// True if the program was written.
-    fn save(&mut self) -> bool {
+    fn save(&mut self, ctx: &egui::Context) -> bool {
         match self.path.clone() {
-            Some(path) => self.write(path),
-            None => self.save_as(),
+            Some(path) => self.write(ctx, path),
+            None => self.save_as(ctx),
         }
     }
 
-    fn save_as(&mut self) -> bool {
+    fn save_as(&mut self, ctx: &egui::Context) -> bool {
         let extension = self.language.file.extension.clone();
         let suggested = self
             .path
@@ -449,10 +449,12 @@ impl App {
         if path.extension().is_none() {
             path.set_extension(&extension);
         }
-        self.write(path)
+        self.write(ctx, path)
     }
 
-    fn write(&mut self, path: PathBuf) -> bool {
+    fn write(&mut self, ctx: &egui::Context, path: PathBuf) -> bool {
+        // So the entry is written normalized and stays one undo step.
+        self.editor.commit_edit(ctx, &self.language, &mut self.program);
         match self.program.save(&path) {
             Ok(()) => {
                 self.history.mark_saved(&self.program);

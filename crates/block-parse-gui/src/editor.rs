@@ -798,15 +798,18 @@ impl BlockEditor {
                     select_all(ui.ctx(), id, buffer.chars().count());
                 }
                 let this = |edit: &LiteralEdit| edit.block == slot.parent && edit.input == slot.input;
+                // egui reports a loss for two frames; once settled, a second
+                // pass would normalize whatever an undo just put back.
+                let editing = self.edit.as_ref().is_some_and(this);
                 if response.has_focus() {
                     self.edit = Some(LiteralEdit {
                         block: slot.parent,
                         input: slot.input.clone(),
                     });
-                } else if self.edit.as_ref().is_some_and(this) {
+                } else if editing {
                     self.edit = None;
                 }
-                if response.lost_focus() {
+                if response.lost_focus() && editing {
                     let tidied = language.normalize_literal(&slot.ty, &buffer);
                     return tidied != text && program.set_literal(slot.parent, &slot.input, tidied);
                 }
@@ -1500,8 +1503,9 @@ mod tests {
         assert_eq!(hue(&program).as_deref(), Some("blue"));
     }
 
-    #[test]
-    fn typing_into_a_field_is_one_step_that_settles_when_the_field_lets_go() {
+    /// [`editing_a_code`] on a canvas with nothing focused yet, and the screen
+    /// rect of its field.
+    fn a_code_on_canvas() -> (Language, Program, BlockId, egui::Context, BlockEditor, Rect) {
         let (language, mut program, id, _) = editing_a_code();
         let ctx = egui::Context::default();
         let mut editor = codon_editor();
@@ -1517,45 +1521,81 @@ mod tests {
         }
         .program(&program);
         let field = scene.slots().next().unwrap().rect.translate(editor.view.pan);
-        let code = |program: &Program| program.find(id).unwrap().inputs["code"].literal.clone();
+        (language, program, id, ctx, editor, field)
+    }
 
-        let mut history = block_parse::History::new(&program);
-        let mut run = |events, program: &mut Program| {
-            let input = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
-                events,
-                ..Default::default()
-            };
-            let mut output = EditorOutput::default();
-            ctx.run_ui(input, |ui| output = editor.show_with(ui, &language, program, &Overlay::default()))
-                .textures_delta
-                .clear();
-            if output.settled {
-                history.record(program);
-            }
-            output
+    /// One frame, recording in `history` when it settles.
+    fn recorded(
+        ctx: &egui::Context,
+        editor: &mut BlockEditor,
+        language: &Language,
+        program: &mut Program,
+        history: &mut block_parse::History,
+        events: Vec<egui::Event>,
+    ) -> EditorOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+            events,
+            ..Default::default()
         };
+        let mut output = EditorOutput::default();
+        ctx.run_ui(input, |ui| output = editor.show_with(ui, language, program, &Overlay::default()))
+            .textures_delta
+            .clear();
+        if output.settled {
+            history.record(program);
+        }
+        output
+    }
+
+    fn code(program: &Program, id: BlockId) -> Option<String> {
+        program.find(id).unwrap().inputs["code"].literal.clone()
+    }
+
+    #[test]
+    fn typing_into_a_field_is_one_step_that_settles_when_the_field_lets_go() {
+        let (language, mut program, id, ctx, mut editor, field) = a_code_on_canvas();
+        let mut history = block_parse::History::new(&program);
         let mut steps = click(field.center());
         steps.extend(["x", "y"].map(|text| vec![egui::Event::Text(text.into())]));
         let mut settled = false;
         for events in steps {
-            settled |= run(events, &mut program).settled;
+            settled |= recorded(&ctx, &mut editor, &language, &mut program, &mut history, events).settled;
         }
-        assert_eq!(code(&program).as_deref(), Some("xy"));
+        assert_eq!(code(&program, id).as_deref(), Some("xy"));
         assert!(!settled, "settled while still typing");
 
         let mut settled = false;
         for events in click(pos2(700.0, 500.0)) {
-            settled |= run(events, &mut program).settled;
+            settled |= recorded(&ctx, &mut editor, &language, &mut program, &mut history, events).settled;
         }
         assert!(settled);
-        assert_eq!(code(&program).as_deref(), Some("XY"), "normalized as it let go");
+        assert_eq!(code(&program, id).as_deref(), Some("XY"), "normalized as it let go");
 
         assert!(history.undo(&mut program));
-        assert_eq!(code(&program).as_deref(), Some("ab"), "typing and normalizing are one step");
+        assert_eq!(code(&program, id).as_deref(), Some("ab"), "typing and normalizing are one step");
         assert!(!history.can_undo(&program));
         assert!(history.redo(&mut program));
-        assert_eq!(code(&program).as_deref(), Some("XY"));
+        assert_eq!(code(&program, id).as_deref(), Some("XY"));
+    }
+
+    #[test]
+    fn undoing_mid_entry_is_not_normalized_over_as_the_field_lets_go() {
+        let (language, mut program, id, ctx, mut editor, field) = a_code_on_canvas();
+        let mut history = block_parse::History::new(&program);
+        let mut steps = click(field.center());
+        steps.push(vec![egui::Event::Text("x".into())]);
+        for events in steps {
+            recorded(&ctx, &mut editor, &language, &mut program, &mut history, events);
+        }
+        editor.commit_edit(&ctx, &language, &mut program);
+        assert!(history.undo(&mut program));
+        assert_eq!(code(&program, id).as_deref(), Some("ab"));
+        for _ in 0..3 {
+            recorded(&ctx, &mut editor, &language, &mut program, &mut history, vec![]);
+        }
+        assert_eq!(code(&program, id).as_deref(), Some("ab"), "normalized again after the undo");
+        assert!(history.can_redo(&program));
     }
 
     #[test]

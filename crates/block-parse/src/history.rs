@@ -4,8 +4,8 @@
 
 use crate::program::{Program, Stack};
 
-/// Starts at the program as opened and is never saved. Recording while undone
-/// drops everything after the cursor.
+/// Starts at the program as opened and lives only in memory. Recording while
+/// undone drops everything after the cursor.
 #[derive(Debug, Clone)]
 pub struct History {
     /// Only stacks: restoring leaves the program's id counter alone, so an

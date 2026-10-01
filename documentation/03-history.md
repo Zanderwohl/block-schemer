@@ -6,7 +6,8 @@ the before of the next: undo moves the cursor back and restores the state
 there, redo moves it forward. Nothing is popped until a new step is recorded
 while undone, which drops every state after the cursor.
 
-The line starts at the program as opened and lives only in memory.
+The line starts at the program as opened and lives only in memory. It has
+no cap: every step keeps a whole copy of the stacks.
 
 ## Who owns it
 
@@ -52,3 +53,5 @@ never sees them.
 `mark_saved` notes the current state as written to disk and `is_saved` says
 whether the program is back at it, so undoing to what was saved clears the
 unsaved-changes marker. A new step recorded while undone past it forgets it.
+The standalone editor commits a literal being typed before writing, so the
+file holds it normalized and the entry stays one step.
