@@ -1,5 +1,8 @@
 //! `block-schemer [program.scmb]`
 
+// Without it, Windows opens a console window beside the app.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
