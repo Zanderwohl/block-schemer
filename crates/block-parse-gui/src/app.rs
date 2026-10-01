@@ -281,7 +281,7 @@ impl eframe::App for App {
         if self.pending.is_none() {
             self.shortcuts(&ctx);
         }
-        self.poll_runner(&ctx);
+        self.poll_runner();
 
         if self.menus == Menus::Egui {
             egui::Panel::top("menu_bar").show(ui, |ui| {
@@ -411,6 +411,12 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         if let Some(native) = &self.native {
             native.set_enabled(|command| self.pending.is_none() && self.enabled(command));
+        }
+
+        // Last, so a run sent this frame counts. Answers arrive with no input
+        // to wake egui.
+        if self.runner.as_ref().is_some_and(|runner| runner.status() != RunStatus::Idle) {
+            ctx.request_repaint_after(Duration::from_millis(30));
         }
     }
 }
@@ -741,14 +747,10 @@ impl App {
     /// Answers that came back since the last frame. Only blocks still
     /// outlined get their bubble, so one dismissed meanwhile stays gone; one
     /// that answered elsewhere loses its outline once the runner is idle.
-    fn poll_runner(&mut self, ctx: &egui::Context) {
+    fn poll_runner(&mut self) {
         let Some(runner) = &mut self.runner else {
             return;
         };
-        if runner.status() != RunStatus::Idle {
-            // Answers arrive with no input to wake egui.
-            ctx.request_repaint_after(Duration::from_millis(30));
-        }
         if !runner.poll() {
             return;
         }
@@ -761,12 +763,9 @@ impl App {
             .filter(|highlight| highlight.style == HighlightStyle::Dispatched)
             .map(|highlight| highlight.block)
             .collect();
-        let mut arrived = false;
         for block in outlined {
-            if let Some(bubble) = bubbles.get(&block)
-                && self.overlay.bubbles.insert(block, bubble.clone()).is_none()
-            {
-                arrived = true;
+            if let Some(bubble) = bubbles.get(&block) {
+                self.overlay.bubbles.insert(block, bubble.clone());
             }
         }
         if idle {
@@ -775,11 +774,9 @@ impl App {
                 .highlights
                 .retain(|highlight| highlight.style != HighlightStyle::Dispatched || bubbles.contains_key(&highlight.block));
         }
-        if let Some(console) = self.sync_tabs()
-            && !arrived
-        {
-            self.show_tab(console);
-        }
+        // Not brought forward: a run that answers only in the console wrote to
+        // it as it was sent, which already did.
+        self.sync_tabs();
     }
 
     fn dismiss_runs(&mut self) {

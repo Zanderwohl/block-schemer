@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use steel::SteelVal;
+use steel::steel_vm::ThreadStateController;
 use steel::steel_vm::engine::Engine;
 
 use crate::codegen::OUTPUT_PORT;
@@ -53,39 +54,29 @@ pub struct Steel {
     interrupter: Arc<SteelInterrupt>,
 }
 
-/// Steel does not export its controller's type, so it is kept in closures.
-struct Controls {
-    interrupt: Box<dyn Fn() + Send + Sync>,
-    clear: Box<dyn Fn() + Send + Sync>,
-}
+/// Swapped to each new engine's controller on `reset`.
+struct SteelInterrupt(Mutex<ThreadStateController>);
 
-impl Controls {
-    fn of(engine: &Engine) -> Self {
-        let (interrupt, clear) = (engine.get_thread_state_controller(), engine.get_thread_state_controller());
-        Self {
-            interrupt: Box::new(move || interrupt.interrupt()),
-            clear: Box::new(move || clear.resume()),
-        }
+impl SteelInterrupt {
+    fn controller(&self) -> std::sync::MutexGuard<'_, ThreadStateController> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
-
-/// Swapped to each new engine's controls on `reset`.
-struct SteelInterrupt(Mutex<Controls>);
 
 impl Interrupt for SteelInterrupt {
     fn interrupt(&self) {
-        (self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).interrupt)();
+        self.controller().interrupt();
     }
 
     fn clear(&self) {
-        (self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear)();
+        self.controller().resume();
     }
 }
 
 impl Steel {
     pub fn new() -> Self {
         let engine = Self::engine();
-        let interrupter = Arc::new(SteelInterrupt(Mutex::new(Controls::of(&engine))));
+        let interrupter = Arc::new(SteelInterrupt(Mutex::new(engine.get_thread_state_controller())));
         Self { engine, interrupter }
     }
 
@@ -133,7 +124,7 @@ impl Scheme for Steel {
 
     fn reset(&mut self) {
         self.engine = Self::engine();
-        *self.interrupter.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Controls::of(&self.engine);
+        *self.interrupter.controller() = self.engine.get_thread_state_controller();
     }
 
     fn interrupter(&self) -> Arc<dyn Interrupt> {

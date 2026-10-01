@@ -36,6 +36,8 @@ pub struct SchemerRunner<D> {
     language: Language,
     dispatch: D,
     pending: HashMap<Ticket, Pending>,
+    /// The latest double-click's; an earlier one's answer is not a bubble.
+    latest: Option<Ticket>,
     answers: HashMap<BlockId, String>,
     console: String,
     /// Show the `__out` port in echoed and inspected code.
@@ -54,6 +56,7 @@ impl<D: Dispatch> SchemerRunner<D> {
             language,
             dispatch,
             pending: HashMap::new(),
+            latest: None,
             answers: HashMap::new(),
             console: String::new(),
             harness: false,
@@ -146,13 +149,19 @@ impl<D: Dispatch> SchemerRunner<D> {
         match codegen::script(&self.language, script) {
             Ok(source) => {
                 let ticket = self.dispatch.send(Job { source, fresh: false });
+                self.latest = Some(ticket);
                 self.pending.insert(ticket, Pending::Evaluate { block, echo });
             }
-            Err(problem) => self.answer(block, echo, Err(format!("Can't run: {problem}"))),
+            Err(problem) => {
+                self.latest = None;
+                self.answer(block, echo, Err(format!("Can't run: {problem}")), true);
+            }
         }
     }
 
-    fn answer(&mut self, block: BlockId, echo: Option<String>, result: Result<Answer, String>) {
+    /// The console is a transcript, so it gets every answer; a bubble, only
+    /// the `latest`.
+    fn answer(&mut self, block: BlockId, echo: Option<String>, result: Result<Answer, String>, latest: bool) {
         if let Some(echo) = echo {
             self.write(&format!("> {echo}"));
         }
@@ -162,7 +171,9 @@ impl<D: Dispatch> SchemerRunner<D> {
             Err(error) => (error.clone(), error),
         };
         self.write(&said);
-        self.answers.insert(block, bubble);
+        if latest {
+            self.answers.insert(block, bubble);
+        }
     }
 }
 
@@ -198,7 +209,10 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
         let changed = !answers.is_empty();
         for (ticket, result) in answers {
             match self.pending.remove(&ticket) {
-                Some(Pending::Evaluate { block, echo }) => self.answer(block, echo, result),
+                Some(Pending::Evaluate { block, echo }) => {
+                    let latest = self.latest == Some(ticket);
+                    self.answer(block, echo, result, latest);
+                }
                 Some(Pending::Play) => self.write(&result.map_or_else(|error| error, |answer| shown(&answer))),
                 None => {}
             }
@@ -236,8 +250,8 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
         self.write(&format!("{line}\n"));
     }
 
-    /// Only the latest answer is kept, as the app dismisses bubbles on the
-    /// next edit or click. The program block plays.
+    /// Only the latest run's answer is kept as a bubble, as the app dismisses
+    /// bubbles on the next edit or click. The program block plays.
     fn run_block(&mut self, program: &Program, path: Option<&Path>, block: BlockId, script: &Script) {
         self.answers.clear();
         if is_program(program, block) {
@@ -447,6 +461,20 @@ mod tests {
         assert!(runner.inspect(&program, BlockId(10), &script).unwrap().contains(codegen::OUTPUT_PORT));
         assert!(runner.overlay().bubbles.is_empty());
         assert!(runner.console().is_empty());
+    }
+
+    #[test]
+    fn only_the_latest_double_click_answers_in_a_bubble() {
+        let (language, program, mut runner) = example();
+        for id in [10, 1] {
+            let script = program.script_at(&language, BlockId(id)).unwrap();
+            runner.run_block(&program, None, BlockId(id), &script);
+        }
+        settle(&mut runner);
+        let bubbles = runner.overlay().bubbles;
+        assert_eq!(bubbles.get(&BlockId(1)).map(String::as_str), Some("ok"));
+        assert!(!bubbles.contains_key(&BlockId(10)), "superseded before it answered");
+        assert!(runner.console().contains("hypotenuse squared:\n25\n"), "the transcript keeps it");
     }
 
     #[test]

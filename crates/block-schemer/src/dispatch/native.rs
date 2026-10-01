@@ -60,23 +60,22 @@ impl Worker {
                     return;
                 }
                 let stopped = |sent| generation.load(Ordering::SeqCst) != sent;
+                // The generation this session belongs to; a job from a later
+                // one, as after any stop, even while idle, gets a fresh session.
+                let mut session = generation.load(Ordering::SeqCst);
                 for (ticket, sent, job) in inbox {
                     // Reset before clearing, and clear before the check, so a
                     // stop from the check on interrupts the engine that runs.
-                    if job.fresh {
+                    if job.fresh || sent != session {
                         scheme.reset();
+                        session = sent;
                     }
                     interrupter.clear();
                     let answer = if stopped(sent) {
                         Err(STOPPED.to_owned())
                     } else {
                         let answer = scheme.run(&job.source);
-                        if stopped(sent) {
-                            scheme.reset();
-                            Err(STOPPED.to_owned())
-                        } else {
-                            answer
-                        }
+                        if stopped(sent) { Err(STOPPED.to_owned()) } else { answer }
                     };
                     if outbox.send((ticket, answer)).is_err() {
                         return;
@@ -181,6 +180,16 @@ mod tests {
         assert_eq!(answers.iter().map(|(ticket, _)| *ticket).collect::<Vec<_>>(), [first, second, third]);
         assert_eq!(value(&answers[1].1), "6");
         assert!(answers[2].1.as_ref().unwrap_err().contains("x"), "the fresh session forgot x");
+    }
+
+    #[test]
+    fn stopping_while_idle_still_loses_the_session() {
+        let mut dispatch = Native::spawn(Steel::new);
+        dispatch.send(job("(define kept 1)", false));
+        settle(&mut dispatch);
+        dispatch.stop();
+        dispatch.send(job("kept", false));
+        assert!(settle(&mut dispatch)[0].1.is_err(), "kept outlived the stop");
     }
 
     #[test]

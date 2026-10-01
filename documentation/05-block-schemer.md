@@ -120,12 +120,15 @@ calls every frame:
   `Scheme::interrupter`, which Steel checks as it runs: an endless loop of
   calls stops within milliseconds. The interrupt stays set until the worker
   clears it before the next job, so one that lands just before a run starts
-  still stops it. A worker that
-  dies answers its queue with an error and is replaced.
+  still stops it. The worker remembers which stop its session dates from,
+  so a stop while idle also loses it. A worker that dies answers its queue
+  with an error and is replaced.
 
 While a job runs, Play is disabled and Stop enabled. A double-click's echo
 and answer reach the console together when it is answered; a Play's
-`> block-schemer` line goes there at once.
+`> block-schemer` line goes there at once. Only the latest double-click's
+answer becomes a bubble; an earlier one still answering goes to the
+console alone.
 
 ## Known gaps
 

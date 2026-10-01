@@ -80,8 +80,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   an actions bar under the menus holds a `RunToolbar`: Play (⏵) and Stop
   (⏹), drawn disabled where the runner does not `support` them; ▶ is not
   in egui's default fonts. The buttons sit at the bar's right and the
-  runner's toggles at its left, as checkboxes that are not saved; flipping one regenerates the open inspections. Feature `cli`
-  adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
+  runner's toggles at its left, as checkboxes that are not saved; flipping
+  one regenerates the open inspections. Feature `cli` adds clap and the `block-parse-editor` binary (`cargo editor -l <language>
   [program]`). Its File/Edit menus (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
   macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere) are one `Command` list drawn as
   `Menus::Native` (the macOS menu bar through muda, with app and Window menus;
@@ -142,9 +142,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   in one closable tab per block, refreshed by inspecting it again, beside
   the runner's own tabs, which it asks for after each call to the runner and
   each `poll` that took in answers, repainting while the runner is not idle.
-  A console the runner has just written to comes to the front, unless a
-  bubble answered at the same time. Commands and
-  events go out either as a polled list in `EditorOutput` or through a
+  A console a run or Play writes to as it is sent comes to the front,
+  unless that run answered in a bubble; later answers never bring it
+  forward. Commands and events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
 - A run in hand stays in the program until dropped, so the program is always
@@ -212,10 +212,16 @@ call `block_parse_gui::snapshot::program`.
   run, if runs become concurrent.
 - A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
   driving an egui context menu headless needs the button's position.
-- Tests of `app::run`'s tab bookkeeping (which console was written to,
-  bringing it forward only without a bubble, `refresh_inspections`,
-  `CloseTab` removing only inspections); it lives in `App`, which needs a
-  window. Moving it out, or a stub `Runner`, would make it testable.
+- Tests of `app::run`'s tab and run bookkeeping (which console was written
+  to, bringing it forward only without a bubble, `refresh_inspections`,
+  `CloseTab` removing only inspections; an outline kept while a run is
+  pending, a late bubble only for a block still outlined, an outline with
+  no bubble dropped once the runner is idle); it lives in `App`, which
+  needs a window. Moving it out, or a stub `Runner`, would make it
+  testable.
+- `dispatch::native` replaces a dead worker inside `poll`, on the UI
+  thread: building Steel's prelude blocks a frame, and a `make` that panics
+  takes the UI down with it.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a web build
   once a WASM Scheme replaces Steel, with a Web Worker `Dispatch`. A native
   run stuck outside Steel's safepoints cannot be interrupted; its worker
