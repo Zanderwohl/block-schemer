@@ -19,6 +19,7 @@ Builds are on the [Releases](https://github.com/Zanderwohl/block-parse/releases)
 
 To make a release, run the **Release** workflow from the Actions tab with a tag such as `v0.1.0`. It builds every
 platform and attaches the builds to a draft release to look over and publish.
+See [documentation/publishing/02-releases.md](documentation/publishing/02-releases.md), which also covers signing.
 
 ## Compiling Block Schemer
 
