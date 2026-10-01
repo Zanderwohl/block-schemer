@@ -12,7 +12,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Galley, Painter, Pos2, Rect, S
 
 use crate::bubble::{self, Bubble};
 use crate::interact::SnapMark;
-use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, append_text, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
+use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, append_text, is_blank, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
 use crate::theme::Theme;
 
@@ -288,7 +288,7 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
         outline(painter, slot.shape, rect, rect.height(), Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
     }
     // Under a live field too: the field is transparent and draws no hint.
-    if text.is_empty() && !matches!(kind, LiteralKind::Bool | LiteralKind::Choice(_)) {
+    if is_blank(text) && !matches!(kind, LiteralKind::Bool | LiteralKind::Choice(_)) {
         hint(painter, rect, &slot.hint, theme.placeholder, t.zoom);
         return;
     }

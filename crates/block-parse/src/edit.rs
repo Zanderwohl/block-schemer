@@ -128,10 +128,10 @@ impl Program {
         let ends_in_cap = fragment
             .blocks
             .last()
-            .is_some_and(|last| kind_of(last) == Some(&BlockKind::Cap));
+            .is_some_and(|last| kind_of(last).is_some_and(BlockKind::is_cap));
         let statement = || match def.kind {
             BlockKind::Reporter(_) => Err(AttachError::WrongKind),
-            BlockKind::Hat => Err(AttachError::HatNotAtTop),
+            BlockKind::Hat | BlockKind::HatCap => Err(AttachError::HatNotAtTop),
             BlockKind::Statement | BlockKind::Cap => Ok(()),
         };
 
@@ -176,7 +176,7 @@ impl Program {
                         AttachError::NoSuchBlock(*id)
                     })?;
                 match kind_of(&seq[index]) {
-                    Some(BlockKind::Cap) => return Err(AttachError::AfterCap),
+                    Some(kind) if kind.is_cap() => return Err(AttachError::AfterCap),
                     Some(BlockKind::Reporter(_)) => return Err(AttachError::WrongKind),
                     _ => {}
                 }
@@ -219,7 +219,7 @@ impl Program {
                     .filter(|_| !gone(*below))
                     .ok_or(AttachError::NoSuchBlock(*below))?;
                 match kind_of(&stack.blocks[0]) {
-                    Some(BlockKind::Hat) => return Err(AttachError::HatNotAtTop),
+                    Some(kind) if kind.is_hat() => return Err(AttachError::HatNotAtTop),
                     Some(BlockKind::Reporter(_)) => return Err(AttachError::WrongKind),
                     _ => {}
                 }
@@ -541,11 +541,41 @@ mod tests {
                     (id: "step", name: "Step", spec: "step"),
                     (id: "loop", name: "Loop", spec: "loop [body]"),
                     (id: "stop", name: "Stop", kind: Cap, spec: "stop"),
+                    (id: "solo", name: "Solo", kind: HatCap, spec: "solo"),
                 ],
             )"#,
             &Validators::new(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn a_hat_cap_stands_alone() {
+        let language = with_cap();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["step"]);
+        let solo = stack(&mut program, &language, &["solo"]);
+        let step = fresh(&mut program, &language, "step");
+
+        assert_eq!(program.can_attach(&language, &step, &Target::After(solo[0])), Err(AttachError::AfterCap));
+        let above = Target::Above {
+            head: solo[0],
+            pos: [0.0, 0.0],
+        };
+        assert_eq!(program.can_attach(&language, &step, &above), Err(AttachError::HatNotAtTop));
+        let lone = fresh(&mut program, &language, "solo");
+        assert_eq!(program.can_attach(&language, &lone, &Target::After(ids[0])), Err(AttachError::HatNotAtTop));
+        assert_eq!(program.can_attach(&language, &lone, &Target::Free { pos: [0.0, 0.0] }), Ok(()));
+        let above_step = Target::Above {
+            head: ids[0],
+            pos: [0.0, 0.0],
+        };
+        assert_eq!(program.can_attach(&language, &lone, &above_step), Err(AttachError::CapWouldOrphan));
+        let mut loaded = Program::new(&language);
+        stack(&mut loaded, &language, &["step", "solo", "step"]);
+        let codes: Vec<_> = loaded.ast(&language).problems().iter().map(|problem| problem.code).collect();
+        use crate::ast::ProblemCode;
+        assert_eq!(codes, [ProblemCode::HatNotAtTop, ProblemCode::AfterCap], "the AST agrees");
     }
 
     #[test]

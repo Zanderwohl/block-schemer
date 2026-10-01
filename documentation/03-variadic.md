@@ -140,8 +140,10 @@ block's `hints`, keyed by input or list name:
 (id: "add", kind: Reporter("datum"), spec: "+ {args:datum*}", hints: {"args": "operand"}),
 ```
 
-A slot is blank when it holds no reporter and, for a typed literal, no text;
-checkboxes and choices are never blank. A literal's field shows it in the
+A slot is blank when it holds no reporter and, for a typed literal, no text
+or only spaces; checkboxes and choices are never blank. A blank slot shows its
+hint and never a validation error, as not filled in yet is not wrong yet. The
+AST still reports it, so a run says what is missing. A literal's field shows it in the
 theme's gray `placeholder`; a slot that takes only reporters, drawn in the
 block's shadow, shows it in a faded tint of the block's ink, which gray would
 not stand out from. Every hole in a list shows the list's

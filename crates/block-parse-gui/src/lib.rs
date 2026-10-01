@@ -1,6 +1,8 @@
 //! An egui block editor for [`block_parse`] languages. [`BlockEditor`] embeds
 //! in any `Ui`; the standalone window is behind the `app` feature.
 
+#[cfg(feature = "app")]
+pub mod app;
 pub mod bubble;
 pub mod color;
 pub mod dropdown;

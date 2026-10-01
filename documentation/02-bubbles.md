@@ -32,9 +32,9 @@ Any other press between the two clicks, or a drag, starts the count again.
 
 Faults inside it are `Problem` nodes, as in any AST; whether to run around them
 is the host's call. `Runner::run_block(program, block, script)` carries the
-same request for hosts that implement `Runner`, once the editor dispatches to
-one; for now it only sends the event (Runner dispatch is deferred in
-`AGENTS.md`).
+same request for hosts that implement `Runner`. The editor component only
+sends the event; `block_parse_gui::app` passes it to the `AppConfig`'s runner,
+if it has one.
 
 ## Answering
 
@@ -48,9 +48,11 @@ While a run is pending or its bubble shows, the host marks the block with a
 yellow outline (`Theme::dispatched`). The editor does not add it itself: only
 the host knows when a run is done with.
 
-The editor binary has no backend yet: it answers each run with "No backend
-configured." and outlines the block, and drops both on a click on any block,
-an edit, or a new or opened program.
+`app::run` outlines the block and shows the bubble its runner gives back for
+it straight after `run_block`, or "No backend configured." without a runner,
+as in the `block-parse-editor` binary. It takes nothing else from the runner's
+overlay, and no answer that comes later. It drops both on a click on any
+block, an edit, an undo or redo, or a new or opened program.
 
 ## Placement
 

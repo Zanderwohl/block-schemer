@@ -84,22 +84,29 @@ pub struct Annotation {
 /// Optional: the editor also returns commands for polling, for interpreters
 /// it cannot borrow (ECS resources, other threads). A trait rather than a
 /// closure per command because every command needs the interpreter mutably.
+/// Everything but `overlay` and `run_block` defaults to doing nothing, so a
+/// runner that only answers runs, such as a REPL, implements those two.
 pub trait Runner {
-    fn status(&self) -> RunStatus;
-    fn supports(&self, command: RunCommand) -> bool;
     fn overlay(&self) -> Overlay;
 
-    fn start(&mut self, program: &Program, ast: &Ast);
-    fn stop(&mut self);
-    fn pause(&mut self);
-    fn resume(&mut self);
-    fn step(&mut self);
-    fn step_over(&mut self);
-    fn step_into(&mut self);
-    fn step_out(&mut self);
+    fn status(&self) -> RunStatus {
+        RunStatus::Idle
+    }
+    fn supports(&self, _command: RunCommand) -> bool {
+        false
+    }
+
+    fn start(&mut self, _program: &Program, _ast: &Ast) {}
+    fn stop(&mut self) {}
+    fn pause(&mut self) {}
+    fn resume(&mut self) {}
+    fn step(&mut self) {}
+    fn step_over(&mut self) {}
+    fn step_into(&mut self) {}
+    fn step_out(&mut self) {}
 
     /// A request; the next `overlay` says what the runner decided.
-    fn toggle_breakpoint(&mut self, block: BlockId);
+    fn toggle_breakpoint(&mut self, _block: BlockId) {}
 
     /// Run one block: `script` is [`Program::script_at`] for it. Anything to
     /// say back goes in the overlay's `bubbles`.

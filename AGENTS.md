@@ -10,13 +10,15 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse` — core. serde + ron only, no geometry, no GUI.
   - `language`: `LanguageConfig` (as written, strings kept raw) compiles into a
     validated `Language`. Types give slot/reporter shape and literal kind;
-    blocks are Hat / Statement / Cap / Reporter(type); a spec string like
+    blocks are Hat / Statement / Cap / HatCap (a whole script in one block)
+    / Reporter(type); a spec string like
     `"repeat {times:number=10} [body]"` gives inputs and C-block branches,
     and `{args:datum*}` (or `+`, at least one) a list of inputs. A block's
     `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
     later ones and later lists' items on indented rows of their own
     (`documentation/03-variadic.md`). A blank slot shows its input's name as a
-    faded hint, or the block's `hints` text for it; a list's empty slot shows it
+    faded hint, or the block's `hints` text for it, and no validation error
+    until there is text to check; a list's empty slot shows it
     with `…`. A `Slot` addresses an input, or a list item by index; the
     index one past the last item appends.
     `file.extension` names the language's program files (RON inside,
@@ -52,18 +54,28 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
     switch states, speech bubbles),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
-    depend on egui.
+    depend on egui. `Runner` needs only `overlay` and `run_block`; the
+    debugger methods default to doing nothing.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, clap, rfd, winit (macOS only) and the
-  `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
-  File/Edit menus are egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
-  macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
+  by default) adds eframe, rfd, winit (macOS only), the window as a
+  library (`app::run` with an `AppConfig`: name, language, program path, an
+  optional `Runner` and an optional window icon). Feature `cli` adds clap
+  and the `block-parse-editor` binary (`cargo editor -l <language>
+  [program]`). Its File/Edit menus are
+  egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on macOS, Ctrl+Y or
+  Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
   native menus arrive. On macOS it turns off winit's default menu, whose Quit
   would skip the save prompt. Feature `snapshot` (off by default) renders
   programs to images offscreen through egui_kittest's wgpu renderer; with it,
   `--command snapshot` (`cargo snapshot -l <language> <out.png>`) writes
   `Layout::grid`, every block in a column per category, instead of opening
   the window.
+- `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
+  blocks run in Steel when double-clicked (`cargo schemer [program.scmb]`,
+  `documentation/05-block-schemer.md`). Its language is embedded; its
+  `codegen` is the layer that refuses anything the language does not offer
+  and escapes strings before Scheme sees them. Steel sits behind the
+  `Scheme` trait so a WASM Scheme can replace it.
 - `documentation/` — design notes, numbered.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
   Scratch-style typing), `strict_tiny.ron` (the same language with exact
@@ -126,7 +138,9 @@ call `block_parse_gui::snapshot::program`.
 
 ## Deferred
 
-- `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
+- `RunToolbar`, `EditorOptions::toolbar`, and `Runner` dispatch beyond
+  `run_block`: `app::run` shows only the bubble a runner gives back at once,
+  not its highlights, breakpoints, annotations or later answers.
 - Other ways for the editor binary to choose a language than `--language`.
 - Native OS menus.
 - A cap on undo history; each step holds a whole copy of the stacks.
@@ -137,6 +151,9 @@ call `block_parse_gui::snapshot::program`.
   it takes drops only.
 - Inserting between list items, and closing holes
   (`documentation/03-variadic.md`).
+- Block Schemer: opening `.scm` files as blocks, auto-formatted; a step limit
+  or worker thread so a runaway run cannot freeze the window; a web build
+  once a WASM Scheme replaces Steel.
 
 ## Spelling
 

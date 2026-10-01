@@ -1,15 +1,18 @@
 #![enable(implicit_some)]
-// A small subset of R7RS Scheme. Typing is light: one `datum` type for every
-// expression, read and checked by the back end. Symbols are square so names
-// look different from values; bindings are square too and fit only `let`.
+// Block Schemer's language: a small subset of R7RS. Opcodes are the Scheme
+// names, so most blocks generate `(opcode arguments…)`; `codegen.rs` handles
+// the rest. A user can run only the blocks offered here.
 Language(
-    name: "scheme",
-    file: (extension: "bscm", description: "Block Scheme program"),
+    name: "Block Schemer",
+    file: (extension: "scmb", description: "Block Schemer program"),
 
     types: {
-        "datum": (shape: Round, literal: Text),
+        // Any literal: a number, boolean, character, string in quotes, or
+        // symbol. Checked by the `datum` validator and emitted as typed.
+        "datum": (shape: Round, literal: Custom("datum")),
+        // Escaped by the code generator, so any text goes.
         "string": (shape: Round, literal: Text),
-        "symbol": (shape: Square, literal: Text),
+        "symbol": (shape: Square, literal: Custom("symbol")),
         "binding": (shape: Square),
     },
 
@@ -116,12 +119,12 @@ Language(
         ),
 
         // Arithmetic
-        (id: "add", name: "Add", category: "Arithmetic", kind: Reporter("datum"), spec: "+ {args:datum*}", hints: {"args": "operand"}),
-        (id: "subtract", name: "Subtract", category: "Arithmetic", kind: Reporter("datum"), spec: "- {args:datum+}", hints: {"args": "operand"}),
-        (id: "multiply", name: "Multiply", category: "Arithmetic", kind: Reporter("datum"), spec: "* {args:datum*}", hints: {"args": "operand"}),
-        (id: "divide", name: "Divide", category: "Arithmetic", kind: Reporter("datum"), spec: "/ {args:datum+}", hints: {"args": "operand"}),
-        (id: "equal", name: "Equal", category: "Arithmetic", kind: Reporter("datum"), spec: "= {args:datum+}", hints: {"args": "operand"}),
-        (id: "less", name: "Less than", category: "Arithmetic", kind: Reporter("datum"), spec: "< {args:datum+}", hints: {"args": "operand"}),
+        (id: "+", name: "Add", category: "Arithmetic", kind: Reporter("datum"), spec: "+ {args:datum*}", hints: {"args": "operand"}),
+        (id: "-", name: "Subtract", category: "Arithmetic", kind: Reporter("datum"), spec: "- {args:datum+}", hints: {"args": "operand"}),
+        (id: "*", name: "Multiply", category: "Arithmetic", kind: Reporter("datum"), spec: "* {args:datum*}", hints: {"args": "operand"}),
+        (id: "/", name: "Divide", category: "Arithmetic", kind: Reporter("datum"), spec: "/ {args:datum+}", hints: {"args": "operand"}),
+        (id: "=", name: "Equal", category: "Arithmetic", kind: Reporter("datum"), spec: "= {args:datum+}", hints: {"args": "operand"}),
+        (id: "<", name: "Less than", category: "Arithmetic", kind: Reporter("datum"), spec: "< {args:datum+}", hints: {"args": "operand"}),
 
         // Lists
         (id: "list", name: "List", category: "Lists", kind: Reporter("datum"), spec: "list {items:datum*}", hints: {"items": "item"}),

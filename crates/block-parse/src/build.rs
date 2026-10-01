@@ -68,7 +68,7 @@ impl Builder<'_> {
             // Before parsing, so a block that fails still takes the first place
             // after a cap, and a cap that fails still ends the run.
             let first_after_cap = std::mem::take(&mut after_cap);
-            if kind == Some(BlockKind::Cap) {
+            if kind.as_ref().is_some_and(BlockKind::is_cap) {
                 after_cap = true;
             }
             let node = match self.block(block, depth) {
@@ -88,7 +88,7 @@ impl Builder<'_> {
                         ProblemCode::ReporterAsStatement,
                         format!("`{name}` reports a value and cannot stand in a stack"),
                     )),
-                    Some(BlockKind::Hat) if !(top_of_stack && index == 0) => Some((
+                    Some(kind) if kind.is_hat() && !(top_of_stack && index == 0) => Some((
                         ProblemCode::HatNotAtTop,
                         format!("`{name}` can only start a stack"),
                     )),
