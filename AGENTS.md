@@ -16,7 +16,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
     later ones and later lists' items on indented rows of their own
     (`documentation/03-variadic.md`). A blank slot shows its input's name as a
-    faded hint, or the block's `hints` text for it; a list's empty slot shows it
+    faded hint, or the block's `hints` text for it, and no validation error
+    until there is text to check; a list's empty slot shows it
     with `…`. A `Slot` addresses an input, or a list item by index; the
     index one past the last item appends.
     `file.extension` names the language's program files (RON inside,

@@ -709,7 +709,9 @@ impl Layout<'_> {
             LaidContent::Empty
         } else {
             let focused = self.editing == Some((block.id, &slot));
-            let error = if self.validate && !focused {
+            // A blank slot shows its hint: not filled in yet is not wrong yet.
+            // The AST still reports it, so running says what is missing.
+            let error = if self.validate && !focused && !text.trim().is_empty() {
                 self.language.parse_literal(ty_name, &text).err()
             } else {
                 None
@@ -1150,6 +1152,28 @@ mod tests {
         let condition = focused.slots().find(|slot| slot.slot.input == "condition").unwrap();
         let SlotContent::Literal { error, .. } = &condition.content else { panic!() };
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn blank_literals_show_their_hint_not_an_error() {
+        let language = tiny();
+        let (mut program, ids) = with_stack(&language, &["add"]);
+        let error = |program: &Program| {
+            let scene = scene_of(&language, program);
+            let slot = scene.slots().find(|slot| slot.slot.input == "a").unwrap();
+            let SlotContent::Literal { error, .. } = &slot.content else { panic!() };
+            error.clone()
+        };
+        for blank in ["", "  "] {
+            program.set_literal(ids[0], &Slot::input("a"), blank.into());
+            assert_eq!(error(&program), None, "{blank:?}");
+        }
+        program.set_literal(ids[0], &Slot::input("a"), "x".into());
+        assert!(error(&program).is_some(), "typed text is still checked");
+
+        program.set_literal(ids[0], &Slot::input("a"), "".into());
+        let codes: Vec<_> = program.ast(&language).problems().iter().map(|problem| problem.code).collect();
+        assert_eq!(codes, [block_parse::ast::ProblemCode::InvalidLiteral], "the AST still reports it");
     }
 
     #[test]
