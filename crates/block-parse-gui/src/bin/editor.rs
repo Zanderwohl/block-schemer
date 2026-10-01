@@ -325,6 +325,8 @@ impl App {
                 self.path = None;
                 self.dirty = false;
                 self.editor = BlockEditor::default();
+                // Ids are only unique within a program.
+                self.dismiss_runs();
                 self.status.clear();
             }
             Pending::Open => self.open(),
@@ -427,6 +429,8 @@ impl App {
                 self.path = Some(path);
                 self.dirty = false;
                 self.editor = BlockEditor::default();
+                // Ids are only unique within a program.
+                self.dismiss_runs();
                 self.status = join(&warnings);
             }
             Err(error) => self.status = format!("could not open {}: {error}", path.display()),

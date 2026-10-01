@@ -40,8 +40,9 @@ pub struct BlockEditor {
     swatches: Option<(SwatchKey, Swatches)>,
     /// The block the context menu was opened on.
     menu: Option<BlockId>,
-    /// The last click that did not run its block, and when. egui's own
-    /// double-click turns into a triple when it follows another closely.
+    /// The last click that did not run its block, and when; any other press
+    /// clears it. egui's own double-click turns into a triple when it follows
+    /// another closely.
     last_click: Option<(BlockId, f64)>,
     id: egui::Id,
 }
@@ -240,6 +241,7 @@ impl BlockEditor {
             let Gesture::Pressed(press) = std::mem::take(&mut self.gesture) else {
                 unreachable!()
             };
+            self.last_click = None;
             self.gesture = self.start_drag(press, language, program, t);
         }
         // A drop now would edit a program the host has locked; clicks and
@@ -271,6 +273,17 @@ impl BlockEditor {
             Gesture::Idle => {
                 if let Some(at) = over.filter(|_| input.pressed) {
                     self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
+                    // Only an uninterrupted pair of clicks on one block runs it.
+                    let same = match &self.gesture {
+                        Gesture::Pressed(Press {
+                            on: Pressed::Block { id, .. },
+                            ..
+                        }) => self.last_click.is_some_and(|(last, _)| last == *id),
+                        _ => false,
+                    };
+                    if !same {
+                        self.last_click = None;
+                    }
                 }
             }
             Gesture::Pressed(press) => {
@@ -1292,47 +1305,89 @@ mod tests {
         assert!(!hover(switch, &live), "a live switch needs no excuse");
     }
 
-    #[test]
-    fn a_double_click_asks_to_run_the_block_and_a_single_click_does_not() {
-        let (language, mut program, ctx, _, label) = codon_on_canvas();
-        let codon = program.stacks[0].blocks[0].id;
-        let button = |pressed| egui::Event::PointerButton {
-            pos: label,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        let mut clicks = |count: usize| {
-            let mut editor = codon_editor();
-            editor.options.read_only = true;
-            let mut events = Vec::new();
-            let mut frames = vec![vec![egui::Event::PointerMoved(label)]];
-            frames.extend((0..count).flat_map(|_| [vec![button(true)], vec![button(false)]]));
-            for input in frames {
+    /// Clicks at `(point, time)` on a fresh read-only editor, and what it
+    /// sent.
+    fn clicks(
+        ctx: &egui::Context,
+        language: &Language,
+        program: &mut Program,
+        clicks: &[(Pos2, f64)],
+    ) -> Vec<EditorEvent> {
+        let mut editor = codon_editor();
+        editor.options.read_only = true;
+        let mut events = Vec::new();
+        for &(at, time) in clicks {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            for input in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
                 let raw = egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                    time: Some(time),
                     events: input,
                     ..Default::default()
                 };
                 let mut out = ctx.run_ui(raw, |ui| {
-                    events.extend(editor.show_with(ui, &language, &mut program, &Overlay::default()).events);
+                    events.extend(editor.show_with(ui, language, program, &Overlay::default()).events);
                 });
                 out.textures_delta.clear();
             }
-            events
-        };
+        }
+        events
+    }
 
-        let once = clicks(1);
-        assert_eq!(once, vec![EditorEvent::BlockClicked(codon)]);
-        let twice = clicks(2);
-        let runs: Vec<_> = twice
+    fn runs(events: &[EditorEvent]) -> Vec<(BlockId, usize)> {
+        events
             .iter()
             .filter_map(|event| match event {
                 EditorEvent::Run { block, script } => Some((*block, script.body.len())),
                 _ => None,
             })
-            .collect();
-        assert_eq!(runs, vec![(codon, 1)], "{twice:?}");
+            .collect()
+    }
+
+    #[test]
+    fn a_second_quick_click_on_the_same_block_runs_it_and_nothing_else_does() {
+        let (language, mut program, ctx, _, label) = codon_on_canvas();
+        let codon = program.stacks[0].blocks[0].id;
+        let other = program.instantiate(&language, "start").unwrap();
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 100.0],
+            blocks: vec![other],
+        });
+        let below = label + vec2(0.0, 100.0);
+        let empty = label + vec2(400.0, 300.0);
+        // One context throughout, whose clock cannot go back.
+        let mut start = 0.0;
+        let mut run = |sequence: &[(Pos2, f64)]| {
+            start += 10.0;
+            let sequence: Vec<_> = sequence.iter().map(|&(at, time)| (at, start + time)).collect();
+            runs(&clicks(&ctx, &language, &mut program, &sequence))
+        };
+
+        assert_eq!(run(&[(label, 1.0)]), vec![]);
+        assert_eq!(run(&[(label, 1.0), (label, 1.1)]), vec![(codon, 1)]);
+        assert_eq!(run(&[(label, 1.0), (label, 2.0)]), vec![], "too slow");
+        assert_eq!(run(&[(label, 1.0), (below, 1.1)]), vec![], "two blocks");
+        assert_eq!(run(&[(label, 1.0), (empty, 1.05), (label, 1.1)]), vec![], "interrupted");
+        assert_eq!(
+            run(&[(label, 1.0), (label, 1.1), (label, 1.2)]),
+            vec![(codon, 1)],
+            "a third click starts a new pair"
+        );
+    }
+
+    #[test]
+    fn a_read_only_canvas_still_pans() {
+        let (language, mut program, ctx, _, label) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.read_only = true;
+        let before = editor.view.pan;
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), label + vec2(400.0, 300.0));
+        assert_ne!(editor.view.pan, before);
     }
 
     #[test]

@@ -17,7 +17,9 @@ counts a double-click that comes soon after an earlier one as a triple click, so
 running a block twice in a row would sometimes do nothing.
 
 Running works in read-only mode, like switches: it changes nothing in the
-program. A click on a literal field belongs to the field and does not count.
+program. While the program is editable, a click on a literal field belongs to
+the field and does not count; read-only, it counts as a click on its block.
+Any other press between the two clicks, or a drag, starts the count again.
 
 `script` is `Program::script_at(language, block)`, built the way
 `Program::ast` builds a stack:
@@ -29,8 +31,10 @@ program. A click on a literal field belongs to the field and does not count.
 | A reporter, loose or in a slot    | That one expression                              |
 
 Faults inside it are `Problem` nodes, as in any AST; whether to run around them
-is the host's call. A host implementing `Runner` gets the same request through
-`Runner::run_block(program, block, script)`.
+is the host's call. `Runner::run_block(program, block, script)` carries the
+same request for hosts that implement `Runner`, once the editor dispatches to
+one; for now it only sends the event (Runner dispatch is deferred in
+`AGENTS.md`).
 
 ## Answering
 
@@ -45,7 +49,8 @@ yellow outline (`Theme::dispatched`). The editor does not add it itself: only
 the host knows when a run is done with.
 
 The editor binary has no backend yet: it answers each run with "No backend
-configured." and outlines the block, and drops both on any click or edit.
+configured." and outlines the block, and drops both on a click on any block,
+an edit, or a new or opened program.
 
 ## Placement
 
@@ -66,7 +71,9 @@ tails are no longer than the rest. The lowest score wins:
 3. Area over other blocks' rows, and over bubbles already placed, costs its
    area. Bubbles are placed in draw order, so later ones move around earlier
    ones.
-4. Ties go in order: right, above, below, left.
+4. Each spot's rank in the list adds a hundredth, so near-ties go in order:
+   right (top, center, bottom), above (left, center, right), above-right,
+   below, below-right, left, above-left, below-left.
 
 The bubble is drawn in front of the blocks and their fields, and under an open
 choice menu and a run in hand.

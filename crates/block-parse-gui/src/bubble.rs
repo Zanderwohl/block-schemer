@@ -38,9 +38,10 @@ pub enum Side {
 }
 
 /// A bubble of `size` pointing at `target`, a block's first row, and kept off
-/// `block`, the whole block. Of the spots around `target`, takes the one that
-/// leaves the least of the bubble outside `visible` and then covers the least
-/// of `obstacles`; ties go to the right of the block, then above.
+/// `block`, the whole block. Of the spots around `target`, takes the one with
+/// the least weighted area over `block`, outside `visible` and over
+/// `obstacles`, in that order of weight; near-ties go to the right of the
+/// block, then above.
 pub fn place(target: Rect, block: Rect, size: Vec2, obstacles: &[Rect], visible: Rect) -> Bubble {
     let body = candidates(target, size)
         .into_iter()
