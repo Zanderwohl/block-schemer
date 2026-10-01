@@ -18,7 +18,7 @@ type SwatchKey = (
 );
 use crate::dropdown::Menu;
 use crate::interact::{
-    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, SnapMark,
+    DIVIDER_GRIP, DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, SnapMark,
 };
 use crate::layout::{
     Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Run, SNAP_RADIUS, Scene, SlotContent,
@@ -26,6 +26,12 @@ use crate::layout::{
 use crate::paint::{self, Transform};
 use crate::theme::Theme;
 use crate::view::View;
+
+/// Least widths the palette's edge can be dragged to leave either side.
+const MIN_PALETTE_WIDTH: f32 = 80.0;
+const MIN_CANVAS_WIDTH: f32 = 120.0;
+/// The palette's collapse button, which sits half its width right of the edge.
+const TOGGLE_SIZE: Vec2 = vec2(16.0, 24.0);
 
 /// Holds only view and interaction state. Program, language and debug state
 /// are passed in each frame.
@@ -57,8 +63,11 @@ pub struct EditorOptions {
     pub start_with_problems: bool,
     /// Offer "Toggle breakpoint" in a block's context menu.
     pub breakpoints: bool,
-    /// `None` fits the widest block.
+    /// `None` fits the widest block. Dragging the palette's edge sets it, so
+    /// a host can read it back to keep it.
     pub palette_width: Option<f32>,
+    /// Hides the palette without forgetting `palette_width`.
+    pub palette_collapsed: bool,
     pub theme: Theme,
 }
 
@@ -70,6 +79,7 @@ impl Default for EditorOptions {
             start_with_problems: false,
             breakpoints: true,
             palette_width: None,
+            palette_collapsed: false,
             theme: Theme::default(),
         }
     }
@@ -184,11 +194,12 @@ impl BlockEditor {
             lifted: None,
         }
         .palette();
-        let palette_width = self
-            .options
-            .palette_width
-            .unwrap_or(palette.width.clamp(180.0, 360.0))
-            .min(bounds.width() * 0.5);
+        let max_width = (bounds.width() - MIN_CANVAS_WIDTH).max(0.0);
+        let palette_width = match self.options.palette_width {
+            _ if self.options.palette_collapsed => 0.0,
+            Some(width) => width.min(max_width),
+            None => palette.width.clamp(180.0, 360.0).min(bounds.width() * 0.5),
+        };
         let palette_rect = Rect::from_min_size(bounds.min, vec2(palette_width, bounds.height()));
         let canvas_rect = Rect::from_min_max(pos2(palette_rect.max.x, bounds.min.y), bounds.max);
 
@@ -209,6 +220,13 @@ impl BlockEditor {
         let over = input
             .at
             .filter(|&at| bounds.contains(at) && ctx.layer_id_at(at) == Some(ui.layer_id()));
+        let toggle_rect = Rect::from_min_size(
+            pos2(palette_rect.max.x + TOGGLE_SIZE.x / 2.0, bounds.min.y + TOGGLE_SIZE.x / 2.0),
+            TOGGLE_SIZE,
+        );
+        let on_toggle = over.is_some_and(|at| toggle_rect.contains(at));
+        let on_divider = !self.options.palette_collapsed
+            && over.is_some_and(|at| (at.x - palette_rect.max.x).abs() <= DIVIDER_GRIP);
 
         if let Some(at) = over {
             if palette_rect.contains(at) {
@@ -273,7 +291,12 @@ impl BlockEditor {
 
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
-                if let Some(at) = over.filter(|_| input.pressed) {
+                if let Some(at) = over.filter(|_| input.pressed && on_divider) {
+                    self.gesture = Gesture::Resizing {
+                        grab: at.x - palette_rect.max.x,
+                    };
+                    self.last_click = None;
+                } else if let Some(at) = over.filter(|_| input.pressed && !on_toggle) {
                     self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
                     // Only an uninterrupted pair of clicks on one block runs it.
                     let same = match &self.gesture {
@@ -308,6 +331,16 @@ impl BlockEditor {
                 if input.down {
                     self.view.pan += input.delta;
                     self.gesture = Gesture::Panning;
+                }
+            }
+            Gesture::Resizing { grab } => {
+                // Takes effect next frame; this one is already laid out.
+                if let Some(at) = input.at {
+                    let width = at.x - grab - bounds.min.x;
+                    self.options.palette_width = Some(width.clamp(MIN_PALETTE_WIDTH.min(max_width), max_width));
+                }
+                if input.down {
+                    self.gesture = Gesture::Resizing { grab };
                 }
             }
             Gesture::Dragging(mut drag) => {
@@ -369,6 +402,13 @@ impl BlockEditor {
         }
         paint::error_tags(&canvas, &scene, t, &theme);
         paint::markers(&canvas, &scene, t, &theme, overlay);
+        let resizing = matches!(self.gesture, Gesture::Resizing { .. });
+        let hot = resizing || (on_divider && !self.is_dragging());
+        ui.painter_at(bounds).vline(
+            palette_rect.max.x,
+            bounds.y_range(),
+            (if hot { 3.0 } else { 1.0 }, theme.divider),
+        );
 
         let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
         fields.set_clip_rect(canvas_rect);
@@ -418,6 +458,14 @@ impl BlockEditor {
         let visible = Rect::from_min_max(t.canvas(canvas_rect.min), t.canvas(canvas_rect.max));
         let bubbles = paint::place_bubbles(fields.painter(), &scene, t.zoom, &theme, overlay, visible);
         paint::bubbles(fields.painter(), bubbles, t, &theme);
+        let collapsed = self.options.palette_collapsed;
+        let mut toggle = ui.new_child(UiBuilder::new().max_rect(bounds));
+        let button = egui::Button::new(if collapsed { "⏵" } else { "⏴" }).min_size(TOGGLE_SIZE);
+        let tip = if collapsed { "Show the palette" } else { "Hide the palette" };
+        if toggle.put(toggle_rect, button).on_hover_text(tip).clicked() {
+            self.options.palette_collapsed = !collapsed;
+            ctx.request_repaint();
+        }
         if self.settle_edit(&ctx, language, program) {
             output.changed = true;
         }
@@ -432,6 +480,9 @@ impl BlockEditor {
             let run = layout.run(&drag.fragment.blocks, drag.head);
             paint::scene(&floating, &run.scene, t, &theme, false, &Overlay::default());
             ctx.set_cursor_icon(CursorIcon::Grabbing);
+        } else if hot {
+            ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
+        } else if on_toggle {
         } else if let Some(at) = over {
             let on_palette = palette_rect.contains(at);
             let field = scene
@@ -1278,6 +1329,47 @@ mod tests {
         let mut editor = BlockEditor::default();
         editor.options.palette_width = Some(0.0);
         editor
+    }
+
+    #[test]
+    fn dragging_the_palette_edge_resizes_it() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = BlockEditor::default();
+        editor.options.palette_width = Some(200.0);
+        let edge = pos2(201.0, 300.0);
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), edge);
+        assert!(!editor.is_dragging());
+        assert_eq!(editor.options.palette_width, Some(265.0));
+
+        let far = egui::Event::PointerMoved(pos2(1190.0, 300.0));
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![far]);
+        assert_eq!(editor.options.palette_width, Some(1200.0 - MIN_CANVAS_WIDTH));
+    }
+
+    #[test]
+    fn the_palette_collapses_and_comes_back_at_its_width() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = BlockEditor::default();
+        editor.options.palette_width = Some(200.0);
+        let mut click = |editor: &mut BlockEditor, at: Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            for events in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
+                frame(&ctx, editor, &language, &mut program, &Overlay::default(), events);
+            }
+        };
+        let toggle = |width: f32| pos2(width + TOGGLE_SIZE.x, TOGGLE_SIZE.x / 2.0 + TOGGLE_SIZE.y / 2.0);
+
+        click(&mut editor, toggle(200.0));
+        assert!(editor.options.palette_collapsed);
+        assert!(!editor.is_dragging());
+        click(&mut editor, toggle(0.0));
+        assert!(!editor.options.palette_collapsed);
+        assert_eq!(editor.options.palette_width, Some(200.0));
     }
 
     #[test]

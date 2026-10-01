@@ -17,7 +17,13 @@ pub enum Gesture {
     Pressed(Press),
     Dragging(Drag),
     Panning,
+    /// Moving the palette's edge; `grab` is the pointer's x minus the edge's
+    /// at the press, so the edge does not jump.
+    Resizing { grab: f32 },
 }
+
+/// Screen pixels either side of the palette's edge that grab it.
+pub const DIVIDER_GRIP: f32 = 4.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Press {

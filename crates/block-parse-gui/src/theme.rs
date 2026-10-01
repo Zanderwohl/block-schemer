@@ -13,6 +13,8 @@ pub struct Theme {
     pub grid: Color32,
     pub palette: Color32,
     pub palette_heading: Color32,
+    /// The edge between palette and canvas, which drags to resize.
+    pub divider: Color32,
     pub snap: Color32,
     /// Drawn under accents so they never depend on contrast with the block,
     /// and as the shadow of a choice's menu.
@@ -40,6 +42,7 @@ impl Default for Theme {
             grid: Color32::from_rgb(0x2a, 0x2d, 0x35),
             palette: Color32::from_rgb(0x1f, 0x22, 0x29),
             palette_heading: Color32::from_gray(0xa0),
+            divider: Color32::from_rgb(0x34, 0x38, 0x42),
             snap: Color32::WHITE,
             halo: Color32::from_black_alpha(150),
             breakpoint: Color32::from_rgb(0xe5, 0x48, 0x4d),
