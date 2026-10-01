@@ -701,6 +701,8 @@ impl BlockEditor {
         if overlay.muted.contains(&slot.parent) {
             swatch.fill = swatch.muted;
             swatch.edge = swatch.muted_edge;
+            swatch.highlight = swatch.muted_highlight;
+            swatch.shadow = swatch.muted_shadow;
         }
         let menu = Menu {
             id,

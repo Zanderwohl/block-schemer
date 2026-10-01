@@ -409,13 +409,17 @@ mod tests {
     }
 
     #[test]
-    fn a_bevel_lies_inside_its_outline_facing_outward() {
-        for form in forms() {
-            let outline = stack_outline(rect(&form), &form);
-            for (piece, normal) in bevel(&outline, 2.0) {
-                let (outer, inner) = (piece[0], piece[3]);
-                assert!((outer - inner).dot(normal) > 1.0, "{piece:?} {normal:?}");
-            }
+    fn a_bevel_lies_inside_its_clockwise_outline() {
+        let pill = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 22.0));
+        let tall = Rect::from_min_size(pos2(0.0, 0.0), vec2(60.0, 70.0));
+        let mut outlines: Vec<Vec<Pos2>> = forms().iter().map(|form| stack_outline(rect(form), form)).collect();
+        outlines.extend([0.0, 3.0, 11.0, 40.0].map(|radius| rounded_rect(pill, radius)));
+        outlines.extend([hexagon(pill, 22.0), hexagon(tall, 22.0)]);
+        for outline in outlines {
+            let inner: Vec<Pos2> = bevel(&outline, 2.0).into_iter().map(|(piece, _)| piece[3]).collect();
+            assert!(inner.len() >= 3, "{outline:?}");
+            let (outer, inner) = (shoelace(&outline), shoelace(&inner));
+            assert!(outer > 0.0 && inner < outer, "{outline:?}: {outer} vs {inner}");
         }
         let sides = bevel(&corners(Rect::from_min_size(pos2(0.0, 0.0), vec2(40.0, 20.0))), 2.0);
         assert_eq!(sides[0].1, vec2(0.0, -1.0));

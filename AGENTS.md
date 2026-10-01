@@ -127,8 +127,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   block may give its own `color`, which replaces its category's for that block
   alone; it stays under its category in the palette.
   Core only carries that. The GUI resolves it with `palette` into a `Swatch`
-  (fill, edge, shadow, highlight, muted, ink) by stepping lightness and chroma,
-  so every category sits at the same perceived lightness; displayed as sRGB.
+  (fill, edge, shadow, highlight, muted and muted versions of the steps, ink)
+  by stepping lightness and chroma, so every category sits at the same
+  perceived lightness; displayed as sRGB. Highlight and shadow shade a thin
+  chamfer inside each block's outline, lit from the top left.
   Other consumers choose their own scheme.
 
 ## Seeing the blocks

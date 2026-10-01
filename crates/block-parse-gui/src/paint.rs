@@ -248,9 +248,12 @@ fn paint_block(
         Form::Reporter { shape, head, .. } => {
             let rect = t.rect(block.rect);
             let head = head * t.zoom;
-            fill(painter, *shape, rect, head, body, Stroke::NONE, t.zoom);
-            bevel(&polygon(*shape, rect, head, t.zoom));
-            fill(painter, *shape, rect, head, Color32::TRANSPARENT, edge, t.zoom);
+            // From points rather than `painter.rect`, which snaps to pixels
+            // and would leave the bevel off by a fraction.
+            let points = reporter_outline(*shape, rect, head, t.zoom);
+            painter.add(egui::Shape::convex_polygon(points.clone(), body, Stroke::NONE));
+            bevel(&points);
+            painter.add(egui::Shape::closed_line(points, edge));
             if let Some(accent) = accent {
                 for stroke in strokes(accent) {
                     outline(painter, *shape, rect, head, stroke, t.zoom);
@@ -399,14 +402,14 @@ fn fill(painter: &Painter, shape: Shape, rect: Rect, head: f32, color: Color32, 
     }
 }
 
-/// The outline [`fill`] draws, as points.
-fn polygon(shape: Shape, rect: Rect, head: f32, zoom: f32) -> Vec<Pos2> {
+/// Clockwise, with the corners [`fill`] gives `shape`.
+fn reporter_outline(shape: Shape, rect: Rect, head: f32, zoom: f32) -> Vec<Pos2> {
     let corner = match shape {
         Shape::Round => head / 2.0,
         Shape::Square => 3.0 * zoom,
         Shape::Hexagon => return shape::hexagon(rect, head),
     };
-    shape::rounded_rect(rect, radius(corner).nw as f32)
+    shape::rounded_rect(rect, corner)
 }
 
 fn outline(painter: &Painter, shape: Shape, rect: Rect, head: f32, stroke: Stroke, zoom: f32) {

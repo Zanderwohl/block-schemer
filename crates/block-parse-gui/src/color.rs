@@ -88,7 +88,7 @@ impl SwatchRecipe {
         let chroma = chroma.unwrap_or(self.chroma);
         let lightness = lightness.unwrap_or(self.lightness);
         let step = |step: Step| srgb(lightness + step.lightness, chroma * step.chroma, hue);
-        let muted = |step: Step| {
+        let muted_step = |step: Step| {
             srgb(
                 lightness + step.lightness + self.muted.lightness,
                 chroma * step.chroma * self.muted.chroma,
@@ -101,9 +101,9 @@ impl SwatchRecipe {
             shadow: step(self.shadow),
             highlight: step(self.highlight),
             muted: step(self.muted),
-            muted_edge: muted(self.edge),
-            muted_highlight: muted(self.highlight),
-            muted_shadow: muted(self.shadow),
+            muted_edge: muted_step(self.edge),
+            muted_highlight: muted_step(self.highlight),
+            muted_shadow: muted_step(self.shadow),
             ink: if lightness > 0.75 {
                 Color32::from_gray(24)
             } else {
