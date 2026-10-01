@@ -12,7 +12,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Galley, Painter, Pos2, Rect, S
 
 use crate::bubble::{self, Bubble};
 use crate::interact::SnapMark;
-use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
+use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, append_text, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
 use crate::theme::Theme;
 
@@ -267,12 +267,12 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
         SlotContent::Plugged(_) => return,
         SlotContent::Empty => {
             fill(painter, slot.shape, rect, rect.height(), slot.swatch.shadow, edge, t.zoom);
+            hint(painter, rect, &slot.hint, slot.swatch.ink.gamma_multiply(0.6), t.zoom);
             return;
         }
         SlotContent::Append => {
             outline(painter, slot.shape, rect.shrink(edge.width), rect.height(), edge, t.zoom);
-            let font = FontId::proportional(LABEL_SIZE * t.zoom);
-            painter.text(rect.center(), Align2::CENTER_CENTER, "…", font, slot.swatch.ink);
+            hint(painter, rect, &append_text(&slot.hint), slot.swatch.ink.gamma_multiply(0.75), t.zoom);
             return;
         }
         SlotContent::Literal { kind, text, error } => (kind, text, error),
@@ -286,6 +286,11 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
     fill(painter, slot.shape, rect, rect.height(), background, edge, t.zoom);
     if error.is_some() {
         outline(painter, slot.shape, rect, rect.height(), Stroke::new(2.0 * t.zoom, theme.error), t.zoom);
+    }
+    // Under a live field too: the field is transparent and draws no hint.
+    if text.is_empty() && !matches!(kind, LiteralKind::Bool | LiteralKind::Choice(_)) {
+        hint(painter, rect, &slot.hint, theme.placeholder, t.zoom);
+        return;
     }
     if live && slot.is_field() && !matches!(kind, LiteralKind::Choice(_)) {
         return;
@@ -316,6 +321,11 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
             painter.text(rect.center(), Align2::CENTER_CENTER, text, font, theme.literal_ink);
         }
     }
+}
+
+fn hint(painter: &Painter, rect: Rect, text: &str, color: Color32, zoom: f32) {
+    let font = FontId::proportional(LITERAL_SIZE * zoom);
+    painter.text(rect.center(), Align2::CENTER_CENTER, text, font, color);
 }
 
 /// Screen-space convex pieces as one mesh, so shared edges leave no seams.

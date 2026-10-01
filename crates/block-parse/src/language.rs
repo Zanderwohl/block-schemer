@@ -91,6 +91,10 @@ pub struct BlockConfig {
     pub spec: String,
     #[serde(default)]
     pub layout: BlockLayout,
+    /// Shown in gray in a blank slot, by input or list name; the name itself
+    /// otherwise. Free text.
+    #[serde(default)]
+    pub hints: BTreeMap<String, String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -269,6 +273,8 @@ pub struct InputDef {
     /// Source text, already validated: the spec's default, else the literal
     /// kind's blank. `None` only for types that take no literal.
     pub default: Option<String>,
+    /// For a blank slot.
+    pub hint: String,
 }
 
 /// Any number of inputs of one type under one name. Starts empty: a list
@@ -279,6 +285,8 @@ pub struct ListDef {
     pub ty: String,
     /// 0 for `*`, 1 for `+`.
     pub min: usize,
+    /// For each blank item and the empty slot.
+    pub hint: String,
 }
 
 #[derive(Debug)]
@@ -606,7 +614,8 @@ impl LanguageConfig {
                                 Arity::Any => 0,
                                 Arity::AtLeastOne => 1,
                             };
-                            parts.push(Part::List(ListDef { name, ty, min }));
+                            let hint = config.hints.get(&name).cloned().unwrap_or_else(|| name.clone());
+                            parts.push(Part::List(ListDef { name, ty, min, hint }));
                             continue;
                         }
                         let default = match types.get(&ty) {
@@ -631,8 +640,19 @@ impl LanguageConfig {
                                 }
                             },
                         };
-                        parts.push(Part::Input(InputDef { name, ty, default }));
+                        let hint = config.hints.get(&name).cloned().unwrap_or_else(|| name.clone());
+                        parts.push(Part::Input(InputDef { name, ty, default, hint }));
                     }
+                }
+            }
+
+            for name in config.hints.keys() {
+                if !parts.iter().any(|part| match part {
+                    Part::Input(input) => &input.name == name,
+                    Part::List(list) => &list.name == name,
+                    Part::Label(_) | Part::Branch(_) => false,
+                }) {
+                    problem(at, format!("hint for `{name}`, which is no input or list"));
                 }
             }
 
@@ -816,6 +836,26 @@ mod tests {
         assert_eq!(add.list("more").map(|list| list.min), Some(1));
         assert_eq!(add.layout, BlockLayout::Body(1));
         assert_eq!(language.block("if").unwrap().layout, BlockLayout::Inline);
+    }
+
+    #[test]
+    fn hints_default_to_the_input_name() {
+        let language = compile(&MINIMAL.replace(
+            r#"spec: "{a:number=1} + {b:number}""#,
+            r#"spec: "{a:number=1} + {b:number} {rest:number*}", hints: {"b": "a number", "rest": "operand"}"#,
+        ))
+        .unwrap();
+        let add = language.block("add").unwrap();
+        assert_eq!(add.input("a").unwrap().hint, "a");
+        assert_eq!(add.input("b").unwrap().hint, "a number");
+        assert_eq!(add.list("rest").unwrap().hint, "operand");
+
+        let problems = compile(&MINIMAL.replace(
+            r#"spec: "{a:number=1} + {b:number}""#,
+            r#"spec: "{a:number=1} + {b:number}", hints: {"c": "nothing"}"#,
+        ))
+        .unwrap_err();
+        assert!(problems[0].contains("`c`"), "{problems:#?}");
     }
 
     #[test]

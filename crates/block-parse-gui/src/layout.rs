@@ -2,7 +2,7 @@
 //! fake. Drawing, hit-testing and snapping all read the one scene.
 
 use block_parse::edit::Target;
-use block_parse::language::{BlockDef, BlockKind, BlockLayout, LiteralKind, Part, Shape};
+use block_parse::language::{BlockDef, BlockKind, BlockLayout, ListDef, LiteralKind, Part, Shape};
 use block_parse::program::{Block, BlockId, Input, Program, Stack};
 use block_parse::Language;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
@@ -33,6 +33,11 @@ const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
 const GRID_GAP: f32 = 24.0;
+
+/// What a list's empty slot shows.
+pub fn append_text(hint: &str) -> String {
+    format!("{hint}…")
+}
 
 /// Canvas units.
 pub trait Measure {
@@ -109,6 +114,8 @@ pub struct PlacedSlot {
     /// The index in a list; its length for the empty slot after the items.
     pub item: Option<usize>,
     pub ty: String,
+    /// Drawn in gray while the slot is blank.
+    pub hint: String,
     pub rect: Rect,
     pub shape: Shape,
     /// The owning block's, for empty slots and edges.
@@ -456,7 +463,7 @@ impl Layout<'_> {
                     continue;
                 }
                 Part::Input(_) => self.item(block, part).into_iter().collect(),
-                Part::List(list) => self.list(block, &list.name, &list.ty),
+                Part::List(list) => self.list(block, list),
                 Part::Branch(_) => continue,
             };
             if inputs < inline {
@@ -574,7 +581,7 @@ impl Layout<'_> {
                 y += height;
                 after_branch = true;
             } else if let Part::List(list) = part {
-                row.extend(self.list(block, &list.name, &list.ty));
+                row.extend(self.list(block, list));
                 after_branch = false;
             } else if let Some(item) = self.item(block, part) {
                 row.push(item);
@@ -608,31 +615,41 @@ impl Layout<'_> {
                 width: self.measure.text_width(text, Font::Label),
                 text: text.clone(),
             }),
-            Part::Input(input) => Some(self.slot(block, &input.name, &input.ty, None, block.inputs.get(&input.name))),
+            Part::Input(input) => Some(self.slot(
+                block,
+                (&input.name, &input.ty, &input.hint),
+                None,
+                block.inputs.get(&input.name),
+            )),
             Part::List(_) | Part::Branch(_) => None,
         }
     }
 
     /// The list's items, then the empty slot that appends to it.
-    fn list(&self, block: &Block, name: &str, ty: &str) -> Vec<Item> {
-        let stored = block.lists.get(name).map(Vec::as_slice).unwrap_or(&[]);
+    fn list(&self, block: &Block, list: &ListDef) -> Vec<Item> {
+        let stored = block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[]);
+        let names = (list.name.as_str(), list.ty.as_str(), list.hint.as_str());
         let mut items: Vec<Item> = stored
             .iter()
             .enumerate()
-            .map(|(index, input)| self.slot(block, name, ty, Some(index), Some(input)))
+            .map(|(index, input)| self.slot(block, names, Some(index), Some(input)))
             .collect();
+        let width = self.measure.text_width(&append_text(&list.hint), Font::Literal) + 16.0;
         items.push(Item::Slot {
-            input: name.to_owned(),
+            input: list.name.clone(),
             item: Some(stored.len()),
-            ty: ty.to_owned(),
-            shape: self.language.ty(ty).map_or(Shape::Round, |ty| ty.shape),
-            size: vec2(APPEND_WIDTH, SLOT_HEIGHT),
+            ty: list.ty.clone(),
+            hint: list.hint.clone(),
+            shape: self.language.ty(&list.ty).map_or(Shape::Round, |ty| ty.shape),
+            size: vec2(width.max(APPEND_WIDTH), SLOT_HEIGHT),
             content: LaidContent::Append,
         });
         items
     }
 
-    fn slot(&self, block: &Block, name: &str, ty_name: &str, item: Option<usize>, stored: Option<&Input>) -> Item {
+    /// `names` is the input's name, type and hint.
+    fn slot(&self, block: &Block, names: (&str, &str, &str), item: Option<usize>, stored: Option<&Input>) -> Item {
+        let (name, ty_name, hint) = names;
         let ty = self.language.ty(ty_name);
         let shape = ty.map_or(Shape::Round, |ty| ty.shape);
         let kind = ty.map_or(LiteralKind::None, |ty| ty.literal.clone());
@@ -646,6 +663,7 @@ impl Layout<'_> {
                 input: name.to_owned(),
                 item,
                 ty: ty_name.to_owned(),
+                hint: hint.to_owned(),
                 shape,
                 size: laid.size,
                 content: LaidContent::Plugged(Box::new(laid)),
@@ -655,10 +673,11 @@ impl Layout<'_> {
         let text = stored
             .and_then(|stored| stored.literal.clone())
             .unwrap_or_default();
-        let text_width = self.measure.text_width(&text, Font::Literal);
+        let shown = if text.is_empty() { hint } else { &text };
+        let text_width = self.measure.text_width(shown, Font::Literal);
         let width = match (&kind, shape) {
-            (LiteralKind::None, Shape::Hexagon) => 40.0,
-            (LiteralKind::None, _) => 32.0,
+            (LiteralKind::None, Shape::Hexagon) => (text_width + SLOT_HEIGHT + 4.0).max(40.0),
+            (LiteralKind::None, _) => (text_width + 16.0).max(32.0),
             (LiteralKind::Bool, _) => 38.0,
             (LiteralKind::Choice(_), _) => text_width + 30.0,
             (_, Shape::Hexagon) => (text_width + SLOT_HEIGHT + 4.0).max(40.0),
@@ -680,6 +699,7 @@ impl Layout<'_> {
             input: name.to_owned(),
             item,
             ty: ty_name.to_owned(),
+            hint: hint.to_owned(),
             shape,
             size: vec2(width, SLOT_HEIGHT),
             content,
@@ -707,6 +727,7 @@ struct Laid {
 struct LaidSlot {
     input: String,
     item: Option<usize>,
+    hint: String,
     ty: String,
     rect: Rect,
     shape: Shape,
@@ -739,6 +760,7 @@ enum Item {
         input: String,
         item: Option<usize>,
         ty: String,
+        hint: String,
         shape: Shape,
         size: Vec2,
         content: LaidContent,
@@ -795,6 +817,7 @@ impl Laid {
                     input,
                     item,
                     ty,
+                    hint,
                     shape,
                     content,
                     ..
@@ -802,6 +825,7 @@ impl Laid {
                     self.slots.push(LaidSlot {
                         input,
                         item,
+                        hint,
                         ty,
                         rect: Rect::from_min_size(pos2(x, center - size.y / 2.0), size),
                         shape,
@@ -911,6 +935,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             input: slot.input.clone(),
             item: slot.item,
             ty: slot.ty.clone(),
+            hint: slot.hint.clone(),
             rect: slot_rect,
             shape: slot.shape,
             swatch: laid.swatch,
@@ -1127,6 +1152,22 @@ mod tests {
         assert_eq!(add.slots[3].content, SlotContent::Append);
         assert!(add.slots.windows(2).all(|pair| pair[0].rect.max.x < pair[1].rect.min.x), "inline");
         assert!(!add.slots[0].is_field(), "list items are not edited in place yet");
+    }
+
+    #[test]
+    fn a_blank_slot_is_sized_for_its_hint() {
+        let language = scheme();
+        let (mut program, ids) = with_stack(&language, &["add"]);
+        let lists = &mut program.find_mut(ids[0]).unwrap().lists;
+        lists.insert("args".into(), vec![literal("1"), Default::default()]);
+        let scene = scene_of(&language, &program);
+        let add = placed(&scene, ids[0]);
+
+        assert!(add.slots.iter().all(|slot| slot.hint == "operand"));
+        let width = |index: usize| add.slots[index].rect.width();
+        assert!((width(1) - (7.0 * 7.0 + 16.0)).abs() < 1e-3, "the hole fits `operand`");
+        assert!(width(0) < width(1), "a filled slot fits its text");
+        assert!((width(2) - (7.0 * 8.0 + 16.0)).abs() < 1e-3, "the empty slot fits `operand…`");
     }
 
     #[test]

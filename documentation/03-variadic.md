@@ -124,8 +124,21 @@ below and its bottom corners cut at the same angle. Both stay convex. The ends
 stop growing at `MAX_END` (40 units), so a one-row block holding a tall one
 does not swell into a huge pill.
 
-A list's empty slot is drawn as an outline in the type's shape with `…`
-inside.
+## Hints
+
+A blank slot shows a hint in gray: the input's name, or free text from the
+block's `hints`, keyed by input or list name:
+
+```ron
+(id: "add", kind: Reporter("datum"), spec: "+ {args:datum*}", hints: {"args": "operand"}),
+```
+
+A slot is blank when it holds no reporter and, for a typed literal, no text;
+checkboxes and choices are never blank. Every hole in a list shows the list's
+hint, and its empty slot shows it followed by `…`, drawn as an outline in the
+type's shape. A blank slot is sized to fit its hint, so it does not shrink to
+nothing. The hint is painted under a live field rather than as egui's hint
+text, which forces its own color.
 
 ![Every block of scheme.ron](images/03-scheme-grid.png)
 

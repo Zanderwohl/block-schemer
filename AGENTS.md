@@ -15,7 +15,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     and `{args:datum*}` (or `+`, at least one) a list of inputs. A block's
     `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
     later ones and later lists' items on indented rows of their own
-    (`documentation/03-variadic.md`). Lists are laid out and drawn, but `edit`,
+    (`documentation/03-variadic.md`). A blank slot shows its input's name in
+    gray, or the block's `hints` text for it; a list's empty slot shows it
+    with `…`. Lists are laid out and drawn, but `edit`,
     the AST and the editor's fields and drops do not handle them yet.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
