@@ -57,6 +57,8 @@ pub enum Font {
 pub struct Scene {
     /// Draw order: parents first.
     pub blocks: Vec<PlacedBlock>,
+    /// Ranges of `blocks`, one per stack. Only a later stack overlaps a block.
+    pub stacks: Vec<Range<usize>>,
     pub seams: Vec<Seam>,
     pub heads: Vec<StackHead>,
     pub bounds: Rect,
@@ -216,6 +218,7 @@ impl Scene {
     fn empty() -> Self {
         Self {
             blocks: Vec::new(),
+            stacks: Vec::new(),
             seams: Vec::new(),
             heads: Vec::new(),
             bounds: Rect::NOTHING,
@@ -262,7 +265,6 @@ pub struct Layout<'a> {
 impl Layout<'_> {
     pub fn program(&self, program: &Program) -> Scene {
         let mut scene = Scene::empty();
-        let mut stacks = Vec::new();
         for stack in &program.stacks {
             let first = scene.blocks.len();
             let origin = pos2(stack.pos[0], stack.pos[1]);
@@ -280,15 +282,18 @@ impl Layout<'_> {
                 place(&laid, pos2(origin.x, y), 0, &mut scene);
                 y += laid.size.y;
             }
-            stacks.push(first..scene.blocks.len());
+            if scene.blocks.len() > first {
+                scene.stacks.push(first..scene.blocks.len());
+            }
         }
-        mark_covered(&mut scene, &stacks);
+        mark_covered(&mut scene);
         scene
     }
 
     pub fn run(&self, blocks: &[Block], origin: Pos2) -> Run {
         let mut scene = Scene::empty();
         let height = self.place_sequence(blocks, origin, 0, &mut scene);
+        scene.stacks.push(0..scene.blocks.len());
         let width = scene.blocks.first().map_or(0.0, |block| block.rect.width());
         Run {
             scene,
@@ -328,6 +333,8 @@ impl Layout<'_> {
             }
             y += PALETTE_GAP;
         }
+        // Entries never overlap, so one range will do.
+        scene.stacks.push(0..scene.blocks.len());
         Palette {
             scene,
             entries,
@@ -888,9 +895,9 @@ impl Laid {
     }
 }
 
-/// Stacks draw in order, so only a later one can lie over a block's fields;
-/// within a stack, children sit beside their parent's fields, never on them.
-fn mark_covered(scene: &mut Scene, stacks: &[Range<usize>]) {
+/// Within a stack, children sit beside their parent's fields, never on them.
+fn mark_covered(scene: &mut Scene) {
+    let stacks = &scene.stacks;
     let bounds: Vec<Rect> = stacks
         .iter()
         .map(|stack| {

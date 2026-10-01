@@ -53,7 +53,8 @@ pub fn scene(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, live
 }
 
 /// Calls `widgets` after painting each block, so a block's widgets sit over
-/// it and under every block drawn after it.
+/// it and under every block drawn after it. A stack's tags and markers go over
+/// that stack and under later ones.
 pub fn scene_with(
     painter: &Painter,
     scene: &Scene,
@@ -64,36 +65,47 @@ pub fn scene_with(
     mut widgets: impl FnMut(&PlacedBlock),
 ) {
     let highlights = by_block(overlay);
-    for block in &scene.blocks {
-        let accent = highlights.get(&block.id).map(|h| theme.highlight(h.style));
-        let muted = overlay.muted.contains(&block.id);
-        paint_block(painter, block, t, theme, live, accent, muted);
-        // A switch with host state gets a live checkbox, unless covered; one
-        // without is drawn disabled.
-        let state = overlay.switches.get(&block.id);
-        if let Some(rect) = block.switch
-            && (state.is_none() || block.switch_covered)
-        {
-            let check = Rect::from_center_size(t.pos(rect.center()), vec2(14.0, 14.0) * t.zoom);
-            painter.rect(
-                check,
-                radius(2.0 * t.zoom),
-                block.swatch.shadow,
-                Stroke::new(t.zoom, block.swatch.edge),
-                StrokeKind::Inside,
-            );
-            if state == Some(&true) {
-                tick(painter, check.center(), 14.0 * t.zoom, Stroke::new(2.0 * t.zoom, block.swatch.ink));
+    for stack in &scene.stacks {
+        let blocks = &scene.blocks[stack.clone()];
+        for block in blocks {
+            let accent = highlights.get(&block.id).map(|h| theme.highlight(h.style));
+            let muted = overlay.muted.contains(&block.id);
+            paint_block(painter, block, t, theme, live, accent, muted);
+            // A switch with host state gets a live checkbox, unless covered; one
+            // without is drawn disabled.
+            let state = overlay.switches.get(&block.id);
+            if let Some(rect) = block.switch
+                && (state.is_none() || block.switch_covered)
+            {
+                let check = Rect::from_center_size(t.pos(rect.center()), vec2(14.0, 14.0) * t.zoom);
+                painter.rect(
+                    check,
+                    radius(2.0 * t.zoom),
+                    block.swatch.shadow,
+                    Stroke::new(t.zoom, block.swatch.edge),
+                    StrokeKind::Inside,
+                );
+                if state == Some(&true) {
+                    tick(painter, check.center(), 14.0 * t.zoom, Stroke::new(2.0 * t.zoom, block.swatch.ink));
+                }
             }
+            widgets(block);
         }
-        widgets(block);
+        error_tags(painter, blocks, t, theme);
+        markers(painter, blocks, t, theme, overlay, &highlights);
     }
 }
 
-/// Breakpoints, highlight labels and annotations, drawn over every block.
-pub fn markers(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme, overlay: &Overlay) {
-    let highlights = by_block(overlay);
-    for block in &scene.blocks {
+/// Breakpoints, highlight labels and annotations.
+fn markers(
+    painter: &Painter,
+    blocks: &[PlacedBlock],
+    t: Transform,
+    theme: &Theme,
+    overlay: &Overlay,
+    highlights: &HashMap<BlockId, &Highlight>,
+) {
+    for block in blocks {
         let row = pos2(block.rect.max.x, first_row_center(block));
         let mut tags = 0.0;
         if overlay.breakpoints.contains(&block.id) {
@@ -186,8 +198,8 @@ pub fn bubbles(painter: &Painter, placed: Vec<(Bubble, Arc<Galley>)>, t: Transfo
     }
 }
 
-pub fn error_tags(painter: &Painter, scene: &Scene, t: Transform, theme: &Theme) {
-    for slot in scene.slots() {
+fn error_tags(painter: &Painter, blocks: &[PlacedBlock], t: Transform, theme: &Theme) {
+    for slot in blocks.iter().flat_map(|block| &block.slots) {
         let SlotContent::Literal {
             error: Some(message),
             ..

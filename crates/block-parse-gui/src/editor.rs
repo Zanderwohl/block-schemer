@@ -417,8 +417,6 @@ impl BlockEditor {
         {
             paint::snap_mark(&canvas, mark, t, &theme);
         }
-        paint::error_tags(&canvas, &scene, t, &theme);
-        paint::markers(&canvas, &scene, t, &theme, overlay);
         let hot = match self.gesture {
             Gesture::Resizing { edge, .. } => Some(edge),
             Gesture::Idle => divider,
@@ -1292,6 +1290,28 @@ mod tests {
         let at = field.left_center() + vec2(2.0, 0.0) + editor.view.pan;
         press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), at);
         assert_eq!(editor.lifted(), Some(ids[1]));
+    }
+
+    #[test]
+    fn a_stack_on_top_covers_the_error_tags_under_it() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let mut add = program.instantiate(&language, "add").unwrap();
+        add.inputs.get_mut("a").unwrap().literal = Some("abc".into());
+        let print = program.instantiate(&language, "print").unwrap();
+        for block in [add, print] {
+            program.stacks.push(block_parse::Stack {
+                pos: [0.0, 0.0],
+                blocks: vec![block],
+            });
+        }
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let texts = frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let tag = texts.iter().position(|painted| painted.contains("number")).unwrap();
+        let label = texts.iter().rposition(|painted| painted == "print").unwrap();
+        assert!(tag < label, "the tag painted over the stack on top: {texts:?}");
     }
 
     fn codon_editor() -> BlockEditor {
