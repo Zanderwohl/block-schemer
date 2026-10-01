@@ -1,5 +1,5 @@
 [alias]
-# The editor needs the `app` feature, which is off by default for size when depended on.
-editor = "run -p block-parse-gui --features app --bin block-parse-editor --"
-snapshot = "run -p block-parse-gui --features app,snapshot --bin block-parse-editor -- --command snapshot"
+# The editor needs the `cli` feature, which is off by default for size when depended on.
+editor = "run -p block-parse-gui --features cli --bin block-parse-editor --"
+snapshot = "run -p block-parse-gui --features cli,snapshot --bin block-parse-editor -- --command snapshot"
 schemer = "run -p block-schemer --"

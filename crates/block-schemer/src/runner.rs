@@ -53,8 +53,11 @@ impl<S: Scheme> Runner for SchemerRunner<S> {
         }
     }
 
+    /// Only the latest answer is kept: the app shows it straight away and
+    /// dismisses it on the next edit or click.
     fn run_block(&mut self, _program: &Program, block: BlockId, script: &Script) {
         let answer = self.answer(script);
+        self.answers.clear();
         self.answers.insert(block, answer);
     }
 }

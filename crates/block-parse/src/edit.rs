@@ -566,6 +566,11 @@ mod tests {
         let lone = fresh(&mut program, &language, "solo");
         assert_eq!(program.can_attach(&language, &lone, &Target::After(ids[0])), Err(AttachError::HatNotAtTop));
         assert_eq!(program.can_attach(&language, &lone, &Target::Free { pos: [0.0, 0.0] }), Ok(()));
+        let above_step = Target::Above {
+            head: ids[0],
+            pos: [0.0, 0.0],
+        };
+        assert_eq!(program.can_attach(&language, &lone, &above_step), Err(AttachError::CapWouldOrphan));
         let mut loaded = Program::new(&language);
         stack(&mut loaded, &language, &["step", "solo", "step"]);
         let codes: Vec<_> = loaded.ast(&language).problems().iter().map(|problem| problem.code).collect();

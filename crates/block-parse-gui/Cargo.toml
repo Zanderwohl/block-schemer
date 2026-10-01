@@ -8,7 +8,9 @@ edition.workspace = true
 default = []
 # The standalone editor window. Off by default so embedding the component never
 # pulls in a windowing backend.
-app = ["dep:eframe", "dep:clap", "dep:rfd", "dep:winit"]
+app = ["dep:eframe", "dep:rfd", "dep:winit"]
+# The block-parse-editor binary, which parses its arguments with clap.
+cli = ["app", "dep:clap"]
 # Offscreen images of programs, and the editor's `--command snapshot`.
 snapshot = ["dep:egui_kittest", "dep:image"]
 
@@ -29,4 +31,4 @@ winit = { workspace = true, optional = true }
 [[bin]]
 name = "block-parse-editor"
 path = "src/bin/editor.rs"
-required-features = ["app"]
+required-features = ["cli"]

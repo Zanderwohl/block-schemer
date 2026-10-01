@@ -149,6 +149,11 @@ pub enum SlotContent {
     Append { kind: LiteralKind },
 }
 
+/// Not filled in yet: shown as its hint and not checked.
+pub fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
 /// Typed as text, rather than ticked, chosen or not typed at all.
 pub fn is_typed(kind: &LiteralKind) -> bool {
     !matches!(kind, LiteralKind::None | LiteralKind::Bool | LiteralKind::Choice(_))
@@ -696,7 +701,7 @@ impl Layout<'_> {
         let text = stored
             .and_then(|stored| stored.literal.clone())
             .unwrap_or_default();
-        let shown = if text.is_empty() { hint } else { &text };
+        let shown = if is_blank(&text) { hint } else { &text };
         let text_width = self.measure.text_width(shown, Font::Literal);
         let width = match (&kind, shape) {
             (LiteralKind::None, Shape::Hexagon) => (text_width + SLOT_HEIGHT + 4.0).max(40.0),
@@ -713,7 +718,7 @@ impl Layout<'_> {
             let focused = self.editing == Some((block.id, &slot));
             // A blank slot shows its hint: not filled in yet is not wrong yet.
             // The AST still reports it, so running says what is missing.
-            let error = if self.validate && !focused && !text.trim().is_empty() {
+            let error = if self.validate && !focused && !is_blank(&text) {
                 self.language.parse_literal(ty_name, &text).err()
             } else {
                 None
@@ -1166,12 +1171,26 @@ mod tests {
             let SlotContent::Literal { error, .. } = &slot.content else { panic!() };
             error.clone()
         };
+        program.set_literal(ids[0], &Slot::input("a"), "".into());
+        let width = |program: &Program| {
+            let scene = scene_of(&language, program);
+            scene.slots().find(|slot| slot.slot.input == "a").unwrap().rect.width()
+        };
+        let hinted = width(&program);
         for blank in ["", "  "] {
             program.set_literal(ids[0], &Slot::input("a"), blank.into());
             assert_eq!(error(&program), None, "{blank:?}");
+            assert_eq!(width(&program), hinted, "{blank:?} is sized for its hint");
         }
         program.set_literal(ids[0], &Slot::input("a"), "x".into());
         assert!(error(&program).is_some(), "typed text is still checked");
+
+        let scheme = scheme();
+        let (mut longer, car) = with_stack(&scheme, &["car"]);
+        longer.set_literal(car[0], &Slot::input("pair"), "  ".into());
+        let scene = scene_of(&scheme, &longer);
+        let width = scene.slots().next().unwrap().rect.width();
+        assert!((width - (7.0 * 4.0 + 16.0)).abs() < 1e-3, "spaces are sized for `pair`, not themselves");
 
         program.set_literal(ids[0], &Slot::input("a"), "".into());
         let codes: Vec<_> = program.ast(&language).problems().iter().map(|problem| problem.code).collect();

@@ -57,10 +57,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     depend on egui. `Runner` needs only `overlay` and `run_block`; the
     debugger methods default to doing nothing.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
-  by default) adds eframe, clap, rfd, winit (macOS only), the window as a
+  by default) adds eframe, rfd, winit (macOS only), the window as a
   library (`app::run` with an `AppConfig`: name, language, program path, an
-  optional `Runner` and an optional window icon) and the `block-parse-editor`
-  binary (`cargo editor -l <language> [program]`). Its File/Edit menus are
+  optional `Runner` and an optional window icon). Feature `cli` adds clap
+  and the `block-parse-editor` binary (`cargo editor -l <language>
+  [program]`). Its File/Edit menus are
   egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on macOS, Ctrl+Y or
   Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
   native menus arrive. On macOS it turns off winit's default menu, whose Quit
@@ -137,7 +138,9 @@ call `block_parse_gui::snapshot::program`.
 
 ## Deferred
 
-- `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
+- `RunToolbar`, `EditorOptions::toolbar`, and `Runner` dispatch beyond
+  `run_block`: `app::run` shows only the bubble a runner gives back at once,
+  not its highlights, breakpoints, annotations or later answers.
 - Other ways for the editor binary to choose a language than `--language`.
 - Native OS menus.
 - A cap on undo history; each step holds a whole copy of the stacks.

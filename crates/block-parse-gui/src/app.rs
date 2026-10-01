@@ -14,7 +14,8 @@ use crate::{BlockEditor, EditorEvent};
 
 /// What the window opens with.
 pub struct AppConfig {
-    /// The window's and the app's name.
+    /// What eframe keys the app's saved state by. The title bar shows the
+    /// file and the language instead.
     pub name: String,
     pub language: Language,
     /// Opened if it exists, else written on first save.
