@@ -36,6 +36,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     reporter is a loose expression, not a problem; warnings (unknown inputs
     and branches) leave `is_clean` true. `Program::script_at` builds the same
     for what running one block covers.
+  - `history`: `History`, undo and redo as a line of program states (stacks
+    only, so ids are never reissued) with a cursor; recording while undone
+    drops the future, recording no change is a no-op, and unrecorded changes
+    are recorded before undoing. The host owns it beside the program and
+    records when `EditorOutput::settled`, which a literal being typed holds
+    back until its field lets go (`documentation/03-history.md`).
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
     switch states, speech bubbles),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
@@ -43,7 +49,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only) and the
   `block-parse-editor` binary (`cargo editor -l <language> [program]`). Its
-  File/Edit menus are egui for now; `--no-menu-bar` hides them for when
+  File/Edit menus are egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on
+  macOS, Ctrl+Y or Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
   native menus arrive. On macOS it turns off winit's default menu, whose Quit
   would skip the save prompt. Feature `snapshot` (off by default) renders
   programs to images offscreen through egui_kittest's wgpu renderer; with it,
@@ -113,7 +120,6 @@ call `block_parse_gui::snapshot::program`.
 
 - `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
-- Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice

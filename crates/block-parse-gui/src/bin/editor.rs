@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use block_parse::History;
 use block_parse::host::{Highlight, HighlightStyle, Overlay};
 use block_parse::language::Language;
 use block_parse::program::Program;
@@ -44,7 +45,13 @@ const SAVE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::S)
 const SAVE_AS: KeyboardShortcut = KeyboardShortcut::new(COMMAND_SHIFT, Key::S);
 const QUIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Q);
 const UNDO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
-const REDO: KeyboardShortcut = KeyboardShortcut::new(COMMAND_SHIFT, Key::Z);
+const REDO: KeyboardShortcut = if cfg!(target_os = "macos") {
+    REDO_SHIFT
+} else {
+    KeyboardShortcut::new(Modifiers::COMMAND, Key::Y)
+};
+/// Also accepted off macOS, where it would otherwise match Undo.
+const REDO_SHIFT: KeyboardShortcut = KeyboardShortcut::new(COMMAND_SHIFT, Key::Z);
 const COMMAND_SHIFT: Modifiers = Modifiers {
     shift: true,
     command: true,
@@ -69,6 +76,7 @@ enum Choice {
 struct App {
     language: Language,
     program: Program,
+    history: History,
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     editor: BlockEditor,
@@ -130,6 +138,7 @@ fn main() -> ExitCode {
 
     let app = App {
         language,
+        history: History::new(&program),
         program,
         path: args.program,
         editor: BlockEditor::default(),
@@ -211,6 +220,9 @@ impl eframe::App for App {
                 self.dirty = true;
                 self.dismiss_runs();
             }
+            if output.settled {
+                self.history.record(&self.program);
+            }
             for event in output.events {
                 match event {
                     EditorEvent::OpenDocumentation { link, .. } => {
@@ -252,15 +264,23 @@ impl eframe::App for App {
 impl App {
     fn shortcuts(&mut self, ctx: &egui::Context) {
         // Shift variants first: a shortcut matches with extra Shift held.
-        let (save_as, save, new, open, quit) = ctx.input_mut(|i| {
+        // Taken before the editor draws, so a focused field's own undo never sees them.
+        let (save_as, save, new, open, quit, redo, undo) = ctx.input_mut(|i| {
             (
                 i.consume_shortcut(&SAVE_AS),
                 i.consume_shortcut(&SAVE),
                 i.consume_shortcut(&NEW),
                 i.consume_shortcut(&OPEN),
                 i.consume_shortcut(&QUIT),
+                i.consume_shortcut(&REDO_SHIFT) || i.consume_shortcut(&REDO),
+                i.consume_shortcut(&UNDO),
             )
         });
+        if redo {
+            self.redo(ctx);
+        } else if undo {
+            self.undo(ctx);
+        }
         if save_as {
             self.save_as();
         } else if save {
@@ -303,9 +323,37 @@ impl App {
             }
         });
         ui.menu_button("Edit", |ui| {
-            ui.add_enabled(false, item("Undo", &UNDO));
-            ui.add_enabled(false, item("Redo", &REDO));
+            let can_undo = self.history.can_undo(&self.program);
+            if ui.add_enabled(can_undo, item("Undo", &UNDO)).clicked() {
+                self.undo(&ctx);
+            }
+            let can_redo = self.history.can_redo(&self.program);
+            if ui.add_enabled(can_redo, item("Redo", &REDO)).clicked() {
+                self.redo(&ctx);
+            }
         });
+    }
+
+    fn undo(&mut self, ctx: &egui::Context) {
+        self.editor.commit_edit(ctx, &self.language, &mut self.program);
+        if self.history.undo(&mut self.program) {
+            self.after_history();
+        }
+    }
+
+    fn redo(&mut self, ctx: &egui::Context) {
+        self.editor.commit_edit(ctx, &self.language, &mut self.program);
+        // An edit still being typed is a step of its own, which ends the line.
+        self.history.record(&self.program);
+        if self.history.redo(&mut self.program) {
+            self.after_history();
+        }
+    }
+
+    fn after_history(&mut self) {
+        self.editor.cancel_drag();
+        self.dirty = !self.history.is_saved(&self.program);
+        self.dismiss_runs();
     }
 
     /// Runs `action`, first asking to save if there are unsaved changes.
@@ -321,6 +369,7 @@ impl App {
         match action {
             Pending::New => {
                 self.program = Program::new(&self.language);
+                self.history = History::new(&self.program);
                 self.path = None;
                 self.dirty = false;
                 self.editor = BlockEditor::default();
@@ -406,6 +455,7 @@ impl App {
     fn write(&mut self, path: PathBuf) -> bool {
         match self.program.save(&path) {
             Ok(()) => {
+                self.history.mark_saved(&self.program);
                 self.status = format!("saved {}", path.display());
                 self.path = Some(path);
                 self.dirty = false;
@@ -424,6 +474,7 @@ impl App {
         };
         match Program::load(&path, &self.language) {
             Ok((program, warnings)) => {
+                self.history = History::new(&program);
                 self.program = program;
                 self.path = Some(path);
                 self.dirty = false;

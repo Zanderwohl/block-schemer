@@ -79,6 +79,10 @@ impl Default for EditorOptions {
 pub struct EditorOutput {
     /// Any AST the consumer holds is stale.
     pub changed: bool,
+    /// An undo step ends here: record the program in a
+    /// [`History`](block_parse::History). False while a literal is being
+    /// typed, so its keystrokes make one step when the field lets go.
+    pub settled: bool,
     /// Empty when shown with a `Runner`, which already received them.
     pub commands: Vec<RunCommand>,
     pub events: Vec<EditorEvent>,
@@ -151,6 +155,7 @@ impl BlockEditor {
         overlay: &Overlay,
     ) -> EditorOutput {
         let mut output = EditorOutput::default();
+        let was_editing = self.edit.is_some();
         let bounds = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(bounds, Sense::click_and_drag());
         let ctx = ui.ctx().clone();
@@ -468,6 +473,7 @@ impl BlockEditor {
             }
         }
 
+        output.settled = self.edit.is_none() && (output.changed || was_editing);
         output
     }
 
@@ -634,7 +640,8 @@ impl BlockEditor {
 
     /// Ends any literal edit now, normalizing its text, rather than when the
     /// field is next drawn. Call before the program is locked, as when a run
-    /// starts, so nothing depends on draw order. True if the program changed.
+    /// starts, so nothing depends on draw order, and before undoing, so the
+    /// edit is one step. Record the program after. True if the program changed.
     pub fn commit_edit(&mut self, ctx: &egui::Context, language: &Language, program: &mut Program) -> bool {
         if let Some(edit) = &self.edit {
             let id = self.field_id(edit.block, &edit.input);
@@ -1491,6 +1498,64 @@ mod tests {
         }
         assert!(editor.choice.is_none(), "a press elsewhere closes the menu");
         assert_eq!(hue(&program).as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn typing_into_a_field_is_one_step_that_settles_when_the_field_lets_go() {
+        let (language, mut program, id, _) = editing_a_code();
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        }
+        .program(&program);
+        let field = scene.slots().next().unwrap().rect.translate(editor.view.pan);
+        let code = |program: &Program| program.find(id).unwrap().inputs["code"].literal.clone();
+
+        let mut history = block_parse::History::new(&program);
+        let mut run = |events, program: &mut Program| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                events,
+                ..Default::default()
+            };
+            let mut output = EditorOutput::default();
+            ctx.run_ui(input, |ui| output = editor.show_with(ui, &language, program, &Overlay::default()))
+                .textures_delta
+                .clear();
+            if output.settled {
+                history.record(program);
+            }
+            output
+        };
+        let mut steps = click(field.center());
+        steps.extend(["x", "y"].map(|text| vec![egui::Event::Text(text.into())]));
+        let mut settled = false;
+        for events in steps {
+            settled |= run(events, &mut program).settled;
+        }
+        assert_eq!(code(&program).as_deref(), Some("xy"));
+        assert!(!settled, "settled while still typing");
+
+        let mut settled = false;
+        for events in click(pos2(700.0, 500.0)) {
+            settled |= run(events, &mut program).settled;
+        }
+        assert!(settled);
+        assert_eq!(code(&program).as_deref(), Some("XY"), "normalized as it let go");
+
+        assert!(history.undo(&mut program));
+        assert_eq!(code(&program).as_deref(), Some("ab"), "typing and normalizing are one step");
+        assert!(!history.can_undo(&program));
+        assert!(history.redo(&mut program));
+        assert_eq!(code(&program).as_deref(), Some("XY"));
     }
 
     #[test]
