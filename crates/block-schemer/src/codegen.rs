@@ -70,16 +70,16 @@ impl Generator<'_> {
         Ok(match node.opcode.as_str() {
             "program" => one("main")?,
             "string" => Form::Atom(self.text(node, "text")?),
-            "variable" => one("name")?,
-            "call" => wrap([vec![one("procedure")?], many("args")?].concat()),
-            "binding" => wrap(vec![one("name")?, one("value")?]),
+            "variable" => one("variable")?,
+            "call" => wrap([vec![one("operator")?], many("operands")?].concat()),
+            "binding" => wrap(vec![one("variable")?, one("init")?]),
             "define_procedure" => {
-                let head = wrap([vec![one("name")?], many("params")?].concat());
+                let head = wrap([vec![one("variable")?], many("formals")?].concat());
                 wrap([vec![atom("define"), head], many("body")?].concat())
             }
-            "lambda" => wrap([vec![atom("lambda"), wrap(many("params")?)], many("body")?].concat()),
+            "lambda" => wrap([vec![atom("lambda"), wrap(many("formals")?)], many("body")?].concat()),
             "let" => wrap([vec![atom("let"), wrap(many("bindings")?)], many("body")?].concat()),
-            "display" => wrap(vec![atom("display"), one("value")?, atom(OUTPUT_PORT)]),
+            "display" => wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)]),
             opcode => {
                 let mut parts = vec![atom(opcode)];
                 for part in &def.parts {
@@ -248,39 +248,39 @@ mod tests {
     fn plain_blocks_are_their_opcode_applied_in_spec_order() {
         let mut b = Builder::new();
         let mut add = b.block("+");
-        set(&mut add, item("args"), text("1"));
-        set(&mut add, item("args"), text("2.5"));
-        let mut reduce = b.block("reduce");
-        set(&mut reduce, Slot::input("procedure"), text("+"));
-        set(&mut reduce, Slot::input("initial"), text("0"));
-        set(&mut reduce, Slot::input("list"), plug(add));
-        assert_eq!(b.code(reduce), Ok("(reduce + 0 (+ 1 2.5))".into()));
+        set(&mut add, item("z"), text("1"));
+        set(&mut add, item("z"), text("2.5"));
+        let mut fold = b.block("fold");
+        set(&mut fold, Slot::input("kons"), text("+"));
+        set(&mut fold, Slot::input("knil"), text("0"));
+        set(&mut fold, Slot::input("clist"), plug(add));
+        assert_eq!(b.code(fold), Ok("(fold + 0 (+ 1 2.5))".into()));
     }
 
     #[test]
     fn special_forms_get_their_own_shape() {
         let mut b = Builder::new();
         let mut times = b.block("*");
-        set(&mut times, item("args"), text("x"));
-        set(&mut times, item("args"), text("x"));
+        set(&mut times, item("z"), text("x"));
+        set(&mut times, item("z"), text("x"));
         let mut define = b.block("define_procedure");
-        set(&mut define, Slot::input("name"), text("square"));
-        set(&mut define, item("params"), text("x"));
+        set(&mut define, Slot::input("variable"), text("square"));
+        set(&mut define, item("formals"), text("x"));
         set(&mut define, item("body"), plug(times));
         assert_eq!(b.code(define), Ok("(define (square x) (* x x))".into()));
 
         let mut binding = b.block("binding");
-        set(&mut binding, Slot::input("name"), text("a"));
-        set(&mut binding, Slot::input("value"), text("3"));
+        set(&mut binding, Slot::input("variable"), text("a"));
+        set(&mut binding, Slot::input("init"), text("3"));
         let mut display = b.block("display");
-        set(&mut display, Slot::input("value"), text("a"));
+        set(&mut display, Slot::input("obj"), text("a"));
         let mut scope = b.block("let");
         set(&mut scope, item("bindings"), plug(binding));
         set(&mut scope, item("body"), plug(display));
         assert_eq!(b.code(scope), Ok(format!("(let ((a 3)) (display a {OUTPUT_PORT}))")));
 
         let mut call = b.block("call");
-        set(&mut call, Slot::input("procedure"), text("f"));
+        set(&mut call, Slot::input("operator"), text("f"));
         assert_eq!(b.code(call), Ok("(f)".into()));
     }
 
@@ -297,9 +297,9 @@ mod tests {
     fn a_script_with_an_error_is_not_generated() {
         let mut b = Builder::new();
         let mut add = b.block("+");
-        set(&mut add, item("args"), text("(exit)"));
+        set(&mut add, item("z"), text("(exit)"));
         let message = b.code(add).unwrap_err();
-        assert!(message.contains("item 1 of `args`"), "{message}");
+        assert!(message.contains("item 1 of `z`"), "{message}");
 
         let minus = b.block("-");
         assert!(b.code(minus).is_err(), "`-` needs an operand");
@@ -312,11 +312,11 @@ mod tests {
         set(&mut choose, Slot::input("consequent"), text("yes"));
         let minus = b.block("-");
         set(&mut choose, Slot::input("alternate"), plug(minus));
-        assert_eq!(b.pretty(choose), Ok("(if <test> yes (- <args>))".into()));
+        assert_eq!(b.pretty(choose), Ok("(if <test> yes (- <z>))".into()));
 
         let mut add = b.block("+");
-        set(&mut add, item("args"), text("(exit)"));
-        assert_eq!(b.pretty(add.clone()), Ok("(+ <args>)".into()));
+        set(&mut add, item("z"), text("(exit)"));
+        assert_eq!(b.pretty(add.clone()), Ok("(+ <z>)".into()));
         assert!(b.code(add).is_err(), "running still refuses it");
     }
 }

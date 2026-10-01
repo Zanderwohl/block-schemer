@@ -154,11 +154,11 @@ mod tests {
 
     #[test]
     fn calls_too_wide_align_under_their_first_argument() {
-        let form = read("(define (sum-of-squares xs) (reduce + 0 (map (lambda (x) (* x x)) xs)))");
+        let form = read("(define (sum-of-squares xs) (fold + 0 (map (lambda (x) (* x x)) xs)))");
         assert_eq!(
-            form.pretty(40),
-            "(define (sum-of-squares xs)\n  (reduce +\n          0\n          \
-             (map (lambda (x) (* x x))\n               xs)))"
+            form.pretty(38),
+            "(define (sum-of-squares xs)\n  (fold +\n        0\n        \
+             (map (lambda (x) (* x x))\n             xs)))"
         );
     }
 

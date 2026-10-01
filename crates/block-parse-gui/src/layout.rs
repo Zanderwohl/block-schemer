@@ -23,6 +23,7 @@ pub const MIN_BLOCK_WIDTH: f32 = 64.0;
 pub const SNAP_RADIUS: f32 = 28.0;
 pub const LABEL_SIZE: f32 = 14.0;
 pub const LITERAL_SIZE: f32 = 13.0;
+pub const FAINT_SIZE: f32 = 11.0;
 pub const SWITCH_SIZE: f32 = 16.0;
 /// Of a `Body` block's later rows, past the first row's start.
 pub const BODY_INDENT: f32 = 16.0;
@@ -45,6 +46,8 @@ pub trait Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Font {
     Label,
+    /// A faint label's.
+    Faint,
     Literal,
 }
 
@@ -106,6 +109,7 @@ pub struct PlacedLabel {
     /// Left-center.
     pub at: Pos2,
     pub text: String,
+    pub faint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -295,6 +299,7 @@ impl Layout<'_> {
             headings.push(PlacedLabel {
                 at: pos2(PALETTE_MARGIN, y + PALETTE_HEADING / 2.0 - 4.0),
                 text: name.unwrap_or("Other").to_owned(),
+                faint: false,
             });
             y += PALETTE_HEADING;
             for block in &members {
@@ -417,6 +422,7 @@ impl Layout<'_> {
             labels: vec![PlacedLabel {
                 at: pos2(ROW_PADDING, ROW_HEIGHT / 2.0),
                 text,
+                faint: false,
             }],
             slots: Vec::new(),
             branches: Vec::new(),
@@ -633,9 +639,10 @@ impl Layout<'_> {
 
     fn item(&self, block: &Block, part: &Part) -> Option<Item> {
         match part {
-            Part::Label(text) => Some(Item::Label {
-                width: self.measure.text_width(text, Font::Label),
-                text: text.clone(),
+            Part::Label(label) => Some(Item::Label {
+                width: self.measure.text_width(&label.text, if label.faint { Font::Faint } else { Font::Label }),
+                text: label.text.clone(),
+                faint: label.faint,
             }),
             Part::Input(input) => Some(self.slot(
                 block,
@@ -781,6 +788,7 @@ enum Item {
     Label {
         text: String,
         width: f32,
+        faint: bool,
     },
     Slot {
         slot: Slot,
@@ -831,10 +839,11 @@ impl Laid {
             }
             let size = item.size();
             match item {
-                Item::Label { text, width } => {
+                Item::Label { text, width, faint } => {
                     self.labels.push(PlacedLabel {
                         at: pos2(x, center),
                         text,
+                        faint,
                     });
                     x += width;
                 }
@@ -926,6 +935,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             .map(|label| PlacedLabel {
                 at: label.at + offset,
                 text: label.text.clone(),
+                faint: label.faint,
             })
             .collect(),
         slots: Vec::new(),

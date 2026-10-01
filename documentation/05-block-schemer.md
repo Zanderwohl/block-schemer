@@ -17,6 +17,10 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 - `scheme.ron`: the language, embedded with `include_str!` so the binary
   needs no files beside it. Programs are `.scmb`. Opcodes are Scheme's own
   names, so most blocks generate `(opcode arguments…)` in spec order.
+  Categories are R7RS's section titles and inputs its argument names
+  (`proc`, `formals`, `z`), except `cons`, whose inputs are `car` and `cdr`.
+  Words that are not Scheme, such as `if`'s `then` and `else`, are faint.
+  `fold` is SRFI 1's, with its names; Steel's takes one list.
 - `literals`: validators for the `datum` type (a number, boolean, character,
   string in quotes or symbol) and the `symbol` type (an identifier). The
   editor shows text they refuse as a problem, and the code generator emits
@@ -54,12 +58,12 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 | `program` | its one expression |
 | `string` | a string literal |
 | `variable` | the name |
-| `call` | `(procedure arguments…)` |
-| `binding` | `(name value)`, for `let` |
-| `define_procedure` | `(define (name parameters…) body…)` |
-| `lambda` | `(lambda (parameters…) body…)` |
+| `call` | `(operator operands…)` |
+| `binding` | `(variable init)`, for `let` |
+| `define_procedure` | `(define (variable formals…) body…)` |
+| `lambda` | `(lambda (formals…) body…)` |
 | `let` | `(let (bindings…) body…)` |
-| `display` | `(display value __out)` |
+| `display` | `(display obj __out)` |
 
 ## Known gaps
 

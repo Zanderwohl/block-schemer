@@ -87,7 +87,9 @@ pub struct BlockConfig {
     pub kind: BlockKind,
     /// `{name:type=default}` is an input, `{name:type*}` a list of any length,
     /// `{name:type+}` one of at least one item, `[name]` a branch, the rest
-    /// label: `"if {cond:bool} then [then] else [else]"`.
+    /// label: `"if {cond:bool} then [then] else [else]"`. A word wrapped in
+    /// underscores, as `_then_`, is a faint label: a reading aid that is not
+    /// part of the language.
     pub spec: String,
     #[serde(default)]
     pub layout: BlockLayout,
@@ -260,11 +262,18 @@ pub struct BlockDef {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Part {
-    Label(String),
+    Label(Label),
     Input(InputDef),
     List(ListDef),
     /// Starts a new row after it.
     Branch(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Label {
+    pub text: String,
+    /// Drawn smaller and fainter.
+    pub faint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -602,7 +611,7 @@ impl LanguageConfig {
             let mut parts = Vec::new();
             for part in spec_parts {
                 match part {
-                    SpecPart::Label(text) => parts.push(Part::Label(text)),
+                    SpecPart::Label(label) => parts.push(Part::Label(label)),
                     SpecPart::Branch(name) => {
                         if !is_name(&name, true) {
                             problem(at, format!("branch name `{name}` is not a valid name"));

@@ -1,7 +1,7 @@
 #![enable(implicit_some)]
 // Block Schemer's language: a small subset of R7RS. Opcodes are the Scheme
 // names, so most blocks generate `(opcode arguments…)`; `codegen.rs` handles
-// the rest.
+// the rest. Categories, input names and faint words follow R7RS's own.
 Language(
     name: "Block Schemer",
     file: (extension: "scmb", description: "Block Schemer program"),
@@ -17,56 +17,79 @@ Language(
     },
 
     categories: [
-        (name: "Program", color: (hue: 95.0)),
-        (name: "Forms", color: (hue: 60.0)),
-        (name: "Procedures", color: (hue: 260.0)),
-        (name: "Arithmetic", color: (hue: 145.0)),
-        (name: "Lists", color: (hue: 330.0)),
-        (name: "Data", color: (hue: 190.0)),
+        (name: "Program structure", color: (hue: 95.0)),
+        (name: "Primitive expressions", color: (hue: 60.0)),
+        (name: "Derived expressions", color: (hue: 25.0)),
+        (name: "Control features", color: (hue: 260.0)),
+        (name: "Numbers", color: (hue: 145.0)),
+        (name: "Pairs and lists", color: (hue: 330.0)),
+        (name: "Input and output", color: (hue: 190.0)),
     ],
 
     blocks: [
-        // Program
+        // Program structure
         (
             id: "program",
             name: "Program",
-            category: "Program",
+            category: "Program structure",
             kind: HatCap,
             spec: "program {main:datum}",
             description: "Where your program begins.",
         ),
-
-        // Forms
         (
             id: "define",
             name: "Define",
-            category: "Forms",
+            category: "Program structure",
             kind: Reporter("datum"),
-            spec: "define {name:symbol} {value:datum}",
+            spec: "define {variable:symbol} {expression:datum}",
             layout: Body(1),
         ),
         (
             id: "define_procedure",
             name: "Define procedure",
-            category: "Forms",
+            category: "Program structure",
             kind: Reporter("datum"),
-            spec: "define {name:symbol} taking {params:symbol*} {body:datum+}",
-            hints: {"params": "param", "body": "expression"},
+            spec: "define {variable:symbol} _taking_ {formals:symbol*} {body:datum+}",
+            hints: {"formals": "variable", "body": "expression"},
             layout: Body(2),
+        ),
+
+        // Primitive expressions
+        (id: "variable", name: "Variable", category: "Primitive expressions", kind: Reporter("datum"), spec: "{variable:symbol}"),
+        (id: "quote", name: "Quote", category: "Primitive expressions", kind: Reporter("datum"), spec: "quote {datum:datum}"),
+        (id: "string", name: "String", category: "Primitive expressions", kind: Reporter("datum"), spec: "\"{text:string}\""),
+        (
+            id: "call",
+            name: "Call",
+            category: "Primitive expressions",
+            kind: Reporter("datum"),
+            spec: "{operator:datum} {operands:datum*}",
+            hints: {"operands": "operand"},
+            description: "Calls any procedure, named or computed.",
+        ),
+        (
+            id: "lambda",
+            name: "Lambda",
+            category: "Primitive expressions",
+            kind: Reporter("datum"),
+            spec: "lambda {formals:symbol*} {body:datum+}",
+            hints: {"formals": "variable", "body": "expression"},
+            layout: Body(1),
         ),
         (
             id: "if",
             name: "If",
-            category: "Forms",
+            category: "Primitive expressions",
             kind: Reporter("datum"),
-            spec: "if {test:datum} then {consequent:datum} else {alternate:datum}",
-            hints: {"consequent": "if true", "alternate": "if false"},
+            spec: "if {test:datum} _then_ {consequent:datum} _else_ {alternate:datum}",
             layout: Body(1),
         ),
+
+        // Derived expressions
         (
             id: "let",
             name: "Let",
-            category: "Forms",
+            category: "Derived expressions",
             kind: Reporter("datum"),
             spec: "let {bindings:binding*} {body:datum+}",
             hints: {"bindings": "binding", "body": "expression"},
@@ -75,83 +98,62 @@ Language(
         (
             id: "binding",
             name: "Binding",
-            category: "Forms",
+            category: "Derived expressions",
             kind: Reporter("binding"),
-            spec: "{name:symbol} := {value:datum}",
+            spec: "{variable:symbol} _as_ {init:datum}",
         ),
         (
             id: "begin",
             name: "Begin",
-            category: "Forms",
+            category: "Derived expressions",
             kind: Reporter("datum"),
-            spec: "begin {body:datum+}",
-            hints: {"body": "expression"},
+            spec: "begin {expressions:datum+}",
+            hints: {"expressions": "expression"},
             layout: Body(0),
         ),
 
-        // Procedures
-        (
-            id: "lambda",
-            name: "Lambda",
-            category: "Procedures",
-            kind: Reporter("datum"),
-            spec: "lambda {params:symbol*} {body:datum+}",
-            hints: {"params": "param", "body": "expression"},
-            layout: Body(1),
-        ),
-        (
-            id: "call",
-            name: "Call",
-            category: "Procedures",
-            kind: Reporter("datum"),
-            spec: "{procedure:datum} {args:datum*}",
-            hints: {"args": "argument"},
-            description: "Calls any procedure, named or computed.",
-        ),
+        // Control features
         (
             id: "apply",
             name: "Apply",
-            category: "Procedures",
+            category: "Control features",
             kind: Reporter("datum"),
-            spec: "apply {procedure:datum} {args:datum+}",
-            hints: {"args": "argument"},
+            spec: "apply {proc:datum} {args:datum+}",
+            hints: {"args": "arg"},
             description: "Calls the procedure with the arguments, the last of which is a list spread out.",
         ),
-
-        // Arithmetic
-        (id: "+", name: "Add", category: "Arithmetic", kind: Reporter("datum"), spec: "+ {args:datum*}", hints: {"args": "operand"}),
-        (id: "-", name: "Subtract", category: "Arithmetic", kind: Reporter("datum"), spec: "- {args:datum+}", hints: {"args": "operand"}),
-        (id: "*", name: "Multiply", category: "Arithmetic", kind: Reporter("datum"), spec: "* {args:datum*}", hints: {"args": "operand"}),
-        (id: "/", name: "Divide", category: "Arithmetic", kind: Reporter("datum"), spec: "/ {args:datum+}", hints: {"args": "operand"}),
-        (id: "=", name: "Equal", category: "Arithmetic", kind: Reporter("datum"), spec: "= {args:datum+}", hints: {"args": "operand"}),
-        (id: "<", name: "Less than", category: "Arithmetic", kind: Reporter("datum"), spec: "< {args:datum+}", hints: {"args": "operand"}),
-
-        // Lists
-        (id: "list", name: "List", category: "Lists", kind: Reporter("datum"), spec: "list {items:datum*}", hints: {"items": "item"}),
-        (id: "cons", name: "Cons", category: "Lists", kind: Reporter("datum"), spec: "cons {car:datum} {cdr:datum}"),
-        (id: "car", name: "Car", category: "Lists", kind: Reporter("datum"), spec: "car {pair:datum}"),
-        (id: "cdr", name: "Cdr", category: "Lists", kind: Reporter("datum"), spec: "cdr {pair:datum}"),
         (
             id: "map",
             name: "Map",
-            category: "Lists",
+            category: "Control features",
             kind: Reporter("datum"),
-            spec: "map {procedure:datum} {lists:datum+}",
+            spec: "map {proc:datum} {lists:datum+}",
             hints: {"lists": "list"},
         ),
+
+        // Numbers
+        (id: "+", name: "Add", category: "Numbers", kind: Reporter("datum"), spec: "+ {z:datum*}"),
+        (id: "-", name: "Subtract", category: "Numbers", kind: Reporter("datum"), spec: "- {z:datum+}"),
+        (id: "*", name: "Multiply", category: "Numbers", kind: Reporter("datum"), spec: "* {z:datum*}"),
+        (id: "/", name: "Divide", category: "Numbers", kind: Reporter("datum"), spec: "/ {z:datum+}"),
+        (id: "=", name: "Equal", category: "Numbers", kind: Reporter("datum"), spec: "= {z:datum+}"),
+        (id: "<", name: "Less than", category: "Numbers", kind: Reporter("datum"), spec: "< {x:datum+}"),
+
+        // Pairs and lists
+        (id: "cons", name: "Cons", category: "Pairs and lists", kind: Reporter("datum"), spec: "cons {car:datum} {cdr:datum}"),
+        (id: "car", name: "Car", category: "Pairs and lists", kind: Reporter("datum"), spec: "car {pair:datum}"),
+        (id: "cdr", name: "Cdr", category: "Pairs and lists", kind: Reporter("datum"), spec: "cdr {pair:datum}"),
+        (id: "list", name: "List", category: "Pairs and lists", kind: Reporter("datum"), spec: "list {obj:datum*}"),
         (
-            id: "reduce",
-            name: "Reduce",
-            category: "Lists",
+            id: "fold",
+            name: "Fold",
+            category: "Pairs and lists",
             kind: Reporter("datum"),
-            spec: "reduce {procedure:datum} {initial:datum} {list:datum}",
-            description: "SRFI 1's reduce: folds the list with the procedure, or gives the initial value if it is empty.",
+            spec: "fold {kons:datum} {knil:datum} {clist:datum}",
+            description: "SRFI 1's fold over one list: calls kons with each element and the result so far, starting from knil.",
         ),
 
-        // Data
-        (id: "quote", name: "Quote", category: "Data", kind: Reporter("datum"), spec: "quote {datum:datum}"),
-        (id: "string", name: "String", category: "Data", kind: Reporter("datum"), spec: "\"{text:string}\""),
-        (id: "variable", name: "Variable", category: "Data", kind: Reporter("datum"), spec: "{name:symbol}"),
-        (id: "display", name: "Display", category: "Data", kind: Reporter("datum"), spec: "display {value:datum}"),
+        // Input and output
+        (id: "display", name: "Display", category: "Input and output", kind: Reporter("datum"), spec: "display {obj:datum}"),
     ],
 )

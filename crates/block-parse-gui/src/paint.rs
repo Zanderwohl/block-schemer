@@ -12,7 +12,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Galley, Painter, Pos2, Rect, S
 
 use crate::bubble::{self, Bubble};
 use crate::interact::SnapMark;
-use crate::layout::{Form, LABEL_SIZE, LITERAL_SIZE, append_text, is_blank, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
+use crate::layout::{FAINT_SIZE, Form, LABEL_SIZE, LITERAL_SIZE, append_text, is_blank, PlacedBlock, PlacedSlot, Scene, Section, SlotContent};
 use crate::shape::{self, TopEdge};
 use crate::theme::Theme;
 
@@ -260,9 +260,13 @@ fn paint_block(
         }
     }
 
-    let font = FontId::proportional(LABEL_SIZE * t.zoom);
     for label in &block.labels {
-        painter.text(t.pos(label.at), Align2::LEFT_CENTER, &label.text, font.clone(), swatch.ink);
+        let (size, ink) = match label.faint {
+            true => (FAINT_SIZE, swatch.ink.gamma_multiply(0.6)),
+            false => (LABEL_SIZE, swatch.ink),
+        };
+        let font = FontId::proportional(size * t.zoom);
+        painter.text(t.pos(label.at), Align2::LEFT_CENTER, &label.text, font, ink);
     }
     for slot in &block.slots {
         paint_slot(painter, slot, t, theme, live);

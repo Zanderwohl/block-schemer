@@ -21,7 +21,7 @@ use crate::interact::{
     DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
 };
 use crate::layout::{
-    Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Scene, SlotContent,
+    FAINT_SIZE, Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Scene, SlotContent,
 };
 use crate::paint::{self, Transform};
 use crate::panels::Panels;
@@ -930,6 +930,7 @@ impl Measure for EguiMeasure<'_> {
     fn text_width(&self, text: &str, font: Font) -> f32 {
         let size = match font {
             Font::Label => LABEL_SIZE,
+            Font::Faint => FAINT_SIZE,
             Font::Literal => LITERAL_SIZE,
         };
         self.0.fonts_mut(|fonts| {

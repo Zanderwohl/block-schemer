@@ -1,9 +1,12 @@
 //! Block spec strings: `{name:type=default}` is an input, `{name:type*}` or
-//! `{name:type+}` a list, `[name]` a branch, everything else label text.
+//! `{name:type+}` a list, `[name]` a branch, everything else label text, faint
+//! for words wrapped in underscores.
+
+use crate::language::Label;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum SpecPart {
-    Label(String),
+    Label(Label),
     Input {
         name: String,
         ty: String,
@@ -77,11 +80,24 @@ pub(crate) fn parse(spec: &str) -> Result<Vec<SpecPart>, String> {
     Ok(parts)
 }
 
-/// Collapses whitespace so labels lay out the same however the spec is spaced.
+/// One label per run of plain or faint words, whitespace collapsed so labels
+/// lay out the same however the spec is spaced.
 fn push_label(parts: &mut Vec<SpecPart>, label: &mut String) {
-    let words: Vec<&str> = label.split_whitespace().collect();
-    if !words.is_empty() {
-        parts.push(SpecPart::Label(words.join(" ")));
+    for word in label.split_whitespace() {
+        let (text, faint) = match word.strip_prefix('_').and_then(|word| word.strip_suffix('_')) {
+            Some(inner) if !inner.is_empty() => (inner, true),
+            _ => (word, false),
+        };
+        match parts.last_mut() {
+            Some(SpecPart::Label(last)) if last.faint == faint => {
+                last.text.push(' ');
+                last.text.push_str(text);
+            }
+            _ => parts.push(SpecPart::Label(Label {
+                text: text.to_owned(),
+                faint,
+            })),
+        }
     }
     label.clear();
 }
@@ -89,6 +105,20 @@ fn push_label(parts: &mut Vec<SpecPart>, label: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plain(text: &str) -> SpecPart {
+        SpecPart::Label(Label {
+            text: text.into(),
+            faint: false,
+        })
+    }
+
+    fn faint(text: &str) -> SpecPart {
+        SpecPart::Label(Label {
+            text: text.into(),
+            faint: true,
+        })
+    }
 
     fn input(name: &str, ty: &str, default: Option<&str>) -> SpecPart {
         SpecPart::Input {
@@ -113,12 +143,27 @@ mod tests {
         assert_eq!(
             parse("if {cond:bool} then [then]  else [else]").unwrap(),
             vec![
-                SpecPart::Label("if".into()),
+                plain("if"),
                 input("cond", "bool", None),
-                SpecPart::Label("then".into()),
+                plain("then"),
                 SpecPart::Branch("then".into()),
-                SpecPart::Label("else".into()),
+                plain("else"),
                 SpecPart::Branch("else".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn words_in_underscores_are_faint() {
+        assert_eq!(
+            parse("define {name:symbol} _taking_ {x:symbol} _and_ _then_ x_ _ __").unwrap(),
+            vec![
+                plain("define"),
+                input("name", "symbol", None),
+                faint("taking"),
+                input("x", "symbol", None),
+                faint("and then"),
+                plain("x_ _ __"),
             ]
         );
     }
@@ -128,7 +173,7 @@ mod tests {
         assert_eq!(
             parse("print {value:text=Hello, world!}").unwrap(),
             vec![
-                SpecPart::Label("print".into()),
+                plain("print"),
                 input("value", "text", Some("Hello, world!")),
             ]
         );
