@@ -37,11 +37,8 @@ pub enum Side {
     Left,
 }
 
-/// A bubble of `size` pointing at `target`, a block's first row, and kept off
-/// `block`, the whole block. Of the spots around `target`, takes the one with
-/// the least weighted area over `block`, outside `visible` and over
-/// `obstacles`, in that order of weight; near-ties go to the right of the
-/// block, then above.
+/// Points at `target`, a block's first row, and keeps off `block`, all of it.
+/// The scoring is in `documentation/02-bubbles.md`.
 pub fn place(target: Rect, block: Rect, size: Vec2, obstacles: &[Rect], visible: Rect) -> Bubble {
     let body = candidates(target, size)
         .into_iter()
@@ -49,8 +46,7 @@ pub fn place(target: Rect, block: Rect, size: Vec2, obstacles: &[Rect], visible:
         .map(|(rank, body)| {
             let outside = body.area() - overlap(body, visible);
             let covered: f32 = obstacles.iter().map(|o| overlap(body, *o)).sum();
-            // A bubble cut off cannot be read, and one over its own block
-            // hides what it speaks for.
+            // A bubble cut off cannot be read; one over its block hides it.
             let penalty = overlap(body, block) * 1000.0 + outside * 4.0 + covered;
             (penalty + rank as f32 * 0.01, body)
         })

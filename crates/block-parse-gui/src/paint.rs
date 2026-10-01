@@ -128,9 +128,7 @@ const BUBBLE_SIZE: f32 = 13.0;
 const BUBBLE_WRAP: f32 = 220.0;
 const BUBBLE_SHADOW: f32 = 2.0;
 
-/// The overlay's speech bubbles in canvas units, each pointing at its block's
-/// first row, where it covers the least of the blocks and earlier bubbles,
-/// inside `visible` if it fits. Text is laid out at `zoom`.
+/// In canvas units, each kept off earlier ones. Text is laid out at `zoom`.
 pub fn place_bubbles(
     painter: &Painter,
     scene: &Scene,

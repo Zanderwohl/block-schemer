@@ -40,9 +40,8 @@ pub struct BlockEditor {
     swatches: Option<(SwatchKey, Swatches)>,
     /// The block the context menu was opened on.
     menu: Option<BlockId>,
-    /// The last click that did not run its block, and when; any other press
-    /// clears it. egui's own double-click turns into a triple when it follows
-    /// another closely.
+    /// A first click awaiting its second; any other press clears it. egui's
+    /// own double-click becomes a triple when it follows another closely.
     last_click: Option<(BlockId, f64)>,
     id: egui::Id,
 }
@@ -244,8 +243,7 @@ impl BlockEditor {
             self.last_click = None;
             self.gesture = self.start_drag(press, language, program, t);
         }
-        // A drop now would edit a program the host has locked; clicks and
-        // panning carry on.
+        // A drop now would edit a program the host has locked.
         if read_only && self.is_dragging() {
             self.cancel_drag();
         }
@@ -407,8 +405,7 @@ impl BlockEditor {
                 }
             }
         }
-        // Over the fields, which share this layer, and under the menu and the
-        // run in hand, which sit above it.
+        // Over the fields on this layer; under the menu and run in hand on theirs.
         let visible = Rect::from_min_max(t.canvas(canvas_rect.min), t.canvas(canvas_rect.max));
         let bubbles = paint::place_bubbles(fields.painter(), &scene, t.zoom, &theme, overlay, visible);
         paint::bubbles(fields.painter(), bubbles, t, &theme);
@@ -1305,8 +1302,7 @@ mod tests {
         assert!(!hover(switch, &live), "a live switch needs no excuse");
     }
 
-    /// Clicks at `(point, time)` on a fresh read-only editor, and what it
-    /// sent.
+    /// What a fresh read-only editor sends for clicks at `(point, time)`.
     fn clicks(
         ctx: &egui::Context,
         language: &Language,

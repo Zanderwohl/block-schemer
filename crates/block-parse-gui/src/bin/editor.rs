@@ -72,7 +72,6 @@ struct App {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     editor: BlockEditor,
-    /// With no backend, a run can only say so.
     overlay: Overlay,
     dirty: bool,
     status: String,
