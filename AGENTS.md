@@ -45,6 +45,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     reporter is a loose expression, not a problem; warnings (unknown inputs
     and branches) leave `is_clean` true. `Program::script_at` builds the same
     for what running one block covers.
+  - `history`: `History`, undo and redo as a line of program states (stacks
+    only, so ids are never reissued) with a cursor; recording while undone
+    drops the future, recording no change is a no-op, and unrecorded changes
+    are recorded before undoing. The host owns it beside the program and
+    records when `EditorOutput::settled`, which a literal being typed holds
+    back until its field lets go (`documentation/04-history.md`).
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
     switch states, speech bubbles),
     `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
@@ -53,9 +59,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only), the window as a
   library (`app::run` with an `AppConfig`: name, language, program path, an
-  optional `Runner` and an optional window icon) and the `block-parse-editor` binary
-  (`cargo editor -l <language> [program]`). Its File/Edit menus are egui for
-  now; `--no-menu-bar` hides them for when
+  optional `Runner` and an optional window icon) and the `block-parse-editor`
+  binary (`cargo editor -l <language> [program]`). Its File/Edit menus are
+  egui for now (Undo Cmd/Ctrl+Z; Redo Cmd+Shift+Z on macOS, Ctrl+Y or
+  Ctrl+Shift+Z elsewhere); `--no-menu-bar` hides them for when
   native menus arrive. On macOS it turns off winit's default menu, whose Quit
   would skip the save prompt. Feature `snapshot` (off by default) renders
   programs to images offscreen through egui_kittest's wgpu renderer; with it,
@@ -64,7 +71,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   the window.
 - `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
   blocks run in Steel when double-clicked (`cargo schemer [program.scmb]`,
-  `documentation/04-block-schemer.md`). Its language is embedded; its
+  `documentation/05-block-schemer.md`). Its language is embedded; its
   `codegen` is the layer that refuses anything the language does not offer
   and escapes strings before Scheme sees them. Steel sits behind the
   `Scheme` trait so a WASM Scheme can replace it.
@@ -132,8 +139,8 @@ call `block_parse_gui::snapshot::program`.
 
 - `RunToolbar`, `Runner` dispatch and `EditorOptions::toolbar`.
 - Other ways for the editor binary to choose a language than `--language`.
-- Undo and redo (the Edit menu items are there, disabled).
 - Native OS menus.
+- A cap on undo history; each step holds a whole copy of the stacks.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice
   menus; Escape closes one.
