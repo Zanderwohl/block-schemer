@@ -1,0 +1,132 @@
+name: Release
+
+# Run from the Actions tab. Builds Block Schemer for each platform and, unless
+# told not to, attaches the builds to a draft release to review and publish.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.1.0 (created on the chosen branch's head if new)"
+        required: true
+      release:
+        description: "Create a draft release (off: only upload the builds to this run)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  linux:
+    # The oldest runner, so the builds run on distributions with an older glibc.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p block-schemer
+      - name: Package tarball
+        run: |
+          name="block-schemer-$TAG-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/block-schemer README.md "dist/$name/"
+          cp crates/block-schemer/assets/linux/block-schemer.desktop "dist/$name/"
+          cp crates/block-schemer/assets/icons/icon-512.png "dist/$name/block-schemer.png"
+          tar -czf "$name.tar.gz" -C dist "$name"
+      - name: Package AppImage
+        env:
+          # The runner has no FUSE to mount AppImages with.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          curl -fsSLo linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          # linuxdeploy names the icon after its file, which must match the desktop entry's Icon.
+          cp crates/block-schemer/assets/icons/icon-512.png block-schemer.png
+          OUTPUT="block-schemer-$TAG-linux-x86_64.AppImage" ./linuxdeploy \
+            --appdir AppDir \
+            --executable target/release/block-schemer \
+            --desktop-file crates/block-schemer/assets/linux/block-schemer.desktop \
+            --icon-file block-schemer.png \
+            --output appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            block-schemer-*.tar.gz
+            block-schemer-*.AppImage
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-bundle --locked
+      - run: cargo build --release --locked -p block-schemer --target x86_64-apple-darwin
+      - run: cargo bundle --release -p block-schemer --target aarch64-apple-darwin
+      - name: Make the app universal
+        run: |
+          app="target/aarch64-apple-darwin/release/bundle/osx/Block Schemer.app"
+          test -f "$app/Contents/MacOS/block-schemer"
+          lipo -create -output "$app/Contents/MacOS/block-schemer" \
+            target/aarch64-apple-darwin/release/block-schemer \
+            target/x86_64-apple-darwin/release/block-schemer
+          lipo -info "$app/Contents/MacOS/block-schemer"
+          # Ad hoc, not notarized: Apple Silicon refuses unsigned code outright.
+          codesign --force --deep --sign - "$app"
+          mkdir dmg
+          cp -R "$app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Block Schemer" -srcfolder dmg -format UDZO \
+            "block-schemer-$TAG-macos-universal.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: block-schemer-*.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p block-schemer
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "block-schemer-$env:TAG-windows-x86_64"
+          New-Item -ItemType Directory "dist/$name" | Out-Null
+          Copy-Item target/release/block-schemer.exe, README.md "dist/$name/"
+          Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: block-schemer-*.zip
+
+  release:
+    if: inputs.release
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Block Schemer $TAG" \
+            --generate-notes \
+            --draft

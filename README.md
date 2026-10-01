@@ -10,7 +10,15 @@ Steel is currently mostly r5rs-compliant, and is working toward r7rs compliance.
 
 ## Releases
 
-To-do!
+Builds are on the [Releases](https://github.com/Zanderwohl/block-parse/releases) page:
+
+- **macOS**: a `.dmg` holding the app for both Apple Silicon and Intel. It is not notarized, so the first time,
+  right-click the app and choose Open, or run `xattr -dr com.apple.quarantine "/Applications/Block Schemer.app"`.
+- **Windows**: a `.zip` holding `block-schemer.exe`. SmartScreen may warn, since it is not signed.
+- **Linux**: an `.AppImage` (`chmod +x` and run it), or a `.tar.gz` with the bare binary, a desktop entry and an icon.
+
+To make a release, run the **Release** workflow from the Actions tab with a tag such as `v0.1.0`. It builds every
+platform and attaches the builds to a draft release to look over and publish.
 
 ## Compiling Block Schemer
 

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Block Schemer
+Comment=Scheme from blocks
+Exec=block-schemer %f
+Icon=block-schemer
+Terminal=false
+Categories=Development;Education;
