@@ -68,8 +68,8 @@ the list's length, meaning the empty slot; any larger is `NoSuchInput`.
   validator that reads quotes.
 - Depth counts list items as it counts inputs.
 
-Inserting between items and removing a hole from the middle are not supported
-yet. Rearranging means dragging items out and back in.
+Until inserting between items and closing holes arrive (see Deferred),
+rearranging means dragging items out and back in.
 
 ## AST
 
@@ -118,3 +118,15 @@ A reporter of several rows keeps its shape at the first row's height: `Round`
 becomes a rectangle whose corners have the radius a one-row reporter's ends
 would, and `Hexagon` keeps its points beside the first row with straight sides
 below. Both stay unions of convex pieces.
+
+## Deferred
+
+- **Closing holes.** Dragging the last thing out of an item, or clearing its
+  field, would remove the item and close the gap rather than leave a hole.
+  Waits on inserting between items, so that a gap can be closed without
+  losing the way to put an item back where it was. Holes, and `MissingInput`
+  for them, would then only come from loading.
+- **Inserting between items.** A drop target in the gap between two items, and
+  before the first, that inserts rather than replaces: `Target::Input` with an
+  `insert: bool`, or its own target. Items after it shift, so the GUI must
+  move any focused field and in-flight edit along with them.
