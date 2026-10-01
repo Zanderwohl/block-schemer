@@ -1,5 +1,5 @@
 use block_parse::ast::Script;
-use block_parse::host::{Overlay, RunCommand};
+use block_parse::host::{Overlay, RunCommand, TabId};
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::LiteralKind;
 use block_parse::program::{BlockId, Program, Slot};
@@ -25,6 +25,7 @@ use crate::layout::{
 };
 use crate::paint::{self, Transform};
 use crate::panels::Panels;
+use crate::tabs::{self, TabState};
 use crate::theme::Theme;
 use crate::view::View;
 
@@ -44,6 +45,7 @@ pub struct BlockEditor {
     /// A first click awaiting its second; any other press clears it. egui's
     /// own double-click becomes a triple when it follows another closely.
     last_click: Option<(BlockId, f64)>,
+    tabs: TabState,
     id: egui::Id,
 }
 
@@ -63,8 +65,14 @@ pub struct EditorOptions {
     pub palette_width: Option<f32>,
     /// Hides the palette without forgetting `palette_width`.
     pub palette_collapsed: bool,
-    pub inspector_width: f32,
-    pub inspector_collapsed: bool,
+    /// The panel right of the canvas, holding the host's `Overlay::tabs`.
+    pub side_width: f32,
+    pub side_collapsed: bool,
+    /// The side panel's tabs left to right. The editor keeps it in step with
+    /// the host's tabs: new ones open after the active tab.
+    pub tab_order: Vec<TabId>,
+    /// Set it to bring a tab to the front, even one the host adds this frame.
+    pub active_tab: Option<TabId>,
     pub theme: Theme,
 }
 
@@ -77,8 +85,10 @@ impl Default for EditorOptions {
             breakpoints: true,
             palette_width: None,
             palette_collapsed: false,
-            inspector_width: 320.0,
-            inspector_collapsed: true,
+            side_width: 320.0,
+            side_collapsed: true,
+            tab_order: Vec::new(),
+            active_tab: None,
             theme: Theme::default(),
         }
     }
@@ -110,8 +120,13 @@ pub enum EditorEvent {
     /// links itself; this is the consumer's hook to open, resolve or refuse.
     OpenDocumentation { opcode: String, link: String },
     /// A request to show `script`, [`Program::script_at`] the block, as the
-    /// host's text in its `Overlay::inspector`. Sent in read-only mode too.
+    /// host's text, typically in a tab of its `Overlay::tabs`. Sent in
+    /// read-only mode too.
     Inspect { block: BlockId, script: Script },
+    /// A request; the tab stays until the host stops sending it.
+    CloseTab(TabId),
+    /// Enter pressed on a console tab's line, sent without its newline.
+    ConsoleInput { tab: TabId, line: String },
     /// A request to set a block's switch; the host's next `Overlay` has the
     /// answer. Sent in read-only mode too.
     Switched(BlockId, bool),
@@ -148,6 +163,7 @@ impl BlockEditor {
             swatches: None,
             menu: None,
             last_click: None,
+            tabs: TabState::default(),
             id: egui::Id::new(id),
         }
     }
@@ -197,6 +213,7 @@ impl BlockEditor {
         }
         .palette();
         let panels = Panels::new(bounds, &self.options, palette.width);
+        tabs::arrange(&mut self.options, &mut self.tabs, &overlay.tabs);
         let (palette_rect, canvas_rect) = (panels.palette, panels.canvas);
 
         let double_click_delay = ctx.options(|o| o.input_options.max_double_click_delay);
@@ -217,8 +234,8 @@ impl BlockEditor {
             .at
             .filter(|&at| bounds.contains(at) && ctx.layer_id_at(at) == Some(ui.layer_id()));
         let divider = over.and_then(|at| panels.edge_at(&self.options, at));
-        // The inspector's widgets take what lands on them.
-        let over = over.filter(|at| divider.is_some() || !panels.inspector.contains(*at));
+        // The side panel's widgets take what lands on them.
+        let over = over.filter(|at| divider.is_some() || !panels.side.contains(*at));
         let on_toggle = over.is_some_and(|at| panels.on_toggle(at));
 
         if let Some(at) = over {
@@ -337,8 +354,8 @@ impl BlockEditor {
                 if let Some(at) = input.at {
                     drag.head = t.canvas(at) - drag.grab_offset;
                 }
-                // A drop under the inspector could not be seen, so it is canceled.
-                let hidden = input.at.is_some_and(|at| panels.inspector.contains(at));
+                // A drop under the side panel could not be seen, so it is canceled.
+                let hidden = input.at.is_some_and(|at| panels.side.contains(at));
                 // Every frame, release included, so a quick flick still snaps.
                 let run = layout.run(&drag.fragment.blocks, drag.head);
                 drag.snap = (!hidden)
@@ -453,8 +470,8 @@ impl BlockEditor {
         if panels.toggles(ui, &mut self.options) {
             ctx.request_repaint();
         }
-        panels.inspector(ui, self.id, &overlay.inspector, &theme);
-        // After the inspector, whose fill would cover half the line.
+        tabs::show(ui, panels.side, self.id, &mut self.options, &mut self.tabs, &overlay.tabs, &theme, &mut output.events);
+        // After the side panel, whose fill would cover half the line.
         panels.edges(&ui.painter_at(bounds), hot, &theme);
         if self.settle_edit(&ctx, language, program) {
             output.changed = true;
@@ -945,6 +962,7 @@ impl Measure for EguiMeasure<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use block_parse::host::{Tab, TabContent};
     use crate::panels::{MIN_CANVAS_WIDTH, TOGGLE_SIZE};
     use crate::dropdown;
 
@@ -1268,13 +1286,13 @@ mod tests {
     }
 
     #[test]
-    fn the_inspector_keeps_presses_and_drops_from_the_canvas() {
+    fn the_side_panel_keeps_presses_and_drops_from_the_canvas() {
         let (language, mut program, ctx, _, label) = codon_on_canvas();
         let mut editor = codon_editor();
-        editor.options.inspector_collapsed = false;
+        editor.options.side_collapsed = false;
         let pan = editor.view.pan;
         press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), pos2(1100.0, 300.0));
-        assert_eq!(editor.view.pan, pan, "a drag over the inspector panned the canvas");
+        assert_eq!(editor.view.pan, pan, "a drag over the side panel panned the canvas");
 
         let before = program.clone();
         press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), label);
@@ -1290,14 +1308,14 @@ mod tests {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
         assert!(!editor.is_dragging());
-        assert_eq!(program.stacks, before.stacks, "a run dropped on the inspector should stay where it was");
+        assert_eq!(program.stacks, before.stacks, "a run dropped on the side panel should stay where it was");
     }
 
     #[test]
-    fn the_inspector_opens_and_its_edge_drags() {
+    fn the_side_panel_opens_and_its_edge_drags() {
         let (language, mut program, ctx, _, _) = codon_on_canvas();
         let mut editor = BlockEditor::default();
-        assert!(editor.options.inspector_collapsed);
+        assert!(editor.options.side_collapsed);
         let at = pos2(1200.0 - TOGGLE_SIZE.x, TOGGLE_SIZE.x / 2.0 + TOGGLE_SIZE.y / 2.0);
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -1308,12 +1326,12 @@ mod tests {
         for events in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
-        assert!(!editor.options.inspector_collapsed);
+        assert!(!editor.options.side_collapsed);
 
         let edge = pos2(1200.0 - 320.0 + 1.0, 300.0);
         press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), edge);
         assert!(!editor.is_dragging());
-        assert_eq!(editor.options.inspector_width, 320.0 - 65.0);
+        assert_eq!(editor.options.side_width, 320.0 - 65.0);
     }
 
     #[test]
@@ -1705,6 +1723,122 @@ mod tests {
         }
         assert_eq!(code(&program, id).as_deref(), Some("ab"), "normalized again after the undo");
         assert!(history.can_redo(&program));
+    }
+
+    /// Four closable tabs, `a` to `d`, titled long enough to squeeze each to
+    /// a quarter of the default side panel: 80 points from x 880.
+    fn four_tabs() -> Overlay {
+        let tab = |id: &str| Tab {
+            id: TabId::from(id),
+            title: format!("{id} with a title far too long to fit in a quarter"),
+            closable: true,
+            content: TabContent::Text(id.into()),
+        };
+        Overlay {
+            tabs: ["a", "b", "c", "d"].map(tab).into(),
+            ..Overlay::default()
+        }
+    }
+
+    fn tab_center(index: usize) -> Pos2 {
+        pos2(880.0 + 80.0 * index as f32 + 30.0, 13.0)
+    }
+
+    fn sent(
+        ctx: &egui::Context,
+        editor: &mut BlockEditor,
+        language: &Language,
+        program: &mut Program,
+        overlay: &Overlay,
+        steps: Vec<Vec<egui::Event>>,
+    ) -> Vec<EditorEvent> {
+        let mut events = Vec::new();
+        for input in steps {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                events: input,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                events.extend(editor.show_with(ui, language, program, overlay).events);
+            });
+            out.textures_delta.clear();
+        }
+        events
+    }
+
+    fn ids(ids: &[&str]) -> Vec<TabId> {
+        ids.iter().map(|&id| TabId::from(id)).collect()
+    }
+
+    #[test]
+    fn a_tab_is_picked_by_clicking_and_closing_it_is_a_request() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.side_collapsed = false;
+        let overlay = four_tabs();
+        sent(&ctx, &mut editor, &language, &mut program, &overlay, vec![vec![]]);
+        assert_eq!(editor.options.tab_order, ids(&["a", "b", "c", "d"]));
+        assert_eq!(editor.options.active_tab, Some(TabId::from("a")));
+
+        let events = sent(&ctx, &mut editor, &language, &mut program, &overlay, click(tab_center(2)));
+        assert_eq!(editor.options.active_tab, Some(TabId::from("c")));
+        assert!(events.is_empty(), "{events:?}");
+
+        let close = pos2(880.0 + 80.0 * 2.0 - 13.0, 13.0);
+        let events = sent(&ctx, &mut editor, &language, &mut program, &overlay, click(close));
+        assert_eq!(events, vec![EditorEvent::CloseTab(TabId::from("b"))]);
+        assert_eq!(editor.options.tab_order.len(), 4, "the host has not closed it yet");
+    }
+
+    #[test]
+    fn dragging_a_tab_reorders_it() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.side_collapsed = false;
+        let overlay = four_tabs();
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        // Past b's middle, short of c's.
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &overlay, tab_center(0));
+        assert_eq!(editor.options.tab_order, ids(&["b", "a", "c", "d"]));
+        assert_eq!(editor.options.active_tab, Some(TabId::from("a")));
+        assert!(!editor.is_dragging(), "a tab is not a run");
+    }
+
+    #[test]
+    fn enter_on_a_console_line_sends_it() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.side_collapsed = false;
+        let overlay = Overlay {
+            tabs: vec![Tab {
+                id: TabId::from("console"),
+                title: "Console".into(),
+                closable: false,
+                content: TabContent::Console { output: "hello\n".into() },
+            }],
+            ..Overlay::default()
+        };
+        let mut steps = click(pos2(1000.0, 800.0 - 14.0));
+        steps.push(vec![egui::Event::Text("(+ 1 2)".into())]);
+        let enter = |pressed| egui::Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        steps.push(vec![enter(true), enter(false)]);
+        let events = sent(&ctx, &mut editor, &language, &mut program, &overlay, steps);
+        assert_eq!(
+            events,
+            vec![EditorEvent::ConsoleInput {
+                tab: TabId::from("console"),
+                line: "(+ 1 2)".into()
+            }]
+        );
+        let line = egui::Id::new("block_editor").with(("console_line", TabId::from("console")));
+        assert!(ctx.memory(|memory| memory.has_focus(line)), "the line keeps focus for the next");
     }
 
     #[test]

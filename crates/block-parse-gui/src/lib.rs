@@ -14,6 +14,7 @@ mod panels;
 pub mod shape;
 #[cfg(feature = "snapshot")]
 pub mod snapshot;
+mod tabs;
 pub mod theme;
 pub mod toolbar;
 pub mod view;

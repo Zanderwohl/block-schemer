@@ -5,6 +5,7 @@
 //! [`Overlay`] every frame, and requests go back out as events and commands.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use crate::ast::{Ast, Script, Severity};
 use crate::program::{BlockId, Program};
@@ -49,8 +50,47 @@ pub struct Overlay {
     pub switch_hint: Option<String>,
     /// Speech bubbles, such as what running a block gave back.
     pub bubbles: HashMap<BlockId, String>,
-    /// What inspecting a block gave back.
-    pub inspector: String,
+    /// The side panel's tabs. The editor keeps their order, so the order
+    /// here only matters among tabs new in the same frame.
+    pub tabs: Vec<Tab>,
+}
+
+/// Chosen by the host; stable while its tab exists.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TabId(pub String);
+
+impl From<&str> for TabId {
+    fn from(id: &str) -> Self {
+        Self(id.to_owned())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tab {
+    pub id: TabId,
+    pub title: String,
+    /// Shows a close button, which only requests closing: the tab stays
+    /// until the host stops sending it.
+    pub closable: bool,
+    pub content: TabContent,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TabContent {
+    /// Read-only, but it can be selected and copied.
+    Text(String),
+    /// Standard output above a line to type standard input into.
+    Console { output: String },
+}
+
+/// An on/off setting a runner offers, drawn by the host.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toggle {
+    /// The runner's own name for it, given back to `set_toggle`.
+    pub id: String,
+    pub label: String,
+    pub on: bool,
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +127,8 @@ pub struct Annotation {
 /// it cannot borrow (ECS resources, other threads). A trait rather than a
 /// closure per command because every command needs the interpreter mutably.
 /// Everything but `overlay` and `run_block` defaults to doing nothing, so a
-/// runner that only answers runs, such as a REPL, implements those two.
+/// runner that only answers runs, such as a REPL, implements those two. The
+/// host asks for the overlay again after each call.
 pub trait Runner {
     fn overlay(&self) -> Overlay;
 
@@ -98,7 +139,9 @@ pub trait Runner {
         false
     }
 
-    fn start(&mut self, _program: &Program, _ast: &Ast) {}
+    /// What it says, such as output, goes in the overlay, typically in a
+    /// console tab. `path` is where the program is saved, `None` until it is.
+    fn start(&mut self, _program: &Program, _path: Option<&Path>, _ast: &Ast) {}
     fn stop(&mut self) {}
     fn pause(&mut self) {}
     fn resume(&mut self) {}
@@ -110,13 +153,22 @@ pub trait Runner {
     /// A request; the next `overlay` says what the runner decided.
     fn toggle_breakpoint(&mut self, _block: BlockId) {}
 
-    /// Run one block: `script` is [`Program::script_at`] for it. Anything to
-    /// say back goes in the overlay's `bubbles`.
-    fn run_block(&mut self, program: &Program, block: BlockId, script: &Script);
+    /// Run one block: `script` is [`Program::script_at`] for it, `path` as
+    /// for `start`. Anything to say back goes in the overlay's `bubbles`.
+    fn run_block(&mut self, program: &Program, path: Option<&Path>, block: BlockId, script: &Script);
 
-    /// `script` as the back end would see it, such as generated source.
-    /// `None` leaves it to the host.
-    fn inspect(&mut self, _script: &Script) -> Option<String> {
+    /// A line entered on one of the overlay's console tabs.
+    fn console_input(&mut self, _tab: &TabId, _line: &str) {}
+
+    /// Settings for the host to offer, asked for again after `set_toggle`.
+    fn toggles(&self) -> Vec<Toggle> {
+        Vec::new()
+    }
+    fn set_toggle(&mut self, _id: &str, _on: bool) {}
+
+    /// `script`, [`Program::script_at`] `block`, as the back end would see
+    /// it, such as generated source. `None` leaves it to the host.
+    fn inspect(&mut self, _program: &Program, _block: BlockId, _script: &Script) -> Option<String> {
         None
     }
 }

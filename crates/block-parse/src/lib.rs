@@ -20,7 +20,10 @@ mod spec;
 pub mod value;
 
 pub use ast::{Ast, Expr, Node, Problem, Stmt};
-pub use host::{Annotation, Highlight, HighlightStyle, Overlay, RunCommand, RunStatus, Runner};
+pub use host::{
+    Annotation, Highlight, HighlightStyle, Overlay, RunCommand, RunStatus, Runner, Tab, TabContent, TabId,
+    Toggle,
+};
 pub use edit::{Fragment, Location, Target};
 pub use history::History;
 pub use language::{BlockDef, BlockKind, CategoryColor, Fit, Language};

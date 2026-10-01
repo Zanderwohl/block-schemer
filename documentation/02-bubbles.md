@@ -50,9 +50,12 @@ the host knows when a run is done with.
 
 `app::run` outlines the block and shows the bubble its runner gives back for
 it straight after `run_block`, or "No backend configured." without a runner,
-as in the `block-parse-editor` binary. It takes nothing else from the runner's
-overlay, and no answer that comes later. It drops both on a click on any
-block, an edit, an undo or redo, or a new or opened program.
+as in the `block-parse-editor` binary. A run that answers with no bubble,
+such as one written to a console tab, is not outlined; its console comes to
+the front instead. Besides bubbles, it takes only the runner's tabs, asked
+for after each call, and no answer that comes later. It drops bubbles and
+outlines on a click on any block, an edit, an undo or redo, or a new or
+opened program.
 
 ## Placement
 

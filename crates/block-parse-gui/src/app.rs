@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use block_parse::History;
-use block_parse::host::{Highlight, HighlightStyle, Overlay, Runner};
+use block_parse::ast::Script;
+use block_parse::host::{Highlight, HighlightStyle, Overlay, RunCommand, Runner, Tab, TabContent, TabId};
 use block_parse::language::Language;
-use block_parse::program::Program;
+use block_parse::program::{BlockId, Program};
 use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportCommand};
 
-use crate::{BlockEditor, EditorEvent, EditorOptions};
+use crate::{BlockEditor, EditorEvent, RunToolbar};
 
 #[cfg(target_os = "macos")]
 mod native;
@@ -85,7 +86,6 @@ pub fn run(config: AppConfig) -> ExitCode {
     }
 
     let name = config.name.clone();
-    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut app = App {
         language: config.language,
         history: History::new(&program),
@@ -93,6 +93,7 @@ pub fn run(config: AppConfig) -> ExitCode {
         path: config.program,
         editor: BlockEditor::default(),
         overlay: Overlay::default(),
+        inspections: Vec::new(),
         runner: config.runner,
         dirty: false,
         status,
@@ -106,6 +107,7 @@ pub fn run(config: AppConfig) -> ExitCode {
         closing: false,
         title: String::new(),
     };
+    app.sync_tabs();
     let creator: eframe::AppCreator = Box::new(move |cc| {
         #[cfg(not(target_os = "macos"))]
         let _ = cc;
@@ -244,7 +246,9 @@ struct App {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     editor: BlockEditor,
+    /// Its tabs are rebuilt by `sync_tabs`.
     overlay: Overlay,
+    inspections: Vec<(BlockId, Tab)>,
     runner: Option<Box<dyn Runner>>,
     dirty: bool,
     status: String,
@@ -282,6 +286,41 @@ impl eframe::App for App {
                 egui::MenuBar::new().ui(ui, |ui| self.menu_bar(ui));
             });
         }
+        if let Some(runner) = self.runner.as_deref() {
+            let mut clicked = None;
+            let mut flipped = None;
+            egui::Panel::top("actions").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let toolbar = RunToolbar {
+                        status: runner.status(),
+                        can_start: true,
+                        supports: &|command| runner.supports(command),
+                    };
+                    clicked = toolbar.show(ui);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for toggle in runner.toggles().into_iter().rev() {
+                            let mut on = toggle.on;
+                            let mut response = ui.checkbox(&mut on, &toggle.label);
+                            if let Some(hint) = &toggle.hint {
+                                response = response.on_hover_text(hint);
+                            }
+                            if response.changed() {
+                                flipped = Some((toggle.id, on));
+                            }
+                        }
+                    });
+                });
+            });
+            if let Some(command) = clicked {
+                self.command(command, &ctx);
+            }
+            if let Some((id, on)) = flipped
+                && let Some(runner) = &mut self.runner
+            {
+                runner.set_toggle(&id, on);
+                self.refresh_inspections();
+            }
+        }
         egui::Panel::bottom("status_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.strong(&self.language.name);
@@ -314,22 +353,37 @@ impl eframe::App for App {
                     EditorEvent::Run { block, script } => {
                         let answer = match &mut self.runner {
                             Some(runner) => {
-                                runner.run_block(&self.program, block, &script);
+                                runner.run_block(&self.program, self.path.as_deref(), block, &script);
                                 runner.overlay().bubbles.remove(&block)
                             }
                             None => Some("No backend configured.".to_owned()),
                         };
-                        self.overlay.bubbles.extend(answer.map(|answer| (block, answer)));
-                        self.overlay.highlights.push(Highlight {
-                            block,
-                            style: HighlightStyle::Dispatched,
-                            label: None,
-                        });
+                        // Not when a bubble already shows the answer.
+                        if let Some(console) = self.sync_tabs()
+                            && answer.is_none()
+                        {
+                            self.show_tab(console);
+                        }
+                        if let Some(answer) = answer {
+                            self.overlay.bubbles.insert(block, answer);
+                            self.overlay.highlights.push(Highlight {
+                                block,
+                                style: HighlightStyle::Dispatched,
+                                label: None,
+                            });
+                        }
                     }
-                    EditorEvent::Inspect { script, .. } => {
-                        let text = self.runner.as_mut().and_then(|runner| runner.inspect(&script));
-                        self.overlay.inspector = text.unwrap_or_else(|| format!("{script:#?}"));
-                        self.editor.options.inspector_collapsed = false;
+                    EditorEvent::Inspect { block, script } => self.inspect(block, &script),
+                    // The runner's own tabs stay open.
+                    EditorEvent::CloseTab(id) => {
+                        self.inspections.retain(|(_, tab)| tab.id != id);
+                        self.sync_tabs();
+                    }
+                    EditorEvent::ConsoleInput { tab, line } => {
+                        if let Some(runner) = &mut self.runner {
+                            runner.console_input(&tab, &line);
+                            self.sync_tabs();
+                        }
                     }
                     _ => {}
                 }
@@ -583,17 +637,100 @@ impl App {
         dialog
     }
 
-    /// Panel sizes stay; the inspector's text was for the old program.
+    /// Panels and the runner's tabs stay; inspections were of the old program.
     fn reset_editor(&mut self) {
         let options = self.editor.options.clone();
         self.editor = BlockEditor::default();
-        self.editor.options = EditorOptions {
-            inspector_collapsed: true,
-            ..options
-        };
-        self.overlay.inspector.clear();
+        self.editor.options = options;
+        self.inspections.clear();
+        self.sync_tabs();
         // Ids are only unique within a program.
         self.dismiss_runs();
+    }
+
+    fn inspection(&mut self, block: BlockId, script: &Script) -> String {
+        let text = self.runner.as_mut().and_then(|runner| runner.inspect(&self.program, block, script));
+        text.unwrap_or_else(|| format!("{script:#?}"))
+    }
+
+    /// For when a runner's setting changes what it shows.
+    fn refresh_inspections(&mut self) {
+        for index in 0..self.inspections.len() {
+            let block = self.inspections[index].0;
+            if let Some(script) = self.program.script_at(&self.language, block) {
+                let text = self.inspection(block, &script);
+                self.inspections[index].1.content = TabContent::Text(text);
+            }
+        }
+        self.sync_tabs();
+    }
+
+    fn inspect(&mut self, block: BlockId, script: &Script) {
+        let text = self.inspection(block, script);
+        let id = TabId(format!("inspect {}", block.0));
+        let title = self
+            .program
+            .find(block)
+            .and_then(|block| self.language.block(&block.opcode))
+            .map_or_else(|| "Inspect".to_owned(), |def| def.name.clone());
+        let tab = Tab {
+            id: id.clone(),
+            title,
+            closable: true,
+            content: TabContent::Text(text),
+        };
+        match self.inspections.iter_mut().find(|(_, tab)| tab.id == id) {
+            Some((_, old)) => *old = tab,
+            None => self.inspections.push((block, tab)),
+        }
+        self.sync_tabs();
+        self.show_tab(id);
+    }
+
+    fn show_tab(&mut self, id: TabId) {
+        self.editor.options.active_tab = Some(id);
+        self.editor.options.side_collapsed = false;
+    }
+
+    /// The console the runner has just written to, if any.
+    fn sync_tabs(&mut self) -> Option<TabId> {
+        let fresh = self.runner.as_ref().map(|runner| runner.overlay().tabs).unwrap_or_default();
+        let written = fresh
+            .iter()
+            .find(|tab| {
+                matches!(tab.content, TabContent::Console { .. })
+                    && self.overlay.tabs.iter().any(|old| old.id == tab.id && old != *tab)
+            })
+            .map(|tab| tab.id.clone());
+        self.overlay.tabs = fresh;
+        self.overlay.tabs.extend(self.inspections.iter().map(|(_, tab)| tab.clone()));
+        written
+    }
+
+    fn command(&mut self, command: RunCommand, ctx: &egui::Context) {
+        let Some(runner) = &mut self.runner else {
+            return;
+        };
+        match command {
+            RunCommand::Start => {
+                // So the run sees the entry being typed, recorded as its own step.
+                if self.editor.commit_edit(ctx, &self.language, &mut self.program) {
+                    self.dirty = true;
+                    self.history.record(&self.program);
+                }
+                runner.start(&self.program, self.path.as_deref(), &self.program.ast(&self.language));
+            }
+            RunCommand::Stop => runner.stop(),
+            RunCommand::Pause => runner.pause(),
+            RunCommand::Continue => runner.resume(),
+            RunCommand::Step => runner.step(),
+            RunCommand::StepOver => runner.step_over(),
+            RunCommand::StepInto => runner.step_into(),
+            RunCommand::StepOut => runner.step_out(),
+        }
+        if let Some(console) = self.sync_tabs() {
+            self.show_tab(console);
+        }
     }
 
     fn dismiss_runs(&mut self) {
