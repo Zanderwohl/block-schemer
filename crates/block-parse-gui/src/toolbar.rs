@@ -17,7 +17,7 @@ impl RunToolbar<'_> {
         let idle = self.status == RunStatus::Idle;
         // Glyphs egui's default fonts have; ▶ (U+25B6) is not among them.
         let buttons = [
-            (RunCommand::Start, "⏵", "Run", self.can_start && idle),
+            (RunCommand::Start, "⏵", "Play", self.can_start && idle),
             (RunCommand::Stop, "⏹", "Stop", !idle),
         ];
         let mut clicked = None;

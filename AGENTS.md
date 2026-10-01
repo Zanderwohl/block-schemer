@@ -187,6 +187,11 @@ call `block_parse_gui::snapshot::program`.
   it needs GTK, which winit does not use), and Cut/Copy/Paste items, whose
   predefined selectors winit's view does not answer.
 - A cap on undo history; each step holds a whole copy of the stacks.
+- A cap on a console's output, which grows for the session and is cloned
+  on each `Runner::overlay` call and laid out every frame.
+- Tabs past the strip's width: they shrink to `MIN_TAB_WIDTH`, then are
+  clipped and cannot be reached until others close. A scrolling strip or a
+  menu of hidden tabs would fix it.
 - Runtime-supplied dropdowns (variables, procedures).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice
   menus; Escape closes one.
@@ -201,6 +206,10 @@ call `block_parse_gui::snapshot::program`.
   blocks; a tab per run, if runs become concurrent.
 - A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
   driving an egui context menu headless needs the button's position.
+- Tests of `app::run`'s tab bookkeeping (which console was written to,
+  bringing it forward only without a bubble, `refresh_inspections`,
+  `CloseTab` removing only inspections); it lives in `App`, which needs a
+  window. Moving it out, or a stub `Runner`, would make it testable.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a step limit
   or worker thread so a runaway run cannot freeze the window; a web build
   once a WASM Scheme replaces Steel.

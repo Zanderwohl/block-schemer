@@ -365,12 +365,14 @@ impl eframe::App for App {
                         {
                             self.show_tab(console);
                         }
-                        self.overlay.bubbles.extend(answer.map(|answer| (block, answer)));
-                        self.overlay.highlights.push(Highlight {
-                            block,
-                            style: HighlightStyle::Dispatched,
-                            label: None,
-                        });
+                        if let Some(answer) = answer {
+                            self.overlay.bubbles.insert(block, answer);
+                            self.overlay.highlights.push(Highlight {
+                                block,
+                                style: HighlightStyle::Dispatched,
+                                label: None,
+                            });
+                        }
                     }
                     EditorEvent::Inspect { block, script } => self.inspect(block, &script),
                     // The runner's own tabs stay open.

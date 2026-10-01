@@ -133,8 +133,12 @@ impl<S: Scheme> SchemerRunner<S> {
     /// Runs `script` in the session, echoed into the console with what it
     /// said, and gives back what its bubble says.
     fn evaluate(&mut self, script: &Script) -> String {
-        let echo = codegen::flat(&self.language, script, self.harness).unwrap_or_default();
-        self.write(&format!("> {echo}"));
+        // Nothing to echo when even the reading form fails; the error follows.
+        if let Ok(echo) = codegen::flat(&self.language, script, self.harness)
+            && !echo.is_empty()
+        {
+            self.write(&format!("> {echo}"));
+        }
         let (said, bubble) = match self.run(script) {
             Ok(answer) if answer == Answer::default() => (String::new(), "ok".into()),
             Ok(answer) => (shown(&answer), shown(&answer)),
