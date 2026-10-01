@@ -1,7 +1,7 @@
 #![enable(implicit_some)]
 // Block Schemer's language: a small subset of R7RS. Opcodes are the Scheme
 // names, so most blocks generate `(opcode arguments…)`; `codegen.rs` handles
-// the rest. A user can run only the blocks offered here.
+// the rest.
 Language(
     name: "Block Schemer",
     file: (extension: "scmb", description: "Block Schemer program"),
@@ -33,7 +33,7 @@ Language(
             category: "Program",
             kind: HatCap,
             spec: "program {main:datum}",
-            description: "Where a program begins: evaluates its one expression.",
+            description: "Where your program begins.",
         ),
 
         // Forms

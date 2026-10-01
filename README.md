@@ -16,7 +16,7 @@ To-do!
 3. Compile
    1. For dev `cargo schemer` will run Block Schemer
    2. As a bundled application `cargo bundle -p block-schemer --release`
-      1. It is compiled to `target/release/bundle/osx/Block Schemer.app`.
+      1. It is compiled to `target/release/bundle/osx/Block\ Schemer.app`.
 
 ## Credit and Attribution
 
