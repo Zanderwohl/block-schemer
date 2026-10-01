@@ -1,0 +1,10 @@
+[package]
+name = "block-schemer"
+description = "Block Schemer: Scheme from blocks"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+block-parse.workspace = true
+block-parse-gui = { path = "../block-parse-gui", features = ["app"] }
+steel-core = { version = "0.8" }

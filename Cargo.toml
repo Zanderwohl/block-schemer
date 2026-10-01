@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/block-parse", "crates/block-parse-gui"]
+members = ["crates/block-parse", "crates/block-parse-gui", "crates/block-schemer"]
 
 [workspace.package]
 version = "0.1.0"

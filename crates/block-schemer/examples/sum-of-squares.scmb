@@ -1,0 +1,43 @@
+#![enable(implicit_some)]
+Program(
+    language: "Block Schemer",
+    version: 2,
+    stacks: [
+        (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "define_procedure",
+            inputs: {"name": (literal: "sum-of-squares")},
+            lists: {
+                "params": [(literal: "xs")],
+                "body": [(block: (id: 2, opcode: "reduce",
+                    inputs: {
+                        "procedure": (block: (id: 3, opcode: "variable", inputs: {"name": (literal: "+")})),
+                        "initial": (literal: "0"),
+                        "list": (block: (id: 4, opcode: "map",
+                            inputs: {"procedure": (block: (id: 5, opcode: "lambda",
+                                lists: {
+                                    "params": [(literal: "x")],
+                                    "body": [(block: (id: 6, opcode: "*",
+                                        lists: {"args": [(literal: "x"), (literal: "x")]}))],
+                                }))},
+                            lists: {"lists": [(block: (id: 7, opcode: "variable", inputs: {"name": (literal: "xs")}))]})),
+                    }))],
+            })]),
+        (pos: (24.0, 260.0), blocks: [(id: 10, opcode: "let",
+            lists: {
+                "bindings": [
+                    (block: (id: 11, opcode: "binding", inputs: {"name": (literal: "a"), "value": (literal: "3")})),
+                    (block: (id: 12, opcode: "binding", inputs: {"name": (literal: "b"), "value": (literal: "4")})),
+                ],
+                "body": [
+                    (block: (id: 13, opcode: "display", inputs: {"value": (block: (id: 14, opcode: "string", inputs: {"text": (literal: "hypotenuse squared:")}))})),
+                    (block: (id: 15, opcode: "+", lists: {"args": [
+                        (block: (id: 16, opcode: "*", lists: {"args": [(literal: "a"), (literal: "a")]})),
+                        (block: (id: 17, opcode: "*", lists: {"args": [(literal: "b"), (literal: "b")]})),
+                    ]})),
+                ],
+            })]),
+        (pos: (24.0, 470.0), blocks: [(id: 20, opcode: "program",
+            inputs: {"main": (block: (id: 21, opcode: "call", inputs: {
+                "procedure": (block: (id: 22, opcode: "variable", inputs: {"name": (literal: "sum-of-squares")})),
+            }, lists: {"args": [(block: (id: 23, opcode: "list", lists: {"items": [(literal: "1"), (literal: "2"), (literal: "3")]}))]}))})]),
+    ],
+)
