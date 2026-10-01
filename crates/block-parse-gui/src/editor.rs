@@ -394,7 +394,7 @@ impl BlockEditor {
             }
         }
         if !read_only {
-            for slot in scene.slots() {
+            for slot in scene.slots().filter(|slot| slot.is_field()) {
                 if let SlotContent::Literal { kind, text, .. } = &slot.content {
                     let rect = t.rect(slot.rect);
                     if canvas_rect.intersects(rect)
@@ -427,10 +427,10 @@ impl BlockEditor {
             let on_palette = palette_rect.contains(at);
             let field = scene
                 .slot_at(t.canvas(at))
-                .filter(|_| !on_palette && !read_only)
+                .filter(|slot| !on_palette && !read_only && slot.is_field())
                 .and_then(|slot| match &slot.content {
                     SlotContent::Literal { kind, .. } => Some(kind),
-                    SlotContent::Empty | SlotContent::Plugged(_) => None,
+                    SlotContent::Empty | SlotContent::Plugged(_) | SlotContent::Append => None,
                 });
             let on_switch = (!on_palette)
                 .then(|| switch_at(&scene, overlay, t.canvas(at)))
@@ -508,7 +508,7 @@ impl BlockEditor {
         let on_field = !read_only
             && scene
                 .slot_at(point)
-                .is_some_and(|slot| matches!(slot.content, SlotContent::Literal { .. }));
+                .is_some_and(PlacedSlot::is_field);
         if on_field {
             return Gesture::Idle;
         }
@@ -832,7 +832,8 @@ fn find_snap(
 
     if let Some(output) = def.kind.output() {
         let probe = pos2(head_rect.min.x, head_rect.center().y);
-        for slot in scene.slots() {
+        // List items take no drops until `Target` can address them.
+        for slot in scene.slots().filter(|slot| slot.item.is_none()) {
             if language.fit(output, &slot.ty) == Fit::No {
                 continue;
             }

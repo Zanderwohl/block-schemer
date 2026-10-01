@@ -57,6 +57,10 @@ pub struct Block {
     pub opcode: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, Input>,
+    /// An item holding neither reporter nor literal is a hole, kept so the
+    /// items after it keep their places.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<String, Vec<Input>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branches: BTreeMap<String, Vec<Block>>,
 }
@@ -180,6 +184,7 @@ impl Program {
             id: self.fresh_id(),
             opcode: opcode.to_owned(),
             inputs: BTreeMap::new(),
+            lists: BTreeMap::new(),
             branches: BTreeMap::new(),
         };
         for part in &def.parts {
@@ -196,7 +201,7 @@ impl Program {
                 Part::Branch(name) => {
                     block.branches.insert(name.clone(), Vec::new());
                 }
-                Part::Label(_) => {}
+                Part::List(_) | Part::Label(_) => {}
             }
         }
         Some(block)
@@ -242,13 +247,17 @@ impl Program {
 }
 
 impl Block {
+    /// Reporters in single inputs and list items alike.
+    pub fn reporters(&self) -> impl Iterator<Item = &Block> {
+        self.inputs
+            .values()
+            .chain(self.lists.values().flatten())
+            .filter_map(|input| input.block.as_deref())
+    }
+
     /// Nesting levels this block spans, counting itself.
     pub fn height(&self) -> usize {
-        let inputs = self
-            .inputs
-            .values()
-            .filter_map(|input| input.block.as_deref())
-            .map(Block::height);
+        let inputs = self.reporters().map(Block::height);
         let branches = self.branches.values().flatten().map(Block::height);
         1 + inputs.chain(branches).max().unwrap_or(0)
     }
@@ -283,10 +292,8 @@ fn with_deep_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
 pub(crate) fn walk<'a>(blocks: &'a [Block], visit: &mut impl FnMut(&'a Block)) {
     for block in blocks {
         visit(block);
-        for input in block.inputs.values() {
-            if let Some(inner) = input.block.as_deref() {
-                walk(std::slice::from_ref(inner), visit);
-            }
+        for inner in block.reporters() {
+            walk(std::slice::from_ref(inner), visit);
         }
         for branch in block.branches.values() {
             walk(branch, visit);
@@ -303,9 +310,7 @@ fn find_block(block: &Block, id: BlockId) -> Option<&Block> {
         return Some(block);
     }
     block
-        .inputs
-        .values()
-        .filter_map(|input| input.block.as_deref())
+        .reporters()
         .find_map(|inner| find_block(inner, id))
         .or_else(|| block.branches.values().find_map(|seq| find_in(seq, id)))
 }
@@ -318,10 +323,11 @@ fn find_block_mut(block: &mut Block, id: BlockId) -> Option<&mut Block> {
     if block.id == id {
         return Some(block);
     }
-    for input in block.inputs.values_mut() {
-        if let Some(inner) = input.block.as_deref_mut()
-            && let Some(found) = find_block_mut(inner, id)
-        {
+    // Fields borrowed apart: borrowing all of `block` here would outlive the
+    // early return.
+    let inputs = block.inputs.values_mut().chain(block.lists.values_mut().flatten());
+    for inner in inputs.filter_map(|input| input.block.as_deref_mut()) {
+        if let Some(found) = find_block_mut(inner, id) {
             return Some(found);
         }
     }
@@ -367,9 +373,8 @@ fn depth_in(blocks: &[Block], id: BlockId, depth: usize) -> Option<usize> {
         if block.id == id {
             return Some(depth);
         }
-        let inputs = block.inputs.values().filter_map(|input| input.block.as_deref());
-        inputs
-            .into_iter()
+        block
+            .reporters()
             .find_map(|inner| depth_in(std::slice::from_ref(inner), id, depth + 1))
             .or_else(|| {
                 block

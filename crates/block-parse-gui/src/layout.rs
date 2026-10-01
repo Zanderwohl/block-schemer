@@ -2,8 +2,8 @@
 //! fake. Drawing, hit-testing and snapping all read the one scene.
 
 use block_parse::edit::Target;
-use block_parse::language::{BlockDef, BlockKind, InputDef, LiteralKind, Part, Shape};
-use block_parse::program::{Block, BlockId, Program, Stack};
+use block_parse::language::{BlockDef, BlockKind, BlockLayout, LiteralKind, Part, Shape};
+use block_parse::program::{Block, BlockId, Input, Program, Stack};
 use block_parse::Language;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -24,6 +24,11 @@ pub const SNAP_RADIUS: f32 = 28.0;
 pub const LABEL_SIZE: f32 = 14.0;
 pub const LITERAL_SIZE: f32 = 13.0;
 pub const SWITCH_SIZE: f32 = 16.0;
+/// Of a `Body` block's later rows, past the first row's start.
+pub const BODY_INDENT: f32 = 16.0;
+pub const APPEND_WIDTH: f32 = 30.0;
+/// The tallest a reporter's ends grow.
+pub const MAX_END: f32 = 40.0;
 const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
@@ -69,7 +74,11 @@ pub struct PlacedBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Form {
     Stack(StackForm),
-    Reporter(Shape),
+    Reporter {
+        shape: Shape,
+        /// The first row's height, which sizes the ends however many rows follow.
+        head: f32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,12 +106,21 @@ pub struct PlacedLabel {
 pub struct PlacedSlot {
     pub parent: BlockId,
     pub input: String,
+    /// The index in a list; its length for the empty slot after the items.
+    pub item: Option<usize>,
     pub ty: String,
     pub rect: Rect,
     pub shape: Shape,
     /// The owning block's, for empty slots and edges.
     pub swatch: Swatch,
     pub content: SlotContent,
+}
+
+impl PlacedSlot {
+    /// Edited in place. List items are not yet.
+    pub fn is_field(&self) -> bool {
+        self.item.is_none() && matches!(self.content, SlotContent::Literal { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +134,8 @@ pub enum SlotContent {
     /// Needs a reporter.
     Empty,
     Plugged(BlockId),
+    /// After a list's items, never stored.
+    Append,
 }
 
 /// Where a statement run's top-left can connect.
@@ -389,22 +409,69 @@ impl Layout<'_> {
             .output()
             .and_then(|ty| self.language.ty(ty))
             .map_or(Shape::Round, |ty| ty.shape);
-        let items: Vec<Item> = def
-            .parts
-            .iter()
-            .filter_map(|part| self.item(block, part))
-            .collect();
-        let inner = items.iter().map(|item| item.size().y).fold(0.0, f32::max);
-        let height = (inner + 6.0).max(REPORTER_HEIGHT);
+        let rows = self.rows(block, def, &def.parts);
+        let height_of = |row: &[Item]| {
+            let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
+            (inner + 6.0).max(REPORTER_HEIGHT)
+        };
+        // Capped so a row holding a tall block keeps modest ends.
+        let head = rows.first().map_or(REPORTER_HEIGHT, |row| height_of(row)).min(MAX_END);
         let padding = match shape {
-            Shape::Round => (height * 0.4).max(ROW_PADDING),
-            Shape::Hexagon => height * 0.5 + 2.0,
+            Shape::Round => (head * 0.4).max(ROW_PADDING),
+            Shape::Hexagon => head * 0.5 + 2.0,
             Shape::Square => 8.0,
         };
-        let mut laid = Laid::new(block.id, Form::Reporter(shape), swatch);
-        let right = laid.row(items, padding, 0.0, height);
-        laid.size = vec2((right + padding).max(height), height);
+        let mut laid = Laid::new(block.id, Form::Reporter { shape, head }, swatch);
+        let (mut y, mut width) = (0.0_f32, head);
+        for (index, row) in rows.into_iter().enumerate() {
+            let height = height_of(&row);
+            let left = if index == 0 { padding } else { padding + BODY_INDENT };
+            width = width.max(laid.row(row, left, y, height) + padding);
+            y += height;
+        }
+        laid.size = vec2(width, y.max(head));
         laid
+    }
+
+    /// `parts`, which hold no branch, as rows by the block's layout. Never
+    /// empty, so a block with an empty spec still has a row.
+    fn rows(&self, block: &Block, def: &BlockDef, parts: &[Part]) -> Vec<Vec<Item>> {
+        let inline = match def.layout {
+            BlockLayout::Inline => usize::MAX,
+            BlockLayout::Body(n) => n,
+        };
+        let mut rows = vec![Vec::new()];
+        let mut labels = Vec::new();
+        let mut inputs = 0;
+        for part in parts {
+            let slots = match part {
+                Part::Label(_) => {
+                    let label = self.item(block, part).into_iter();
+                    // Leading labels name the block, so they head it.
+                    if inputs < inline || inputs == 0 {
+                        rows[0].extend(label);
+                    } else {
+                        labels.extend(label);
+                    }
+                    continue;
+                }
+                Part::Input(_) => self.item(block, part).into_iter().collect(),
+                Part::List(list) => self.list(block, &list.name, &list.ty),
+                Part::Branch(_) => continue,
+            };
+            if inputs < inline {
+                rows[0].extend(slots);
+            } else {
+                for slot in slots {
+                    let mut row = std::mem::take(&mut labels);
+                    row.push(slot);
+                    rows.push(row);
+                }
+            }
+            inputs += 1;
+        }
+        rows.last_mut().expect("starts with a row").extend(labels);
+        rows
     }
 
     fn stack_block(&self, block: &Block, def: &BlockDef, swatch: Swatch) -> Laid {
@@ -419,7 +486,11 @@ impl Layout<'_> {
             BottomEdge::Tab
         };
 
-        let mut laid = Laid::new(block.id, Form::Reporter(Shape::Round), swatch);
+        let mut laid = Laid::new(block.id, Form::Stack(StackForm {
+            top,
+            bottom,
+            sections: Vec::new(),
+        }), swatch);
         laid.top = Some(top);
         laid.seam_below = bottom == BottomEdge::Tab;
         let mut sections = Vec::new();
@@ -429,6 +500,30 @@ impl Layout<'_> {
         } else {
             MIN_BLOCK_WIDTH
         };
+
+        if def.layout != BlockLayout::Inline {
+            for (index, mut row) in self.rows(block, def, &def.parts).into_iter().enumerate() {
+                if index == 0 && def.switch {
+                    row.push(Item::Switch);
+                }
+                let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
+                let height = (inner + 12.0).max(ROW_HEIGHT);
+                let left = if index == 0 { ROW_PADDING } else { ROW_PADDING + BODY_INDENT };
+                width = width.max(laid.row(row, left, y, height) + ROW_PADDING);
+                sections.push(Section::Row {
+                    top: y,
+                    bottom: y + height,
+                });
+                y += height;
+            }
+            laid.size = vec2(width, y);
+            laid.form = Form::Stack(StackForm {
+                top,
+                bottom,
+                sections,
+            });
+            return laid;
+        }
 
         let mut row: Vec<Item> = Vec::new();
         // At the end of the first row, whatever the spec puts there.
@@ -478,6 +573,9 @@ impl Layout<'_> {
                 });
                 y += height;
                 after_branch = true;
+            } else if let Part::List(list) = part {
+                row.extend(self.list(block, &list.name, &list.ty));
+                after_branch = false;
             } else if let Some(item) = self.item(block, part) {
                 row.push(item);
                 after_branch = false;
@@ -510,16 +608,34 @@ impl Layout<'_> {
                 width: self.measure.text_width(text, Font::Label),
                 text: text.clone(),
             }),
-            Part::Input(input) => Some(self.slot(block, input)),
-            Part::Branch(_) => None,
+            Part::Input(input) => Some(self.slot(block, &input.name, &input.ty, None, block.inputs.get(&input.name))),
+            Part::List(_) | Part::Branch(_) => None,
         }
     }
 
-    fn slot(&self, block: &Block, input: &InputDef) -> Item {
-        let ty = self.language.ty(&input.ty);
+    /// The list's items, then the empty slot that appends to it.
+    fn list(&self, block: &Block, name: &str, ty: &str) -> Vec<Item> {
+        let stored = block.lists.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut items: Vec<Item> = stored
+            .iter()
+            .enumerate()
+            .map(|(index, input)| self.slot(block, name, ty, Some(index), Some(input)))
+            .collect();
+        items.push(Item::Slot {
+            input: name.to_owned(),
+            item: Some(stored.len()),
+            ty: ty.to_owned(),
+            shape: self.language.ty(ty).map_or(Shape::Round, |ty| ty.shape),
+            size: vec2(APPEND_WIDTH, SLOT_HEIGHT),
+            content: LaidContent::Append,
+        });
+        items
+    }
+
+    fn slot(&self, block: &Block, name: &str, ty_name: &str, item: Option<usize>, stored: Option<&Input>) -> Item {
+        let ty = self.language.ty(ty_name);
         let shape = ty.map_or(Shape::Round, |ty| ty.shape);
         let kind = ty.map_or(LiteralKind::None, |ty| ty.literal.clone());
-        let stored = block.inputs.get(&input.name);
 
         let plugged = stored
             .and_then(|stored| stored.block.as_deref())
@@ -527,8 +643,9 @@ impl Layout<'_> {
         if let Some(inner) = plugged {
             let laid = self.block(inner);
             return Item::Slot {
-                input: input.name.clone(),
-                ty: input.ty.clone(),
+                input: name.to_owned(),
+                item,
+                ty: ty_name.to_owned(),
                 shape,
                 size: laid.size,
                 content: LaidContent::Plugged(Box::new(laid)),
@@ -551,17 +668,18 @@ impl Layout<'_> {
         let content = if kind == LiteralKind::None {
             LaidContent::Empty
         } else {
-            let focused = self.editing == Some((block.id, input.name.as_str()));
+            let focused = item.is_none() && self.editing == Some((block.id, name));
             let error = if self.validate && !focused {
-                self.language.parse_literal(&input.ty, &text).err()
+                self.language.parse_literal(ty_name, &text).err()
             } else {
                 None
             };
             LaidContent::Literal { kind, text, error }
         };
         Item::Slot {
-            input: input.name.clone(),
-            ty: input.ty.clone(),
+            input: name.to_owned(),
+            item,
+            ty: ty_name.to_owned(),
             shape,
             size: vec2(width, SLOT_HEIGHT),
             content,
@@ -588,6 +706,7 @@ struct Laid {
 
 struct LaidSlot {
     input: String,
+    item: Option<usize>,
     ty: String,
     rect: Rect,
     shape: Shape,
@@ -602,6 +721,7 @@ enum LaidContent {
     },
     Empty,
     Plugged(Box<Laid>),
+    Append,
 }
 
 struct LaidBranch {
@@ -617,6 +737,7 @@ enum Item {
     },
     Slot {
         input: String,
+        item: Option<usize>,
         ty: String,
         shape: Shape,
         size: Vec2,
@@ -672,6 +793,7 @@ impl Laid {
                 }
                 Item::Slot {
                     input,
+                    item,
                     ty,
                     shape,
                     content,
@@ -679,6 +801,7 @@ impl Laid {
                 } => {
                     self.slots.push(LaidSlot {
                         input,
+                        item,
                         ty,
                         rect: Rect::from_min_size(pos2(x, center - size.y / 2.0), size),
                         shape,
@@ -740,7 +863,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
                 hit,
             )
         }
-        Form::Reporter(shape) => (Form::Reporter(*shape), vec![rect]),
+        Form::Reporter { shape, head } => (Form::Reporter { shape: *shape, head: *head }, vec![rect]),
     };
 
     let index = scene.blocks.len();
@@ -781,10 +904,12 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             },
             LaidContent::Empty => SlotContent::Empty,
             LaidContent::Plugged(inner) => SlotContent::Plugged(inner.id),
+            LaidContent::Append => SlotContent::Append,
         };
         scene.blocks[index].slots.push(PlacedSlot {
             parent: laid.id,
             input: slot.input.clone(),
+            item: slot.item,
             ty: slot.ty.clone(),
             rect: slot_rect,
             shape: slot.shape,
@@ -833,6 +958,21 @@ mod tests {
             &Validators::new(),
         )
         .unwrap()
+    }
+
+    fn scheme() -> Language {
+        Language::from_ron(
+            include_str!("../../../examples/languages/scheme.ron"),
+            &Validators::new(),
+        )
+        .unwrap()
+    }
+
+    fn literal(text: &str) -> block_parse::program::Input {
+        block_parse::program::Input {
+            literal: Some(text.into()),
+            block: None,
+        }
     }
 
     fn scene_of(language: &Language, program: &Program) -> Scene {
@@ -970,6 +1110,62 @@ mod tests {
         let condition = focused.slots().find(|slot| slot.input == "condition").unwrap();
         let SlotContent::Literal { error, .. } = &condition.content else { panic!() };
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn a_list_shows_its_items_then_the_slot_that_appends() {
+        let language = scheme();
+        let (mut program, ids) = with_stack(&language, &["add"]);
+        let lists = &mut program.find_mut(ids[0]).unwrap().lists;
+        lists.insert("args".into(), vec![literal("1"), Default::default(), literal("3")]);
+        let scene = scene_of(&language, &program);
+        let add = placed(&scene, ids[0]);
+
+        let items: Vec<Option<usize>> = add.slots.iter().map(|slot| slot.item).collect();
+        assert_eq!(items, [Some(0), Some(1), Some(2), Some(3)]);
+        assert!(matches!(&add.slots[1].content, SlotContent::Literal { text, .. } if text.is_empty()), "a hole");
+        assert_eq!(add.slots[3].content, SlotContent::Append);
+        assert!(add.slots.windows(2).all(|pair| pair[0].rect.max.x < pair[1].rect.min.x), "inline");
+        assert!(!add.slots[0].is_field(), "list items are not edited in place yet");
+    }
+
+    #[test]
+    fn body_puts_later_inputs_and_items_on_indented_rows() {
+        let language = scheme();
+        let (mut program, ids) = with_stack(&language, &["let"]);
+        let lists = &mut program.find_mut(ids[0]).unwrap().lists;
+        lists.insert("body".into(), vec![literal("a"), literal("b")]);
+        let scene = scene_of(&language, &program);
+        let block = placed(&scene, ids[0]);
+
+        let rect = |input: &str, item: usize| {
+            block.slots.iter().find(|slot| slot.input == input && slot.item == Some(item)).unwrap().rect
+        };
+        let head = block.labels[0].at.y;
+        assert_eq!(rect("bindings", 0).center().y, head, "the first input stays on the first row");
+        let rows = [rect("body", 0), rect("body", 1), rect("body", 2)];
+        assert!(rows.windows(2).all(|pair| pair[0].max.y <= pair[1].min.y), "{rows:?}");
+        assert!(rows.iter().all(|row| row.min.x == rows[0].min.x && row.min.y > head));
+        assert!(rows[0].min.x > block.labels[0].at.x, "indented");
+        assert!(matches!(block.form, Form::Reporter { head, .. } if head < block.rect.height()));
+    }
+
+    #[test]
+    fn labels_join_the_row_of_the_input_after_them_but_lead_the_block() {
+        let language = scheme();
+        let (program, ids) = with_stack(&language, &["if", "begin"]);
+        let scene = scene_of(&language, &program);
+        let row_of = |block: &PlacedBlock, label: &str| {
+            block.labels.iter().find(|placed| placed.text == label).unwrap().at.y
+        };
+        let branch = placed(&scene, ids[0]);
+        let y = |input: &str| branch.slots.iter().find(|slot| slot.input == input).unwrap().rect.center().y;
+        assert_eq!(row_of(branch, "if"), y("test"));
+        assert_eq!(row_of(branch, "then"), y("consequent"));
+        assert_eq!(row_of(branch, "else"), y("alternate"));
+
+        let begin = placed(&scene, ids[1]);
+        assert!(row_of(begin, "begin") < begin.slots[0].rect.min.y, "Body(0) still heads with its name");
     }
 
     #[test]

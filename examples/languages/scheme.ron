@@ -1,0 +1,146 @@
+#![enable(implicit_some)]
+// A small subset of R7RS Scheme. Typing is light: one `datum` type for every
+// expression, read and checked by the back end. Symbols are square so names
+// look different from values; bindings are square too and fit only `let`.
+Language(
+    name: "scheme",
+    file: (extension: "bscm", description: "Block Scheme program"),
+
+    types: {
+        "datum": (shape: Round, literal: Text),
+        "string": (shape: Round, literal: Text),
+        "symbol": (shape: Square, literal: Text),
+        "binding": (shape: Square),
+    },
+
+    categories: [
+        (name: "Program", color: (hue: 95.0)),
+        (name: "Forms", color: (hue: 60.0)),
+        (name: "Procedures", color: (hue: 260.0)),
+        (name: "Arithmetic", color: (hue: 145.0)),
+        (name: "Lists", color: (hue: 330.0)),
+        (name: "Data", color: (hue: 190.0)),
+    ],
+
+    blocks: [
+        // Program
+        (
+            id: "program",
+            name: "Program",
+            category: "Program",
+            kind: Hat,
+            spec: "program {main:datum}",
+            description: "Where a program begins: evaluates its one expression.",
+        ),
+
+        // Forms
+        (
+            id: "define",
+            name: "Define",
+            category: "Forms",
+            kind: Reporter("datum"),
+            spec: "define {name:symbol} {value:datum}",
+            layout: Body(1),
+        ),
+        (
+            id: "define_procedure",
+            name: "Define procedure",
+            category: "Forms",
+            kind: Reporter("datum"),
+            spec: "define {name:symbol} taking {params:symbol*} {body:datum+}",
+            layout: Body(2),
+        ),
+        (
+            id: "if",
+            name: "If",
+            category: "Forms",
+            kind: Reporter("datum"),
+            spec: "if {test:datum} then {consequent:datum} else {alternate:datum}",
+            layout: Body(1),
+        ),
+        (
+            id: "let",
+            name: "Let",
+            category: "Forms",
+            kind: Reporter("datum"),
+            spec: "let {bindings:binding*} {body:datum+}",
+            layout: Body(1),
+        ),
+        (
+            id: "binding",
+            name: "Binding",
+            category: "Forms",
+            kind: Reporter("binding"),
+            spec: "{name:symbol} := {value:datum}",
+        ),
+        (
+            id: "begin",
+            name: "Begin",
+            category: "Forms",
+            kind: Reporter("datum"),
+            spec: "begin {body:datum+}",
+            layout: Body(0),
+        ),
+
+        // Procedures
+        (
+            id: "lambda",
+            name: "Lambda",
+            category: "Procedures",
+            kind: Reporter("datum"),
+            spec: "lambda {params:symbol*} {body:datum+}",
+            layout: Body(1),
+        ),
+        (
+            id: "call",
+            name: "Call",
+            category: "Procedures",
+            kind: Reporter("datum"),
+            spec: "{procedure:datum} {args:datum*}",
+            description: "Calls any procedure, named or computed.",
+        ),
+        (
+            id: "apply",
+            name: "Apply",
+            category: "Procedures",
+            kind: Reporter("datum"),
+            spec: "apply {procedure:datum} {args:datum+}",
+            description: "Calls the procedure with the arguments, the last of which is a list spread out.",
+        ),
+
+        // Arithmetic
+        (id: "add", name: "Add", category: "Arithmetic", kind: Reporter("datum"), spec: "+ {args:datum*}"),
+        (id: "subtract", name: "Subtract", category: "Arithmetic", kind: Reporter("datum"), spec: "- {args:datum+}"),
+        (id: "multiply", name: "Multiply", category: "Arithmetic", kind: Reporter("datum"), spec: "* {args:datum*}"),
+        (id: "divide", name: "Divide", category: "Arithmetic", kind: Reporter("datum"), spec: "/ {args:datum+}"),
+        (id: "equal", name: "Equal", category: "Arithmetic", kind: Reporter("datum"), spec: "= {args:datum+}"),
+        (id: "less", name: "Less than", category: "Arithmetic", kind: Reporter("datum"), spec: "< {args:datum+}"),
+
+        // Lists
+        (id: "list", name: "List", category: "Lists", kind: Reporter("datum"), spec: "list {items:datum*}"),
+        (id: "cons", name: "Cons", category: "Lists", kind: Reporter("datum"), spec: "cons {car:datum} {cdr:datum}"),
+        (id: "car", name: "Car", category: "Lists", kind: Reporter("datum"), spec: "car {pair:datum}"),
+        (id: "cdr", name: "Cdr", category: "Lists", kind: Reporter("datum"), spec: "cdr {pair:datum}"),
+        (
+            id: "map",
+            name: "Map",
+            category: "Lists",
+            kind: Reporter("datum"),
+            spec: "map {procedure:datum} {lists:datum+}",
+        ),
+        (
+            id: "reduce",
+            name: "Reduce",
+            category: "Lists",
+            kind: Reporter("datum"),
+            spec: "reduce {procedure:datum} {initial:datum} {list:datum}",
+            description: "SRFI 1's reduce: folds the list with the procedure, or gives the initial value if it is empty.",
+        ),
+
+        // Data
+        (id: "quote", name: "Quote", category: "Data", kind: Reporter("datum"), spec: "quote {datum:datum}"),
+        (id: "string", name: "String", category: "Data", kind: Reporter("datum"), spec: "\"{text:string}\""),
+        (id: "variable", name: "Variable", category: "Data", kind: Reporter("datum"), spec: "{name:symbol}"),
+        (id: "display", name: "Display", category: "Data", kind: Reporter("datum"), spec: "display {value:datum}"),
+    ],
+)

@@ -1,5 +1,5 @@
-//! Block spec strings: `{name:type=default}` is an input, `[name]` a branch,
-//! everything else label text.
+//! Block spec strings: `{name:type=default}` is an input, `{name:type*}` or
+//! `{name:type+}` a list, `[name]` a branch, everything else label text.
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum SpecPart {
@@ -8,8 +8,17 @@ pub(crate) enum SpecPart {
         name: String,
         ty: String,
         default: Option<String>,
+        list: Option<Arity>,
     },
     Branch(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Arity {
+    /// `*`
+    Any,
+    /// `+`
+    AtLeastOne,
 }
 
 pub(crate) fn parse(spec: &str) -> Result<Vec<SpecPart>, String> {
@@ -47,13 +56,21 @@ pub(crate) fn parse(spec: &str) -> Result<Vec<SpecPart>, String> {
             return Err(format!("input `{{{inner}}}` needs a type, as `{{name:type}}`"));
         };
         let (ty, default) = match rest.split_once('=') {
-            Some((ty, default)) => (ty, Some(default.trim().to_owned())),
-            None => (rest, None),
+            Some((ty, default)) => (ty.trim(), Some(default.trim().to_owned())),
+            None => (rest.trim(), None),
+        };
+        let (ty, list) = if let Some(ty) = ty.strip_suffix('*') {
+            (ty, Some(Arity::Any))
+        } else if let Some(ty) = ty.strip_suffix('+') {
+            (ty, Some(Arity::AtLeastOne))
+        } else {
+            (ty, None)
         };
         parts.push(SpecPart::Input {
             name: name.trim().to_owned(),
             ty: ty.trim().to_owned(),
             default,
+            list,
         });
     }
     push_label(&mut parts, &mut label);
@@ -78,6 +95,16 @@ mod tests {
             name: name.into(),
             ty: ty.into(),
             default: default.map(Into::into),
+            list: None,
+        }
+    }
+
+    fn list(name: &str, ty: &str, list: Arity) -> SpecPart {
+        SpecPart::Input {
+            name: name.into(),
+            ty: ty.into(),
+            default: None,
+            list: Some(list),
         }
     }
 
@@ -111,6 +138,18 @@ mod tests {
     fn a_colon_after_the_first_stays_in_the_type() {
         // So `{a:b:c}` is refused later as an unknown type, not misread.
         assert_eq!(parse("{a:b:c}").unwrap(), vec![input("a", "b:c", None)]);
+    }
+
+    #[test]
+    fn a_star_or_plus_after_the_type_makes_a_list() {
+        assert_eq!(
+            parse("{f:datum} {args:datum*} {rest : datum + }").unwrap(),
+            vec![
+                input("f", "datum", None),
+                list("args", "datum", Arity::Any),
+                list("rest", "datum", Arity::AtLeastOne),
+            ]
+        );
     }
 
     #[test]

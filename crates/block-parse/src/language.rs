@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::literal::{self, Validators};
-use crate::spec::{self, SpecPart};
+use crate::spec::{self, Arity, SpecPart};
 use crate::value::Value;
 
 /// Always RON, whatever the file is named.
@@ -16,7 +16,7 @@ use crate::value::Value;
 /// Opcodes, type names, input names and branch names are non-empty printable
 /// ASCII without spaces (`!` to `~`), so none can hide control or
 /// bidirectional characters. Type, input and branch names also exclude
-/// `{ } [ ] : =`, which delimit them in specs. Labels and descriptions are
+/// `{ } [ ] : = * +`, which delimit them in specs. Labels and descriptions are
 /// free text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "Language")]
@@ -85,9 +85,12 @@ pub struct BlockConfig {
     pub category: Option<String>,
     #[serde(default)]
     pub kind: BlockKind,
-    /// `{name:type=default}` is an input, `[name]` a branch, the rest label:
-    /// `"if {cond:bool} then [then] else [else]"`.
+    /// `{name:type=default}` is an input, `{name:type*}` a list of any length,
+    /// `{name:type+}` one of at least one item, `[name]` a branch, the rest
+    /// label: `"if {cond:bool} then [then] else [else]"`.
     pub spec: String,
+    #[serde(default)]
+    pub layout: BlockLayout,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -169,6 +172,20 @@ pub enum LiteralKind {
     Custom(String),
 }
 
+/// Where a block's rows break. Per block rather than per use, so a program
+/// always reads the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum BlockLayout {
+    /// One row, before any branch.
+    #[default]
+    Inline,
+    /// The first `n` inputs share the first row, a list counting as one input;
+    /// each later input, and each item of a later list, gets an indented row
+    /// of its own. A label joins the row of the input after it. As Emacs's
+    /// `lisp-indent-function`. Blocks without branches only.
+    Body(usize),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum BlockKind {
     /// Nothing above.
@@ -233,12 +250,14 @@ pub struct BlockDef {
     pub switch: bool,
     /// Overrides the category's color.
     pub color: Option<CategoryColor>,
+    pub layout: BlockLayout,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Part {
     Label(String),
     Input(InputDef),
+    List(ListDef),
     /// Starts a new row after it.
     Branch(String),
 }
@@ -250,6 +269,16 @@ pub struct InputDef {
     /// Source text, already validated: the spec's default, else the literal
     /// kind's blank. `None` only for types that take no literal.
     pub default: Option<String>,
+}
+
+/// Any number of inputs of one type under one name. Starts empty: a list
+/// takes no default.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListDef {
+    pub name: String,
+    pub ty: String,
+    /// 0 for `*`, 1 for `+`.
+    pub min: usize,
 }
 
 #[derive(Debug)]
@@ -303,11 +332,23 @@ impl BlockKind {
 }
 
 impl BlockDef {
+    /// Single inputs only; see [`lists`](Self::lists).
     pub fn inputs(&self) -> impl Iterator<Item = &InputDef> {
         self.parts.iter().filter_map(|part| match part {
             Part::Input(input) => Some(input),
-            Part::Label(_) | Part::Branch(_) => None,
+            Part::Label(_) | Part::List(_) | Part::Branch(_) => None,
         })
+    }
+
+    pub fn lists(&self) -> impl Iterator<Item = &ListDef> {
+        self.parts.iter().filter_map(|part| match part {
+            Part::List(list) => Some(list),
+            Part::Label(_) | Part::Input(_) | Part::Branch(_) => None,
+        })
+    }
+
+    pub fn list(&self, name: &str) -> Option<&ListDef> {
+        self.lists().find(|list| list.name == name)
     }
 
     pub fn input(&self, name: &str) -> Option<&InputDef> {
@@ -317,7 +358,7 @@ impl BlockDef {
     pub fn branches(&self) -> impl Iterator<Item = &str> {
         self.parts.iter().filter_map(|part| match part {
             Part::Branch(name) => Some(name.as_str()),
-            Part::Label(_) | Part::Input(_) => None,
+            Part::Label(_) | Part::Input(_) | Part::List(_) => None,
         })
     }
 
@@ -396,7 +437,7 @@ fn is_name(name: &str, in_spec: bool) -> bool {
     !name.is_empty()
         && name
             .bytes()
-            .all(|b| (0x21..=0x7e).contains(&b) && !(in_spec && b"{}[]:=".contains(&b)))
+            .all(|b| (0x21..=0x7e).contains(&b) && !(in_spec && b"{}[]:=*+".contains(&b)))
 }
 
 impl LanguageConfig {
@@ -524,6 +565,11 @@ impl LanguageConfig {
             if spec_parts.is_empty() {
                 problem(at, "spec is empty".into());
             }
+            if matches!(config.layout, BlockLayout::Body(_))
+                && spec_parts.iter().any(|part| matches!(part, SpecPart::Branch(_)))
+            {
+                problem(at, "a block with branches already has rows; it cannot take `Body`".into());
+            }
 
             let mut names = HashSet::new();
             let mut parts = Vec::new();
@@ -542,12 +588,26 @@ impl LanguageConfig {
                         }
                         parts.push(Part::Branch(name));
                     }
-                    SpecPart::Input { name, ty, default } => {
+                    SpecPart::Input { name, ty, default, list } => {
                         if !is_name(&name, true) {
                             problem(at, format!("input name `{name}` is not a valid name"));
                         }
                         if !names.insert(name.clone()) {
                             problem(at, format!("`{name}` is used twice in the spec"));
+                        }
+                        if let Some(arity) = list {
+                            if !types.contains_key(&ty) {
+                                problem(at, format!("list `{name}` has unknown type `{ty}`"));
+                            }
+                            if default.is_some() {
+                                problem(at, format!("list `{name}` has a default, but lists start empty"));
+                            }
+                            let min = match arity {
+                                Arity::Any => 0,
+                                Arity::AtLeastOne => 1,
+                            };
+                            parts.push(Part::List(ListDef { name, ty, min }));
+                            continue;
                         }
                         let default = match types.get(&ty) {
                             None => {
@@ -587,6 +647,7 @@ impl LanguageConfig {
                 documentation: config.documentation,
                 switch: config.switch,
                 color: config.color,
+                layout: config.layout,
             });
         }
 
@@ -737,8 +798,37 @@ mod tests {
         assert!(!is_name("a b", false));
         assert!(!is_name("a\u{7}", false));
         assert!(!is_name("", false));
+        assert!(!is_name("a*", true) && !is_name("a+", true));
         let problems = compile(&MINIMAL.replace("{a:number=1}", "{a:b:c}")).unwrap_err();
         assert!(problems.iter().any(|p| p.contains("b:c")), "{problems:#?}");
+    }
+
+    #[test]
+    fn lists_start_empty_and_know_their_minimum() {
+        let language = compile(&MINIMAL.replace(
+            r#"spec: "{a:number=1} + {b:number}""#,
+            r#"spec: "sum {a:number=1} {rest:number*} {more:number+}", layout: Body(1)"#,
+        ))
+        .unwrap();
+        let add = language.block("add").unwrap();
+        assert_eq!(add.inputs().map(|input| input.name.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(add.list("rest").map(|list| list.min), Some(0));
+        assert_eq!(add.list("more").map(|list| list.min), Some(1));
+        assert_eq!(add.layout, BlockLayout::Body(1));
+        assert_eq!(language.block("if").unwrap().layout, BlockLayout::Inline);
+    }
+
+    #[test]
+    fn lists_take_no_default_and_body_takes_no_branches() {
+        let problems = compile(
+            &MINIMAL
+                .replace("{b:number}", "{b:number*=3}")
+                .replace(r#"spec: "if {c:bool} [then]""#, r#"spec: "if {c:bool} [then]", layout: Body(1)"#),
+        )
+        .unwrap_err();
+        assert_eq!(problems.len(), 2, "{problems:#?}");
+        assert!(problems.iter().any(|p| p.contains("lists start empty")), "{problems:#?}");
+        assert!(problems.iter().any(|p| p.contains("Body")), "{problems:#?}");
     }
 
     #[test]

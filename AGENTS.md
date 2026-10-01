@@ -11,7 +11,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   - `language`: `LanguageConfig` (as written, strings kept raw) compiles into a
     validated `Language`. Types give slot/reporter shape and literal kind;
     blocks are Hat / Statement / Cap / Reporter(type); a spec string like
-    `"repeat {times:number=10} [body]"` gives inputs and C-block branches.
+    `"repeat {times:number=10} [body]"` gives inputs and C-block branches,
+    and `{args:datum*}` (or `+`, at least one) a list of inputs. A block's
+    `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,
+    later ones and later lists' items on indented rows of their own
+    (`documentation/03-variadic.md`). Lists are laid out and drawn, but `edit`,
+    the AST and the editor's fields and drops do not handle them yet.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the
@@ -52,8 +57,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   the window.
 - `documentation/` — design notes, numbered.
 - `examples/languages/` — sample language definitions: `tiny.ron` (loose,
-  Scratch-style typing) and `strict_tiny.ron` (the same language with exact
-  types and explicit conversions).
+  Scratch-style typing), `strict_tiny.ron` (the same language with exact
+  types and explicit conversions) and `scheme.ron` (an R7RS subset built on
+  lists and `Body` layout).
 
 ## Principles
 
@@ -84,7 +90,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
   Drawing, hit-testing and snapping all read one `Scene`.
 - Opcodes, type names, input and branch names are printable ASCII without
-  spaces; names used in specs also exclude `{ } [ ] : =`.
+  spaces; names used in specs also exclude `{ } [ ] : = * +`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
   problems and attaching checks the combined depth. Program loads raise RON's
   recursion limit to `RON_RECURSION_LIMIT` (RON spends 6–7 levels per block);

@@ -550,6 +550,7 @@ mod tests {
                     block: None,
                 },
             )]),
+            lists: BTreeMap::new(),
             branches: BTreeMap::from([("then".to_owned(), vec![inner])]),
         };
 

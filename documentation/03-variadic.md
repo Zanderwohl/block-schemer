@@ -99,15 +99,18 @@ with no items is a `TooFewItems` error on its block.
 
 - `Inline` lays a reporter out in one row, as now; a list's items and its empty
   slot follow each other in that row.
-- `Body(n)` keeps the spec up to and including the `n`th slot on the first row,
-  then puts each later slot on a row of its own, indented. A list item counts
-  as a slot, and so does a list's empty slot, which therefore gets a row too. A
-  label goes on the row of the slot it comes before, so
+- `Body(n)` keeps the first `n` inputs on the first row, a list counting as
+  one input with all its items. Each later input gets an indented row of its
+  own, and so does each item of a later list, its empty slot included. A label
+  goes on the row of the input it comes before, so
   `if {c:datum} then {t:datum} else {e:datum}` with `Body(1)` reads
-  `if c` / `then t` / `else e`. Labels after the last slot share its row.
+  `if c` / `then t` / `else e`. Labels before the first input always head the
+  block, so `begin {body:datum+}` with `Body(0)` reads `begin` above its
+  items. Labels after the last input share its row.
 
-This follows Emacs's `lisp-indent-function`: `define`, `lambda` and `let` are
-`Body(1)`, calls are `Inline`. It is per block, not per use, so the programmer
+This follows Emacs's `lisp-indent-function`: `define` and `lambda` are
+`Body(1)`, so `lambda {params:symbol*} {body:datum+}` keeps its parameters
+beside its name and lists its body below; calls are `Inline`. It is per block, not per use, so the programmer
 cannot choose where lines break; in return a program always reads the same.
 
 `Body` is allowed on any block without branches; a block with branches already
@@ -116,8 +119,17 @@ lists one top-level form per row.
 
 A reporter of several rows keeps its shape at the first row's height: `Round`
 becomes a rectangle whose corners have the radius a one-row reporter's ends
-would, and `Hexagon` keeps its points beside the first row with straight sides
-below. Both stay unions of convex pieces.
+would, and `Hexagon` keeps its points beside the first row, with straight sides
+below and its bottom corners cut at the same angle. Both stay convex. The ends
+stop growing at `MAX_END` (40 units), so a one-row block holding a tall one
+does not swell into a huge pill.
+
+A list's empty slot is drawn as an outline in the type's shape with `…`
+inside.
+
+![Every block of scheme.ron](images/03-scheme-grid.png)
+
+![A program using lists and Body](images/03-scheme-program.png)
 
 ## Deferred
 
