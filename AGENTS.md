@@ -50,8 +50,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     debugger methods default to doing nothing.
 - `crates/block-parse-gui` — egui component `BlockEditor`. Feature `app` (off
   by default) adds eframe, clap, rfd, winit (macOS only), the window as a
-  library (`app::run` with an `AppConfig`: name, language, program path and
-  an optional `Runner`) and the `block-parse-editor` binary
+  library (`app::run` with an `AppConfig`: name, language, program path, an
+  optional `Runner` and an optional window icon) and the `block-parse-editor` binary
   (`cargo editor -l <language> [program]`). Its File/Edit menus are egui for
   now; `--no-menu-bar` hides them for when
   native menus arrive. On macOS it turns off winit's default menu, whose Quit

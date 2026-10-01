@@ -22,6 +22,14 @@ pub struct AppConfig {
     pub menu_bar: bool,
     /// Answers runs; without one, a run says there is no backend.
     pub runner: Option<Box<dyn Runner>>,
+    /// The window's, shown in the taskbar or Dock while it runs. See
+    /// [`icon_from_png`].
+    pub icon: Option<egui::IconData>,
+}
+
+/// An icon from PNG bytes, such as an `include_bytes!` of the app's icon.
+pub fn icon_from_png(png: &[u8]) -> Result<egui::IconData, String> {
+    eframe::icon_data::from_png_bytes(png).map_err(|error| error.to_string())
 }
 
 /// Opens the window and blocks until it closes.
@@ -41,9 +49,13 @@ pub fn run(config: AppConfig) -> ExitCode {
         _ => Program::new(&config.language),
     };
 
+    let mut viewport = egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]);
+    if let Some(icon) = config.icon {
+        viewport = viewport.with_icon(icon);
+    }
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),
+        viewport,
         ..Default::default()
     };
     #[cfg(target_os = "macos")]

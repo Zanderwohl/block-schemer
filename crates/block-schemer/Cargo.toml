@@ -8,3 +8,15 @@ edition.workspace = true
 block-parse.workspace = true
 block-parse-gui = { path = "../block-parse-gui", features = ["app"] }
 steel-core = { version = "0.8" }
+
+# Building on Windows for Windows embeds the icon in the executable.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+# For `cargo bundle`, which makes the macOS .app that shows the iconset.
+[package.metadata.bundle]
+name = "Block Schemer"
+identifier = "io.github.zanderwohl.block-schemer"
+icon = ["assets/icons/block-schemer.iconset/*.png"]
+category = "public.app-category.developer-tools"
+short_description = "Scheme from blocks"

@@ -83,7 +83,14 @@ about 10% margin, follow each `-resize` in the loop with
 
 ## Where they go
 
-The `.ico` and `.icns` are for packaging, such as `cargo-bundle` or an
-installer. The running window's own icon is separate: eframe's
-`ViewportBuilder::with_icon` takes PNG data, which `app::run` does not pass
-yet.
+- **The running window:** `main` embeds `icon-512.png` and passes it as
+  `AppConfig::icon`. eframe shows it in the taskbar, the title bar or the
+  Dock while the app runs.
+- **The Windows executable:** `build.rs` embeds `block-schemer.ico` with
+  `winresource` when building on Windows for Windows, so Explorer and
+  shortcuts show it. Cross-compiling from another OS skips it.
+- **The macOS app:** `cargo install cargo-bundle`, then
+  `cargo bundle -p block-schemer --release` makes `Block Schemer.app` from
+  `[package.metadata.bundle]` in the crate's `Cargo.toml`, with the iconset
+  as its icon.
+- **The web version:** the favicon files, once there is one.

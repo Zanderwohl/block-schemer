@@ -57,6 +57,7 @@ fn main() -> ExitCode {
         program: args.program,
         menu_bar: !args.no_menu_bar,
         runner: None,
+        icon: None,
     })
 }
 
