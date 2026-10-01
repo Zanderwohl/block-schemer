@@ -4,6 +4,8 @@ Block Schemer is a visual block-based programming environment much like [Scratch
 that provides blocks to program in Scheme. The current Scheme interpreter is [Steel](https://github.com/mattwparas/steel), though that may change in the future.
 Steel is currently mostly r5rs-compliant, and is working toward r7rs compliance.
 
+![A view of Block Schemer](./readme/sum-of-squares.png)
+
 ## Releases
 
 To-do!
