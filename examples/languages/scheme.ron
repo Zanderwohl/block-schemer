@@ -28,7 +28,7 @@ Language(
             id: "program",
             name: "Program",
             category: "Program",
-            kind: Hat,
+            kind: HatCap,
             spec: "program {main:datum}",
             description: "Where a program begins: evaluates its one expression.",
         ),

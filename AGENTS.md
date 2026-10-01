@@ -10,7 +10,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 - `crates/block-parse` — core. serde + ron only, no geometry, no GUI.
   - `language`: `LanguageConfig` (as written, strings kept raw) compiles into a
     validated `Language`. Types give slot/reporter shape and literal kind;
-    blocks are Hat / Statement / Cap / Reporter(type); a spec string like
+    blocks are Hat / Statement / Cap / HatCap (a whole script in one block)
+    / Reporter(type); a spec string like
     `"repeat {times:number=10} [body]"` gives inputs and C-block branches,
     and `{args:datum*}` (or `+`, at least one) a list of inputs. A block's
     `layout` is `Inline` or `Body(n)`: the first `n` inputs on the first row,

@@ -385,7 +385,9 @@ impl Layout<'_> {
             .unwrap_or(self.swatches.uncategorized);
         match &def.kind {
             BlockKind::Reporter(_) => self.reporter(block, def, swatch),
-            BlockKind::Hat | BlockKind::Statement | BlockKind::Cap => self.stack_block(block, def, swatch),
+            BlockKind::Hat | BlockKind::Statement | BlockKind::Cap | BlockKind::HatCap => {
+                self.stack_block(block, def, swatch)
+            }
         }
     }
 
@@ -497,12 +499,12 @@ impl Layout<'_> {
     }
 
     fn stack_block(&self, block: &Block, def: &BlockDef, swatch: Swatch) -> Laid {
-        let top = if def.kind == BlockKind::Hat {
+        let top = if def.kind.is_hat() {
             TopEdge::Hat
         } else {
             TopEdge::Notched
         };
-        let bottom = if def.kind == BlockKind::Cap {
+        let bottom = if def.kind.is_cap() {
             BottomEdge::Flat
         } else {
             BottomEdge::Tab
@@ -1228,6 +1230,17 @@ mod tests {
         assert!(rows.iter().all(|row| row.min.x == rows[0].min.x && row.min.y > head));
         assert!(rows[0].min.x > block.labels[0].at.x, "indented");
         assert!(matches!(block.form, Form::Reporter { head, .. } if head < block.rect.height()));
+    }
+
+    #[test]
+    fn a_hat_cap_has_a_hat_and_a_flat_bottom_with_no_seam() {
+        let language = scheme();
+        let (program, ids) = with_stack(&language, &["program"]);
+        let scene = scene_of(&language, &program);
+        let Form::Stack(form) = &placed(&scene, ids[0]).form else { panic!() };
+        assert_eq!((form.top, form.bottom), (TopEdge::Hat, BottomEdge::Flat));
+        assert!(scene.seams.iter().all(|seam| seam.target != Target::After(ids[0])), "nothing snaps below");
+        assert!(scene.heads[0].is_hat, "nor above");
     }
 
     #[test]

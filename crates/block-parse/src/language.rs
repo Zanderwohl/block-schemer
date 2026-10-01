@@ -197,6 +197,8 @@ pub enum BlockKind {
     Statement,
     /// Nothing below.
     Cap,
+    /// Nothing above or below: a whole script in one block.
+    HatCap,
     /// Output type; lives in a slot, not a stack.
     Reporter(String),
 }
@@ -333,8 +335,18 @@ impl BlockKind {
     pub fn output(&self) -> Option<&str> {
         match self {
             Self::Reporter(ty) => Some(ty),
-            Self::Hat | Self::Statement | Self::Cap => None,
+            Self::Hat | Self::Statement | Self::Cap | Self::HatCap => None,
         }
+    }
+
+    /// Nothing goes above it.
+    pub fn is_hat(&self) -> bool {
+        matches!(self, Self::Hat | Self::HatCap)
+    }
+
+    /// Nothing goes below it.
+    pub fn is_cap(&self) -> bool {
+        matches!(self, Self::Cap | Self::HatCap)
     }
 }
 
@@ -598,7 +610,7 @@ impl LanguageConfig {
                         if !names.insert(name.clone()) {
                             problem(at, format!("`{name}` is used twice in the spec"));
                         }
-                        if matches!(config.kind, BlockKind::Hat | BlockKind::Reporter(_)) {
+                        if config.kind.is_hat() || config.kind.output().is_some() {
                             problem(at, "hats and reporters cannot have branches".into());
                         }
                         parts.push(Part::Branch(name));
