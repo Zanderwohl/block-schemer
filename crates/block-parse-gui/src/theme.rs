@@ -28,6 +28,8 @@ pub struct Theme {
     pub warning: Color32,
     pub literal_fill: Color32,
     pub literal_ink: Color32,
+    /// A blank field's hint.
+    pub placeholder: Color32,
 }
 
 impl Default for Theme {
@@ -50,6 +52,7 @@ impl Default for Theme {
             warning: Color32::from_rgb(0xf5, 0xa5, 0x24),
             literal_fill: Color32::WHITE,
             literal_ink: Color32::from_rgb(0x1d, 0x1f, 0x24),
+            placeholder: Color32::from_gray(0x9a),
         }
     }
 }

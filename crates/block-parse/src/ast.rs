@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::program::BlockId;
+use crate::program::{BlockId, Slot};
 use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +46,8 @@ pub struct Node {
     /// Spec order.
     pub args: Vec<Arg>,
     /// Spec order.
+    pub lists: Vec<List>,
+    /// Spec order.
     pub branches: Vec<Branch>,
 }
 
@@ -53,6 +55,13 @@ pub struct Node {
 pub struct Arg {
     pub name: String,
     pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct List {
+    pub name: String,
+    /// Holes are `MissingInput` problems, so indices match the program's.
+    pub items: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,8 +73,8 @@ pub struct Branch {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Problem {
     pub block: Option<BlockId>,
-    /// An empty slot has no block of its own: the owner and the input name.
-    pub slot: Option<(BlockId, String)>,
+    /// An empty slot has no block of its own: the owner and the slot.
+    pub slot: Option<(BlockId, Slot)>,
     pub code: ProblemCode,
     pub severity: Severity,
     pub message: String,
@@ -77,8 +86,10 @@ pub struct Problem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProblemCode {
     UnknownOpcode,
-    /// Neither a reporter nor a literal.
+    /// Neither a reporter nor a literal; also a hole in a list.
     MissingInput,
+    /// A list with fewer items than its spec asks for (`+`). On the block.
+    TooFewItems,
     TypeMismatch,
     /// Rejected by the slot type's validator; the message is the validator's.
     InvalidLiteral,
@@ -124,6 +135,13 @@ impl Node {
         self.args.iter().find(|arg| arg.name == name).map(|arg| &arg.value)
     }
 
+    pub fn list(&self, name: &str) -> Option<&[Expr]> {
+        self.lists
+            .iter()
+            .find(|list| list.name == name)
+            .map(|list| list.items.as_slice())
+    }
+
     pub fn branch(&self, name: &str) -> Option<&[Stmt]> {
         self.branches
             .iter()
@@ -144,6 +162,9 @@ fn statements<'a>(body: &'a [Stmt], found: &mut Vec<&'a Problem>) {
 fn node_problems<'a>(node: &'a Node, found: &mut Vec<&'a Problem>) {
     for arg in &node.args {
         expression(&arg.value, found);
+    }
+    for item in node.lists.iter().flat_map(|list| &list.items) {
+        expression(item, found);
     }
     for branch in &node.branches {
         statements(&branch.body, found);

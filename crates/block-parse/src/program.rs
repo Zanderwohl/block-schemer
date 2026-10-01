@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::edit::Location;
 use crate::language::{Language, Part, ron_options};
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
@@ -14,10 +14,10 @@ pub const FORMAT_VERSION: u32 = 1;
 pub const MAX_DEPTH: usize = 120;
 
 /// RON's recursion limit for program loads. Measured: a level of nesting
-/// costs RON 6 through a branch and 7 through an input, plus about 8 for the
-/// file around it, so its default of 128 stops loads near depth 17. Only a
-/// file nested past this is a fatal syntax error.
-pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 7 + 16;
+/// costs RON 6 through a branch, 7 through an input and 9 through a list
+/// item, plus about 8 for the file around it, so its default of 128 stops
+/// loads near depth 13. Only a file nested past this is a fatal syntax error.
+pub const RON_RECURSION_LIMIT: usize = MAX_DEPTH * 9 + 16;
 
 /// Only stack positions are stored; block positions are derived, so a language
 /// whose labels change width re-flows old files instead of overlapping them.
@@ -57,8 +57,46 @@ pub struct Block {
     pub opcode: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, Input>,
+    /// An item holding neither reporter nor literal is a hole, kept so the
+    /// items after it keep their places.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<String, Vec<Input>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branches: BTreeMap<String, Vec<Block>>,
+}
+
+/// A slot of a block: a single input, or one item of a list. Index `len` of
+/// a list is the empty slot after its items, which appends.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Slot {
+    pub input: String,
+    /// `None` for a single input.
+    pub item: Option<usize>,
+}
+
+impl Slot {
+    pub fn input(name: impl Into<String>) -> Self {
+        Self {
+            input: name.into(),
+            item: None,
+        }
+    }
+
+    pub fn item(list: impl Into<String>, index: usize) -> Self {
+        Self {
+            input: list.into(),
+            item: Some(index),
+        }
+    }
+}
+
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.item {
+            Some(index) => write!(f, "{}[{index}]", self.input),
+            None => write!(f, "{}", self.input),
+        }
+    }
 }
 
 /// The literal stays under a plugged reporter and returns when it is removed.
@@ -69,6 +107,12 @@ pub struct Input {
     pub literal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Box<Block>>,
+}
+
+impl Input {
+    pub fn is_hole(&self) -> bool {
+        self.literal.is_none() && self.block.is_none()
+    }
 }
 
 #[derive(Debug)]
@@ -96,13 +140,20 @@ impl Program {
         }
     }
 
+    /// Trailing holes in lists are dropped.
     pub fn from_ron(text: &str) -> Result<Self, ProgramError> {
-        with_deep_stack(|| {
+        let mut program: Self = with_deep_stack(|| {
             ron_options()
                 .with_recursion_limit(RON_RECURSION_LIMIT)
                 .from_str(text)
                 .map_err(ProgramError::Syntax)
-        })
+        })?;
+        for stack in &mut program.stacks {
+            for block in &mut stack.blocks {
+                block.trim_all();
+            }
+        }
+        Ok(program)
     }
 
     pub fn to_ron(&self) -> String {
@@ -180,6 +231,7 @@ impl Program {
             id: self.fresh_id(),
             opcode: opcode.to_owned(),
             inputs: BTreeMap::new(),
+            lists: BTreeMap::new(),
             branches: BTreeMap::new(),
         };
         for part in &def.parts {
@@ -196,7 +248,7 @@ impl Program {
                 Part::Branch(name) => {
                     block.branches.insert(name.clone(), Vec::new());
                 }
-                Part::Label(_) => {}
+                Part::List(_) | Part::Label(_) => {}
             }
         }
         Some(block)
@@ -231,24 +283,102 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// False if the block is gone.
-    pub fn set_literal(&mut self, block: BlockId, input: &str, text: String) -> bool {
+    /// False if the block is gone or the slot is past a list's empty slot.
+    /// Emptying an item's text makes it a hole, so a field keeps one address
+    /// as its item comes and goes.
+    pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let Some(block) = self.find_mut(block) else {
             return false;
         };
-        block.inputs.entry(input.to_owned()).or_default().literal = Some(text);
+        let Some(index) = slot.item else {
+            block.inputs.entry(slot.input.clone()).or_default().literal = Some(text);
+            return true;
+        };
+        let len = block.lists.get(&slot.input).map_or(0, Vec::len);
+        if index > len {
+            return false;
+        }
+        if index == len && text.is_empty() {
+            return true;
+        }
+        let items = block.lists.entry(slot.input.clone()).or_default();
+        if index == len {
+            items.push(Input::default());
+        }
+        items[index].literal = (!text.is_empty()).then_some(text);
+        block.trim_lists();
         true
     }
 }
 
 impl Block {
+    pub fn slot(&self, slot: &Slot) -> Option<&Input> {
+        match slot.item {
+            None => self.inputs.get(&slot.input),
+            Some(index) => self.lists.get(&slot.input)?.get(index),
+        }
+    }
+
+    /// An item past a list's end is created at the empty slot, never beyond.
+    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> Option<&mut Input> {
+        match slot.item {
+            None => Some(self.inputs.entry(slot.input.clone()).or_default()),
+            Some(index) => {
+                if index > self.lists.get(&slot.input).map_or(0, Vec::len) {
+                    return None;
+                }
+                let items = self.lists.entry(slot.input.clone()).or_default();
+                if index == items.len() {
+                    items.push(Input::default());
+                }
+                items.get_mut(index)
+            }
+        }
+    }
+
+    /// How many items `list` shows once the reporter `lifted` is out of it:
+    /// trailing holes, including the one it may leave, do not count.
+    pub fn list_len(&self, list: &str, lifted: Option<BlockId>) -> usize {
+        let items = self.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);
+        let empty = |input: &Input| {
+            input.literal.is_none() && input.block.as_ref().is_none_or(|inner| Some(inner.id) == lifted)
+        };
+        items.len() - items.iter().rev().take_while(|input| empty(input)).count()
+    }
+
+    /// Drops trailing holes, and lists left empty, which a fresh block has
+    /// none of.
+    pub(crate) fn trim_lists(&mut self) {
+        for items in self.lists.values_mut() {
+            while items.last().is_some_and(Input::is_hole) {
+                items.pop();
+            }
+        }
+        self.lists.retain(|_, items| !items.is_empty());
+    }
+
+    fn trim_all(&mut self) {
+        self.trim_lists();
+        let inputs = self.inputs.values_mut().chain(self.lists.values_mut().flatten());
+        for inner in inputs.filter_map(|input| input.block.as_deref_mut()) {
+            inner.trim_all();
+        }
+        for child in self.branches.values_mut().flatten() {
+            child.trim_all();
+        }
+    }
+
+    /// Reporters in single inputs and list items alike.
+    pub fn reporters(&self) -> impl Iterator<Item = &Block> {
+        self.inputs
+            .values()
+            .chain(self.lists.values().flatten())
+            .filter_map(|input| input.block.as_deref())
+    }
+
     /// Nesting levels this block spans, counting itself.
     pub fn height(&self) -> usize {
-        let inputs = self
-            .inputs
-            .values()
-            .filter_map(|input| input.block.as_deref())
-            .map(Block::height);
+        let inputs = self.reporters().map(Block::height);
         let branches = self.branches.values().flatten().map(Block::height);
         1 + inputs.chain(branches).max().unwrap_or(0)
     }
@@ -283,10 +413,8 @@ fn with_deep_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
 pub(crate) fn walk<'a>(blocks: &'a [Block], visit: &mut impl FnMut(&'a Block)) {
     for block in blocks {
         visit(block);
-        for input in block.inputs.values() {
-            if let Some(inner) = input.block.as_deref() {
-                walk(std::slice::from_ref(inner), visit);
-            }
+        for inner in block.reporters() {
+            walk(std::slice::from_ref(inner), visit);
         }
         for branch in block.branches.values() {
             walk(branch, visit);
@@ -303,9 +431,7 @@ fn find_block(block: &Block, id: BlockId) -> Option<&Block> {
         return Some(block);
     }
     block
-        .inputs
-        .values()
-        .filter_map(|input| input.block.as_deref())
+        .reporters()
         .find_map(|inner| find_block(inner, id))
         .or_else(|| block.branches.values().find_map(|seq| find_in(seq, id)))
 }
@@ -318,10 +444,11 @@ fn find_block_mut(block: &mut Block, id: BlockId) -> Option<&mut Block> {
     if block.id == id {
         return Some(block);
     }
-    for input in block.inputs.values_mut() {
-        if let Some(inner) = input.block.as_deref_mut()
-            && let Some(found) = find_block_mut(inner, id)
-        {
+    // Fields borrowed apart: borrowing all of `block` here would outlive the
+    // early return.
+    let inputs = block.inputs.values_mut().chain(block.lists.values_mut().flatten());
+    for inner in inputs.filter_map(|input| input.block.as_deref_mut()) {
+        if let Some(found) = find_block_mut(inner, id) {
             return Some(found);
         }
     }
@@ -332,12 +459,19 @@ fn find_block_mut(block: &mut Block, id: BlockId) -> Option<&mut Block> {
 }
 
 fn locate_in(block: &Block, id: BlockId) -> Option<Location> {
-    for (name, input) in &block.inputs {
+    let singles = block.inputs.iter().map(|(name, input)| (Slot::input(name.clone()), input));
+    let items = block.lists.iter().flat_map(|(name, items)| {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, input)| (Slot::item(name.clone(), index), input))
+    });
+    for (slot, input) in singles.chain(items) {
         if let Some(inner) = input.block.as_deref() {
             if inner.id == id {
                 return Some(Location::Input {
                     parent: block.id,
-                    input: name.clone(),
+                    slot,
                 });
             }
             if let Some(found) = locate_in(inner, id) {
@@ -367,9 +501,8 @@ fn depth_in(blocks: &[Block], id: BlockId, depth: usize) -> Option<usize> {
         if block.id == id {
             return Some(depth);
         }
-        let inputs = block.inputs.values().filter_map(|input| input.block.as_deref());
-        inputs
-            .into_iter()
+        block
+            .reporters()
             .find_map(|inner| depth_in(std::slice::from_ref(inner), id, depth + 1))
             .or_else(|| {
                 block

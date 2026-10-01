@@ -104,6 +104,7 @@ mod tests {
                 id: BlockId(1),
                 opcode: "say".into(),
                 inputs: BTreeMap::new(),
+                lists: BTreeMap::new(),
                 branches: BTreeMap::new(),
             }],
         });
