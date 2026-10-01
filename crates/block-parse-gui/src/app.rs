@@ -3,10 +3,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use block_parse::History;
 use block_parse::ast::Script;
-use block_parse::host::{Highlight, HighlightStyle, Overlay, RunCommand, Runner, Tab, TabContent, TabId};
+use block_parse::host::{Highlight, HighlightStyle, Overlay, RunCommand, RunStatus, Runner, Tab, TabContent, TabId};
 use block_parse::language::Language;
 use block_parse::program::{BlockId, Program};
 use eframe::egui::{self, Button, Key, KeyboardShortcut, Modifiers, ViewportCommand};
@@ -280,6 +281,7 @@ impl eframe::App for App {
         if self.pending.is_none() {
             self.shortcuts(&ctx);
         }
+        self.poll_runner(&ctx);
 
         if self.menus == Menus::Egui {
             egui::Panel::top("menu_bar").show(ui, |ui| {
@@ -291,23 +293,23 @@ impl eframe::App for App {
             let mut flipped = None;
             egui::Panel::top("actions").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let toolbar = RunToolbar {
-                        status: runner.status(),
-                        can_start: true,
-                        supports: &|command| runner.supports(command),
-                    };
-                    clicked = toolbar.show(ui);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        for toggle in runner.toggles().into_iter().rev() {
-                            let mut on = toggle.on;
-                            let mut response = ui.checkbox(&mut on, &toggle.label);
-                            if let Some(hint) = &toggle.hint {
-                                response = response.on_hover_text(hint);
-                            }
-                            if response.changed() {
-                                flipped = Some((toggle.id, on));
-                            }
+                    for toggle in runner.toggles() {
+                        let mut on = toggle.on;
+                        let mut response = ui.checkbox(&mut on, &toggle.label);
+                        if let Some(hint) = &toggle.hint {
+                            response = response.on_hover_text(hint);
                         }
+                        if response.changed() {
+                            flipped = Some((toggle.id, on));
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let toolbar = RunToolbar {
+                            status: runner.status(),
+                            can_start: true,
+                            supports: &|command| runner.supports(command),
+                        };
+                        clicked = toolbar.show(ui);
                     });
                 });
             });
@@ -351,12 +353,13 @@ impl eframe::App for App {
                     }
                     EditorEvent::BlockClicked(_) => self.dismiss_runs(),
                     EditorEvent::Run { block, script } => {
-                        let answer = match &mut self.runner {
+                        let (answer, pending) = match &mut self.runner {
                             Some(runner) => {
                                 runner.run_block(&self.program, self.path.as_deref(), block, &script);
-                                runner.overlay().bubbles.remove(&block)
+                                let answer = runner.overlay().bubbles.remove(&block);
+                                (answer, runner.status() != RunStatus::Idle)
                             }
-                            None => Some("No backend configured.".to_owned()),
+                            None => (Some("No backend configured.".to_owned()), false),
                         };
                         // Not when a bubble already shows the answer.
                         if let Some(console) = self.sync_tabs()
@@ -364,13 +367,15 @@ impl eframe::App for App {
                         {
                             self.show_tab(console);
                         }
-                        if let Some(answer) = answer {
-                            self.overlay.bubbles.insert(block, answer);
+                        if answer.is_some() || pending {
                             self.overlay.highlights.push(Highlight {
                                 block,
                                 style: HighlightStyle::Dispatched,
                                 label: None,
                             });
+                        }
+                        if let Some(answer) = answer {
+                            self.overlay.bubbles.insert(block, answer);
                         }
                     }
                     EditorEvent::Inspect { block, script } => self.inspect(block, &script),
@@ -729,6 +734,50 @@ impl App {
             RunCommand::StepOut => runner.step_out(),
         }
         if let Some(console) = self.sync_tabs() {
+            self.show_tab(console);
+        }
+    }
+
+    /// Answers that came back since the last frame. Only blocks still
+    /// outlined get their bubble, so one dismissed meanwhile stays gone; one
+    /// that answered elsewhere loses its outline once the runner is idle.
+    fn poll_runner(&mut self, ctx: &egui::Context) {
+        let Some(runner) = &mut self.runner else {
+            return;
+        };
+        if runner.status() != RunStatus::Idle {
+            // Answers arrive with no input to wake egui.
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
+        if !runner.poll() {
+            return;
+        }
+        let bubbles = runner.overlay().bubbles;
+        let idle = runner.status() == RunStatus::Idle;
+        let outlined: Vec<BlockId> = self
+            .overlay
+            .highlights
+            .iter()
+            .filter(|highlight| highlight.style == HighlightStyle::Dispatched)
+            .map(|highlight| highlight.block)
+            .collect();
+        let mut arrived = false;
+        for block in outlined {
+            if let Some(bubble) = bubbles.get(&block)
+                && self.overlay.bubbles.insert(block, bubble.clone()).is_none()
+            {
+                arrived = true;
+            }
+        }
+        if idle {
+            let bubbles = &self.overlay.bubbles;
+            self.overlay
+                .highlights
+                .retain(|highlight| highlight.style != HighlightStyle::Dispatched || bubbles.contains_key(&highlight.block));
+        }
+        if let Some(console) = self.sync_tabs()
+            && !arrived
+        {
             self.show_tab(console);
         }
     }

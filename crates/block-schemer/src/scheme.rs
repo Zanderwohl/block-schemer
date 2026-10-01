@@ -1,6 +1,8 @@
 //! The interpreter behind Block Schemer, kept to one small trait so Steel can
 //! be swapped for another Scheme, such as one that runs in WASM.
 
+use std::sync::{Arc, Mutex};
+
 use steel::SteelVal;
 use steel::steel_vm::engine::Engine;
 
@@ -14,6 +16,17 @@ pub trait Scheme {
 
     /// A fresh session, with no definitions but the prelude's.
     fn reset(&mut self);
+
+    /// Stops this session's runs from another thread. The same one serves
+    /// across `reset`.
+    fn interrupter(&self) -> Arc<dyn Interrupt>;
+}
+
+/// Once interrupted, every run ends in an error until `clear`, so an
+/// interrupt that lands just before a run starts still stops it.
+pub trait Interrupt: Send + Sync {
+    fn interrupt(&self);
+    fn clear(&self);
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -37,10 +50,46 @@ const STEEL_PRELUDE: [&str; 2] = [
 /// Steel's sandboxed engine, which loads no native libraries.
 pub struct Steel {
     engine: Engine,
+    interrupter: Arc<SteelInterrupt>,
+}
+
+/// Steel does not export its controller's type, so it is kept in closures.
+struct Controls {
+    interrupt: Box<dyn Fn() + Send + Sync>,
+    clear: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Controls {
+    fn of(engine: &Engine) -> Self {
+        let (interrupt, clear) = (engine.get_thread_state_controller(), engine.get_thread_state_controller());
+        Self {
+            interrupt: Box::new(move || interrupt.interrupt()),
+            clear: Box::new(move || clear.resume()),
+        }
+    }
+}
+
+/// Swapped to each new engine's controls on `reset`.
+struct SteelInterrupt(Mutex<Controls>);
+
+impl Interrupt for SteelInterrupt {
+    fn interrupt(&self) {
+        (self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).interrupt)();
+    }
+
+    fn clear(&self) {
+        (self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear)();
+    }
 }
 
 impl Steel {
     pub fn new() -> Self {
+        let engine = Self::engine();
+        let interrupter = Arc::new(SteelInterrupt(Mutex::new(Controls::of(&engine))));
+        Self { engine, interrupter }
+    }
+
+    fn engine() -> Engine {
         let mut engine = Engine::new_sandboxed();
         for definition in STEEL_PRELUDE {
             engine.run(definition).expect("the prelude runs");
@@ -48,7 +97,7 @@ impl Steel {
         engine
             .run(format!("(define {OUTPUT_PORT} (open-output-string))"))
             .expect("Steel opens a string port");
-        Self { engine }
+        engine
     }
 
     fn take_output(&mut self) -> String {
@@ -83,7 +132,12 @@ impl Scheme for Steel {
     }
 
     fn reset(&mut self) {
-        *self = Self::new();
+        self.engine = Self::engine();
+        *self.interrupter.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Controls::of(&self.engine);
+    }
+
+    fn interrupter(&self) -> Arc<dyn Interrupt> {
+        self.interrupter.clone()
     }
 }
 

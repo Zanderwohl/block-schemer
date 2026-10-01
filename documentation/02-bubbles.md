@@ -48,14 +48,15 @@ While a run is pending or its bubble shows, the host marks the block with a
 yellow outline (`Theme::dispatched`). The editor does not add it itself: only
 the host knows when a run is done with.
 
-`app::run` outlines the block and shows the bubble its runner gives back for
-it straight after `run_block`, or "No backend configured." without a runner,
-as in the `block-parse-editor` binary. A run that answers with no bubble,
-such as one written to a console tab, is not outlined; its console comes to
-the front instead. Besides bubbles, it takes only the runner's tabs, asked
-for after each call, and no answer that comes later. It drops bubbles and
-outlines on a click on any block, an edit, an undo or redo, or a new or
-opened program.
+`app::run` outlines the block while its run is pending and shows the bubble
+its runner gives back for it, straight after `run_block` or from a later
+`Runner::poll`, or "No backend configured." without a runner, as in the
+`block-parse-editor` binary. A run that ends with no bubble, such as one
+written to a console tab, loses its outline once the runner is idle; its
+console comes to the front instead. Besides bubbles, it takes only the
+runner's tabs. It drops bubbles and outlines on a click on any block, an
+edit, an undo or redo, or a new or opened program, and an answer that comes
+back for a block no longer outlined is not shown.
 
 ## Placement
 

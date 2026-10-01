@@ -15,10 +15,14 @@ impl RunToolbar<'_> {
     pub fn show(&self, ui: &mut egui::Ui) -> Option<RunCommand> {
         let idle = self.status == RunStatus::Idle;
         // Glyphs egui's default fonts have; ▶ (U+25B6) is not among them.
-        let buttons = [
+        let mut buttons = [
             (RunCommand::Start, "⏵", "Play", self.can_start && idle),
             (RunCommand::Stop, "⏹", "Stop", !idle),
         ];
+        // So they read in this order when placed from the right.
+        if ui.layout().prefer_right_to_left() {
+            buttons.reverse();
+        }
         let mut clicked = None;
         ui.horizontal(|ui| {
             for (command, glyph, tip, enabled) in buttons {

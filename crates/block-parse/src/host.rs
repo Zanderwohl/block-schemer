@@ -157,6 +157,13 @@ pub trait Runner {
     /// for `start`. Anything to say back goes in the overlay's `bubbles`.
     fn run_block(&mut self, program: &Program, path: Option<&Path>, block: BlockId, script: &Script);
 
+    /// Takes in answers to work done off the UI thread; true if `overlay`
+    /// changed. The host calls it every frame and, while `status` is not
+    /// `Idle`, keeps frames coming.
+    fn poll(&mut self) -> bool {
+        false
+    }
+
     /// A line entered on one of the overlay's console tabs.
     fn console_input(&mut self, _tab: &TabId, _line: &str) {}
 
