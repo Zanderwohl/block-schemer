@@ -246,9 +246,8 @@ struct App {
     /// `None` until first saved or opened.
     path: Option<PathBuf>,
     editor: BlockEditor,
-    /// The runner's tabs beside `inspections`, refreshed after each change.
+    /// Its tabs are rebuilt by `sync_tabs`.
     overlay: Overlay,
-    /// Each with the block it inspects.
     inspections: Vec<(BlockId, Tab)>,
     runner: Option<Box<dyn Runner>>,
     dirty: bool,
@@ -359,7 +358,7 @@ impl eframe::App for App {
                             }
                             None => Some("No backend configured.".to_owned()),
                         };
-                        // Only a run answered there alone, not one also in a bubble.
+                        // Not when a bubble already shows the answer.
                         if let Some(console) = self.sync_tabs()
                             && answer.is_none()
                         {
@@ -654,8 +653,7 @@ impl App {
         text.unwrap_or_else(|| format!("{script:#?}"))
     }
 
-    /// Regenerates every inspection still in the program, as after a runner's
-    /// setting changes what it shows.
+    /// For when a runner's setting changes what it shows.
     fn refresh_inspections(&mut self) {
         for index in 0..self.inspections.len() {
             let block = self.inspections[index].0;
@@ -667,8 +665,6 @@ impl App {
         self.sync_tabs();
     }
 
-    /// One tab per block, brought to the front and refreshed by inspecting
-    /// it again.
     fn inspect(&mut self, block: BlockId, script: &Script) {
         let text = self.inspection(block, script);
         let id = TabId(format!("inspect {}", block.0));

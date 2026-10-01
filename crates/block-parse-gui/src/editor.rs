@@ -1744,7 +1744,6 @@ mod tests {
         pos2(880.0 + 80.0 * index as f32 + 30.0, 13.0)
     }
 
-    /// Frames of `steps`, and what the editor sent during them.
     fn sent(
         ctx: &egui::Context,
         editor: &mut BlockEditor,

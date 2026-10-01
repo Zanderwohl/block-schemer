@@ -83,8 +83,7 @@ pub enum TabContent {
     Console { output: String },
 }
 
-/// An on/off setting a runner offers, which the host draws, such as a
-/// checkbox.
+/// An on/off setting a runner offers, drawn by the host.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Toggle {
     /// The runner's own name for it, given back to `set_toggle`.

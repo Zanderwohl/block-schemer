@@ -11,8 +11,7 @@ pub struct RunToolbar<'a> {
 }
 
 impl RunToolbar<'_> {
-    /// The command clicked, if any. A button the host does not support is
-    /// drawn disabled.
+    /// The command clicked, if any.
     pub fn show(&self, ui: &mut egui::Ui) -> Option<RunCommand> {
         let idle = self.status == RunStatus::Idle;
         // Glyphs egui's default fonts have; ▶ (U+25B6) is not among them.

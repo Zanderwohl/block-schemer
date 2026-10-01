@@ -22,12 +22,10 @@ const INPUT_HEIGHT: f32 = 28.0;
 pub(crate) struct TabState {
     /// Last frame's active tab, which new tabs open after.
     shown: Option<TabId>,
-    /// What is typed on each console's line, not yet entered.
     typed: HashMap<TabId, String>,
 }
 
-/// Brings `order` and `active` up to date with the host's `tabs`. A closed
-/// active tab hands over to its right-hand neighbor, else its left.
+/// A closed active tab hands over to its right-hand neighbor, else its left.
 pub(crate) fn arrange(options: &mut EditorOptions, state: &mut TabState, tabs: &[Tab]) {
     let exists = |id: &TabId| tabs.iter().any(|tab| tab.id == *id);
     let order = &mut options.tab_order;
@@ -151,7 +149,6 @@ fn read_only(ui: &mut egui::Ui, mut text: &str, id: egui::Id) {
     ui.add(field);
 }
 
-/// Picks, closes and reorders tabs.
 fn strip_ui(
     panel: &mut egui::Ui,
     strip: Rect,

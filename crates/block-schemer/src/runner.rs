@@ -33,7 +33,7 @@ pub struct SchemerRunner<S> {
     scheme: S,
     answers: HashMap<BlockId, String>,
     console: String,
-    /// Show the code as it runs, with what lets the console catch `display`.
+    /// Show the `__out` port in echoed and inspected code.
     harness: bool,
 }
 
@@ -58,8 +58,7 @@ impl<S: Scheme> SchemerRunner<S> {
         &self.console
     }
 
-    /// Ends what it writes with a newline, so the next run starts on a line
-    /// of its own.
+    /// Ends with a newline, so the next run starts on its own line.
     fn write(&mut self, text: &str) {
         self.console.push_str(text);
         if !text.is_empty() && !text.ends_with('\n') {
@@ -67,9 +66,8 @@ impl<S: Scheme> SchemerRunner<S> {
         }
     }
 
-    /// The program as one file, each part through `generate`: definitions in
-    /// reading order, then the program's expression. `Err` says why it
-    /// cannot run, naming the definition at fault.
+    /// Each part through `generate`. `Err` says why it cannot run, naming
+    /// the definition at fault.
     fn file(
         &self,
         program: &Program,
@@ -112,8 +110,8 @@ impl<S: Scheme> SchemerRunner<S> {
         Ok(parts)
     }
 
-    /// Runs the program as a file in a fresh session, into the console,
-    /// after the command that will one day do the same from a shell.
+    /// The `> block-schemer` line is the command that will one day do the
+    /// same from a shell.
     fn play(&mut self, program: &Program, path: Option<&Path>) {
         let file = path
             .and_then(Path::file_name)
@@ -130,8 +128,7 @@ impl<S: Scheme> SchemerRunner<S> {
         self.write(&text);
     }
 
-    /// Runs `script` in the session, echoed into the console with what it
-    /// said, and gives back what its bubble says.
+    /// Echoes into the console; gives back the bubble's text.
     fn evaluate(&mut self, script: &Script) -> String {
         // Nothing to echo when even the reading form fails; the error follows.
         if let Ok(echo) = codegen::flat(&self.language, script, self.harness)
@@ -219,7 +216,6 @@ impl<S: Scheme> Runner for SchemerRunner<S> {
     }
 }
 
-/// Output, then the value on a line of its own.
 fn shown(answer: &Answer) -> String {
     [answer.output.as_str(), answer.value.as_str()]
         .into_iter()
