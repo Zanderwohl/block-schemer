@@ -83,8 +83,6 @@ fn render(
             };
             painter.rect_filled(ctx.content_rect(), 0.0, theme.canvas);
             paint::scene(&painter, &scene, t, theme, false, overlay);
-            paint::error_tags(&painter, &scene, t, theme);
-            paint::markers(&painter, &scene, t, theme, overlay);
             paint::bubbles(&painter, bubbles, t, theme);
         },
         Vec2::ZERO,

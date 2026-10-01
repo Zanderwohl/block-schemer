@@ -21,7 +21,7 @@ use crate::interact::{
     DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
 };
 use crate::layout::{
-    FAINT_SIZE, Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedSlot, Scene, SlotContent,
+    FAINT_SIZE, Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedBlock, PlacedSlot, Scene, SlotContent,
 };
 use crate::paint::{self, Transform};
 use crate::panels::Panels;
@@ -405,64 +405,22 @@ impl BlockEditor {
         let canvas = ui.painter_at(canvas_rect);
         canvas.rect_filled(canvas_rect, 0.0, theme.canvas);
         grid(&canvas, canvas_rect, t, theme.grid);
-        paint::scene(&canvas, &scene, t, &theme, !read_only, overlay);
+        // On the canvas's layer, which paints in call order, so later blocks cover them.
+        let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
+        fields.set_clip_rect(canvas_rect);
+        paint::scene_with(&canvas, &scene, t, &theme, !read_only, overlay, |block| {
+            self.block_widgets(&mut fields, block, canvas_rect, t, &theme, overlay, language, program, &mut output);
+        });
         if let Gesture::Dragging(drag) = &self.gesture
             && let Some((_, mark)) = &drag.snap
         {
             paint::snap_mark(&canvas, mark, t, &theme);
         }
-        paint::error_tags(&canvas, &scene, t, &theme);
-        paint::markers(&canvas, &scene, t, &theme, overlay);
         let hot = match self.gesture {
             Gesture::Resizing { edge, .. } => Some(edge),
             Gesture::Idle => divider,
             _ => None,
         };
-
-        let mut fields = ui.new_child(UiBuilder::new().max_rect(canvas_rect));
-        fields.set_clip_rect(canvas_rect);
-        // Live even when read-only: switches are the host's, not program data.
-        for block in &scene.blocks {
-            let Some(rect) = block.switch.map(|rect| t.rect(rect)) else {
-                continue;
-            };
-            if !canvas_rect.intersects(rect) {
-                continue;
-            }
-            match overlay.switches.get(&block.id) {
-                Some(&on) => {
-                    let mut value = on;
-                    if checkbox(&mut fields, rect.center(), t.zoom, &mut value).changed() {
-                        output.events.push(EditorEvent::Switched(block.id, value));
-                    }
-                }
-                // Hover only, so a press still reaches `press`, which ignores it.
-                None => {
-                    if let Some(hint) = &overlay.switch_hint {
-                        fields
-                            .interact(rect, self.id.with(("switch", block.id)), Sense::hover())
-                            .on_hover_text(hint);
-                    }
-                }
-            }
-        }
-        if !read_only {
-            for slot in scene.slots().filter(|slot| slot.is_field()) {
-                let field = match &slot.content {
-                    SlotContent::Literal { kind, text, .. } => Some((kind, text.as_str())),
-                    SlotContent::Append { kind } => Some((kind, "")),
-                    SlotContent::Empty | SlotContent::Plugged(_) => None,
-                };
-                if let Some((kind, text)) = field {
-                    let rect = t.rect(slot.rect);
-                    if canvas_rect.intersects(rect)
-                        && self.literal_field(&mut fields, rect, slot, kind, text, language, program, t.zoom, &theme)
-                    {
-                        output.changed = true;
-                    }
-                }
-            }
-        }
         // Over the fields on this layer; under the menu and run in hand on theirs.
         let visible = Rect::from_min_max(t.canvas(canvas_rect.min), t.canvas(canvas_rect.max));
         let bubbles = paint::place_bubbles(fields.painter(), &scene, t.zoom, &theme, overlay, visible);
@@ -815,6 +773,59 @@ impl BlockEditor {
         tidied != text && program.set_literal(edit.block, &edit.slot, tidied)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn block_widgets(
+        &mut self,
+        ui: &mut egui::Ui,
+        block: &PlacedBlock,
+        canvas_rect: Rect,
+        t: Transform,
+        theme: &Theme,
+        overlay: &Overlay,
+        language: &Language,
+        program: &mut Program,
+        output: &mut EditorOutput,
+    ) {
+        // Live even when read-only: switches are the host's, not program data.
+        if let Some(rect) = block.switch.map(|rect| t.rect(rect))
+            && !block.switch_covered
+            && canvas_rect.intersects(rect)
+        {
+            match overlay.switches.get(&block.id) {
+                Some(&on) => {
+                    let mut value = on;
+                    if checkbox(ui, rect.center(), t.zoom, &mut value).changed() {
+                        output.events.push(EditorEvent::Switched(block.id, value));
+                    }
+                }
+                // Hover only, so a press still reaches `press`, which ignores it.
+                None => {
+                    if let Some(hint) = &overlay.switch_hint {
+                        ui.interact(rect, self.id.with(("switch", block.id)), Sense::hover()).on_hover_text(hint);
+                    }
+                }
+            }
+        }
+        if self.options.read_only {
+            return;
+        }
+        for slot in block.slots.iter().filter(|slot| slot.is_field()) {
+            let field = match &slot.content {
+                SlotContent::Literal { kind, text, .. } => Some((kind, text.as_str())),
+                SlotContent::Append { kind } => Some((kind, "")),
+                SlotContent::Empty | SlotContent::Plugged(_) => None,
+            };
+            if let Some((kind, text)) = field {
+                let rect = t.rect(slot.rect);
+                if canvas_rect.intersects(rect)
+                    && self.literal_field(ui, rect, slot, kind, text, language, program, t.zoom, theme)
+                {
+                    output.changed = true;
+                }
+            }
+        }
+    }
+
     /// True if the program changed.
     #[allow(clippy::too_many_arguments)]
     fn literal_field(
@@ -908,7 +919,7 @@ fn switch_at(scene: &Scene, overlay: &Overlay, point: Pos2) -> Option<(BlockId, 
         .blocks
         .iter()
         .rev()
-        .find(|block| block.switch.is_some_and(|rect| rect.contains(point)))
+        .find(|block| !block.switch_covered && block.switch.is_some_and(|rect| rect.contains(point)))
         .map(|block| (block.id, overlay.switches.contains_key(&block.id)))
 }
 
@@ -1236,6 +1247,148 @@ mod tests {
         let switch = to_screen(placed.switch.expect("the language gives it a switch").center());
         let label = to_screen(placed.rect.left_center() + vec2(8.0, 0.0));
         (language, program, ctx, switch, label)
+    }
+
+    #[test]
+    fn a_stack_on_top_hides_and_takes_presses_for_the_fields_under_it() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let mut ids = Vec::new();
+        for value in ["under", "over"] {
+            let mut print = program.instantiate(&language, "print").unwrap();
+            print.inputs.get_mut("value").unwrap().literal = Some(value.into());
+            ids.push(print.id);
+            program.stacks.push(block_parse::Stack {
+                pos: [0.0, 0.0],
+                blocks: vec![print],
+            });
+        }
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        let order = |editor: &mut BlockEditor, program: &mut Program| {
+            frame(&ctx, editor, &language, program, &Overlay::default(), vec![]);
+            let texts = frame(&ctx, editor, &language, program, &Overlay::default(), vec![]);
+            let at = |text: &str| texts.iter().position(|painted| painted == text).unwrap();
+            let top_label = texts.iter().rposition(|painted| painted == "print").unwrap();
+            (at("under") < top_label, at("over") > top_label, texts)
+        };
+        // Apart, the lower field is live: its widget goes in with its own block.
+        program.stacks[1].pos = [0.0, 300.0];
+        let (under, over, texts) = order(&mut editor, &mut program);
+        assert!(under && over, "a live field painted out of its block's turn: {texts:?}");
+        program.stacks[1].pos = [0.0, 0.0];
+        let (under, over, texts) = order(&mut editor, &mut program);
+        assert!(under && over, "the lower field painted over the top block: {texts:?}");
+
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let layout = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        };
+        // The lower field's left edge just inside the top block, whose own field is clear.
+        let field = layout.program(&program).blocks[0].slots[0].rect;
+        program.stacks[1].pos = [field.min.x - 4.0, 0.0];
+        assert!(layout.program(&program).blocks[0].slots[0].covered);
+        let at = field.left_center() + vec2(2.0, 0.0) + editor.view.pan;
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &Overlay::default(), at);
+        assert_eq!(editor.lifted(), Some(ids[1]));
+    }
+
+    #[test]
+    fn a_stack_on_top_covers_the_error_tags_under_it() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let mut add = program.instantiate(&language, "add").unwrap();
+        add.inputs.get_mut("a").unwrap().literal = Some("abc".into());
+        let print = program.instantiate(&language, "print").unwrap();
+        for block in [add, print] {
+            program.stacks.push(block_parse::Stack {
+                pos: [0.0, 0.0],
+                blocks: vec![block],
+            });
+        }
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let texts = frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let tag = texts.iter().position(|painted| painted.contains("number")).unwrap();
+        let label = texts.iter().rposition(|painted| painted == "print").unwrap();
+        assert!(tag < label, "the tag painted over the stack on top: {texts:?}");
+    }
+
+    #[test]
+    fn a_stack_on_top_covers_the_markers_under_it() {
+        let language = tiny();
+        let mut program = Program::new(&language);
+        let lower = program.instantiate(&language, "print").unwrap();
+        let lower_id = lower.id;
+        let mut top = program.instantiate(&language, "print").unwrap();
+        top.inputs.get_mut("value").unwrap().literal = Some("top".into());
+        for (block, x) in [(lower, 0.0), (top, 120.0)] {
+            program.stacks.push(block_parse::Stack {
+                pos: [x, 0.0],
+                blocks: vec![block],
+            });
+        }
+        let overlay = Overlay {
+            annotations: vec![block_parse::host::Annotation {
+                block: lower_id,
+                severity: block_parse::ast::Severity::Warning,
+                message: "noted".into(),
+            }],
+            ..Overlay::default()
+        };
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        let texts = frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        let note = texts.iter().position(|painted| painted == "noted").unwrap();
+        let label = texts.iter().rposition(|painted| painted == "print").unwrap();
+        assert!(note < label, "the annotation painted over the stack after it: {texts:?}");
+    }
+
+    #[test]
+    fn a_covered_switch_is_neither_live_nor_a_handle() {
+        let (language, mut program, ctx, switch, _) = codon_on_canvas();
+        let codon = program.stacks[0].blocks[0].id;
+        let top = program.instantiate(&language, "start").unwrap();
+        let top_id = top.id;
+        let canvas = switch - codon_editor().view.pan;
+        program.stacks.push(block_parse::Stack {
+            pos: [canvas.x - 6.0, 0.0],
+            blocks: vec![top],
+        });
+        let mut live = Overlay::default();
+        live.switches.insert(codon, false);
+
+        let mut editor = codon_editor();
+        let mut events = Vec::new();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: switch,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for input in [vec![egui::Event::PointerMoved(switch)], vec![button(true)], vec![button(false)]] {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                events: input,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                events.extend(editor.show_with(ui, &language, &mut program, &live).events);
+            });
+            out.textures_delta.clear();
+        }
+        assert!(!events.iter().any(|event| matches!(event, EditorEvent::Switched(..))), "{events:?}");
+
+        let mut editor = codon_editor();
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &live, switch);
+        assert_eq!(editor.lifted(), Some(top_id));
     }
 
     fn codon_editor() -> BlockEditor {

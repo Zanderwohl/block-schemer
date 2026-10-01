@@ -34,6 +34,13 @@ const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
 const GRID_GAP: f32 = 24.0;
 
+mod scene;
+
+use scene::mark_covered;
+pub use scene::{
+    Form, PlacedBlock, PlacedLabel, PlacedSlot, Scene, Seam, Section, SlotContent, StackForm, StackHead,
+};
+
 pub fn append_text(hint: &str) -> String {
     format!("{hint}…")
 }
@@ -50,108 +57,6 @@ pub enum Font {
     Literal,
 }
 
-/// Canvas units.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Scene {
-    /// Draw order: parents first.
-    pub blocks: Vec<PlacedBlock>,
-    pub seams: Vec<Seam>,
-    pub heads: Vec<StackHead>,
-    pub bounds: Rect,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlacedBlock {
-    pub id: BlockId,
-    /// Includes a hat's rise, not the tab.
-    pub rect: Rect,
-    pub form: Form,
-    pub swatch: Swatch,
-    pub labels: Vec<PlacedLabel>,
-    pub slots: Vec<PlacedSlot>,
-    /// Rows and arms, excluding branch mouths.
-    pub hit: Vec<Rect>,
-    /// Where the block's switch sits, if its language gives it one.
-    pub switch: Option<Rect>,
-    pub depth: u16,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Form {
-    Stack(StackForm),
-    Reporter {
-        shape: Shape,
-        /// Sizes the ends however many rows follow: the first row's height,
-        /// up to `MAX_END`.
-        head: f32,
-        /// The first row's center, from the top; markers point at it.
-        first_row: f32,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StackForm {
-    pub top: TopEdge,
-    pub bottom: BottomEdge,
-    /// Top to bottom.
-    pub sections: Vec<Section>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Section {
-    Row { top: f32, bottom: f32 },
-    Branch { top: f32, bottom: f32 },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlacedLabel {
-    /// Left-center.
-    pub at: Pos2,
-    pub text: String,
-    pub faint: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PlacedSlot {
-    pub parent: BlockId,
-    /// A list's empty slot has its length as index.
-    pub slot: Slot,
-    pub ty: String,
-    /// Shown while the slot is blank.
-    pub hint: String,
-    pub rect: Rect,
-    pub shape: Shape,
-    /// The owning block's, for empty slots and edges.
-    pub swatch: Swatch,
-    pub content: SlotContent,
-}
-
-impl PlacedSlot {
-    pub fn is_field(&self) -> bool {
-        match &self.content {
-            SlotContent::Literal { .. } => true,
-            SlotContent::Append { kind } => is_typed(kind),
-            SlotContent::Empty | SlotContent::Plugged(_) => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlotContent {
-    Literal {
-        kind: LiteralKind,
-        text: String,
-        /// The validator's message; `None` while the field has focus.
-        error: Option<String>,
-    },
-    /// Needs a reporter.
-    Empty,
-    Plugged(BlockId),
-    /// After a list's items, never stored. Typing into it appends, for a
-    /// `kind` typed as text.
-    Append { kind: LiteralKind },
-}
-
 /// Not filled in yet: shown as its hint and not checked.
 pub fn is_blank(text: &str) -> bool {
     text.trim().is_empty()
@@ -160,21 +65,6 @@ pub fn is_blank(text: &str) -> bool {
 /// Typed as text, rather than ticked, chosen or not typed at all.
 pub fn is_typed(kind: &LiteralKind) -> bool {
     !matches!(kind, LiteralKind::None | LiteralKind::Bool | LiteralKind::Choice(_))
-}
-
-/// Where a statement run's top-left can connect.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Seam {
-    pub target: Target,
-    pub at: Pos2,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StackHead {
-    pub block: BlockId,
-    pub top_left: Pos2,
-    pub width: f32,
-    pub is_hat: bool,
 }
 
 /// A laid-out run of blocks outside the program: a drag in hand.
@@ -202,34 +92,6 @@ pub struct PaletteEntry {
     pub rect: Rect,
 }
 
-impl Scene {
-    fn empty() -> Self {
-        Self {
-            blocks: Vec::new(),
-            seams: Vec::new(),
-            heads: Vec::new(),
-            bounds: Rect::NOTHING,
-        }
-    }
-
-    pub fn slots(&self) -> impl Iterator<Item = &PlacedSlot> {
-        self.blocks.iter().flat_map(|block| &block.slots)
-    }
-
-    /// The topmost block under `point`. Children draw after parents, so the
-    /// last hit is the deepest.
-    pub fn hit(&self, point: Pos2) -> Option<&PlacedBlock> {
-        self.blocks
-            .iter()
-            .rev()
-            .find(|block| block.hit.iter().any(|rect| rect.contains(point)))
-    }
-
-    pub fn slot_at(&self, point: Pos2) -> Option<&PlacedSlot> {
-        self.slots().filter(|slot| slot.rect.contains(point)).last()
-    }
-}
-
 impl Palette {
     pub fn entry_at(&self, point: Pos2) -> Option<&PaletteEntry> {
         self.entries.iter().find(|entry| entry.rect.contains(point))
@@ -253,6 +115,7 @@ impl Layout<'_> {
     pub fn program(&self, program: &Program) -> Scene {
         let mut scene = Scene::empty();
         for stack in &program.stacks {
+            let first = scene.blocks.len();
             let origin = pos2(stack.pos[0], stack.pos[1]);
             let mut y = origin.y;
             for (index, block) in self.unlifted(&stack.blocks).iter().enumerate() {
@@ -268,13 +131,18 @@ impl Layout<'_> {
                 place(&laid, pos2(origin.x, y), 0, &mut scene);
                 y += laid.size.y;
             }
+            if scene.blocks.len() > first {
+                scene.stacks.push(first..scene.blocks.len());
+            }
         }
+        mark_covered(&mut scene);
         scene
     }
 
     pub fn run(&self, blocks: &[Block], origin: Pos2) -> Run {
         let mut scene = Scene::empty();
         let height = self.place_sequence(blocks, origin, 0, &mut scene);
+        scene.stacks.push(0..scene.blocks.len());
         let width = scene.blocks.first().map_or(0.0, |block| block.rect.width());
         Run {
             scene,
@@ -314,6 +182,8 @@ impl Layout<'_> {
             }
             y += PALETTE_GAP;
         }
+        // Entries never overlap, so one range will do.
+        scene.stacks.push(0..scene.blocks.len());
         Palette {
             scene,
             entries,
@@ -940,6 +810,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
         slots: Vec::new(),
         hit,
         switch: laid.switch.map(|rect| rect.translate(offset)),
+        switch_covered: false,
         depth,
     });
 
@@ -971,6 +842,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             shape: slot.shape,
             swatch: laid.swatch,
             content,
+            covered: false,
         });
         if let LaidContent::Plugged(inner) = &slot.content {
             place(inner, slot_rect.min, depth + 1, scene);
@@ -1180,6 +1052,26 @@ mod tests {
         let print = placed(&scene, ids[0]);
         assert!(print.rect.width() > before);
         assert!(matches!(print.slots[0].content, SlotContent::Plugged(_)));
+    }
+
+    #[test]
+    fn a_later_stack_covers_the_fields_under_it() {
+        let language = tiny();
+        let (mut program, ids) = with_stack(&language, &["print"]);
+        let top = program.instantiate(&language, "print").unwrap();
+        let top_id = top.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [100.0, 50.0],
+            blocks: vec![top],
+        });
+
+        let scene = scene_of(&language, &program);
+        assert!(placed(&scene, ids[0]).slots.iter().all(|slot| slot.covered && !slot.is_field()));
+        assert!(placed(&scene, top_id).slots.iter().all(|slot| !slot.covered && slot.is_field()));
+
+        program.stacks[1].pos = [100.0, 400.0];
+        let scene = scene_of(&language, &program);
+        assert!(placed(&scene, ids[0]).slots.iter().all(|slot| !slot.covered));
     }
 
     #[test]
