@@ -131,9 +131,7 @@ pub fn top_edge(x0: f32, width: f32, y: f32, top: TopEdge) -> Vec<Pos2> {
     points
 }
 
-/// Pointed beside a first row `head` tall; below it the sides run straight
-/// down to corners cut at the same angle. One row (`head` the full height)
-/// is a plain hexagon.
+/// Pointed beside a first row `head` tall, with straight sides below.
 pub fn hexagon(rect: Rect, head: f32) -> Vec<Pos2> {
     let half = (head / 2.0).min(rect.height() / 2.0);
     let mid = rect.min.y + half;

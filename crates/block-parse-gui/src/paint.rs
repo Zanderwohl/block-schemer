@@ -354,7 +354,7 @@ pub fn tick(painter: &Painter, center: Pos2, size: f32, stroke: Stroke) {
     painter.add(egui::Shape::line(tick.to_vec(), stroke));
 }
 
-/// `head` is the first row's height, which sizes the ends.
+/// `head` sizes the ends.
 fn fill(painter: &Painter, shape: Shape, rect: Rect, head: f32, color: Color32, edge: Stroke, zoom: f32) {
     match shape {
         Shape::Round => {

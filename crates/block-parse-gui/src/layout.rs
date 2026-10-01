@@ -27,14 +27,12 @@ pub const SWITCH_SIZE: f32 = 16.0;
 /// Of a `Body` block's later rows, past the first row's start.
 pub const BODY_INDENT: f32 = 16.0;
 pub const APPEND_WIDTH: f32 = 30.0;
-/// The tallest a reporter's ends grow.
 pub const MAX_END: f32 = 40.0;
 const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
 const GRID_GAP: f32 = 24.0;
 
-/// What a list's empty slot shows.
 pub fn append_text(hint: &str) -> String {
     format!("{hint}…")
 }
@@ -116,7 +114,7 @@ pub struct PlacedSlot {
     /// A list's empty slot has its length as index.
     pub slot: Slot,
     pub ty: String,
-    /// Drawn in gray while the slot is blank.
+    /// Shown while the slot is blank.
     pub hint: String,
     pub rect: Rect,
     pub shape: Shape,
@@ -126,7 +124,6 @@ pub struct PlacedSlot {
 }
 
 impl PlacedSlot {
-    /// Edited in place: a literal, or the empty slot of a list typed into.
     pub fn is_field(&self) -> bool {
         match &self.content {
             SlotContent::Literal { .. } => true,
@@ -643,7 +640,6 @@ impl Layout<'_> {
         }
     }
 
-    /// The list's items, then the empty slot that appends to it.
     fn list(&self, block: &Block, list: &ListDef) -> Vec<Item> {
         // As the list will be once the run in hand is out of it.
         let len = block.list_len(&list.name, self.lifted);

@@ -91,7 +91,7 @@ pub struct BlockConfig {
     pub spec: String,
     #[serde(default)]
     pub layout: BlockLayout,
-    /// Shown in gray in a blank slot, by input or list name; the name itself
+    /// Shown in a blank slot, by input or list name; the name itself
     /// otherwise. Free text.
     #[serde(default)]
     pub hints: BTreeMap<String, String>,
@@ -183,10 +183,9 @@ pub enum BlockLayout {
     /// One row, before any branch.
     #[default]
     Inline,
-    /// The first `n` inputs share the first row, a list counting as one input;
-    /// each later input, and each item of a later list, gets an indented row
-    /// of its own. A label joins the row of the input after it. As Emacs's
-    /// `lisp-indent-function`. Blocks without branches only.
+    /// The first `n` inputs, a list counting as one, share the first row;
+    /// each later input and list item gets an indented row. Blocks without
+    /// branches only. See `documentation/03-variadic.md`.
     Body(usize),
 }
 

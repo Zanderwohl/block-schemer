@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::edit::Location;
 use crate::language::{Language, Part, ron_options};
 
-/// 2 added list inputs.
 pub const FORMAT_VERSION: u32 = 2;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
@@ -111,7 +110,6 @@ pub struct Input {
 }
 
 impl Input {
-    /// A list item holding nothing.
     pub fn is_hole(&self) -> bool {
         self.literal.is_none() && self.block.is_none()
     }
@@ -286,8 +284,8 @@ impl Program {
     }
 
     /// False if the block is gone or the slot is past a list's empty slot.
-    /// Text at the empty slot appends an item; emptying an item's text makes
-    /// it a hole, so the field that was typed in keeps one address throughout.
+    /// Emptying an item's text makes it a hole, so a field keeps one address
+    /// as its item comes and goes.
     pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let Some(block) = self.find_mut(block) else {
             return false;
