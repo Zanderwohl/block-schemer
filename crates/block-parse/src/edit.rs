@@ -1,7 +1,7 @@
 //! Tree operations, addressed by [`BlockId`] because positions go stale.
 
 use crate::language::{BlockKind, Fit, Language};
-use crate::program::{Block, BlockId, MAX_DEPTH, Program, Stack, find_in};
+use crate::program::{Block, BlockId, MAX_DEPTH, Program, Slot, Stack, find_in};
 
 /// Blocks out of the program: a statement and everything below it, or one
 /// reporter.
@@ -15,7 +15,7 @@ pub struct Fragment {
 pub enum Location {
     Stack { stack: usize, index: usize },
     Branch { parent: BlockId, branch: String, index: usize },
-    Input { parent: BlockId, input: String },
+    Input { parent: BlockId, slot: Slot },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,15 +27,16 @@ pub enum Target {
     /// The stack moves to `pos` so its blocks stay put on screen. The caller
     /// supplies it because only layout knows the fragment's height.
     Above { head: BlockId, pos: [f32; 2] },
-    /// Ejects any reporter already there.
-    Input { parent: BlockId, input: String },
+    /// Ejects any reporter already there. A list's empty slot appends.
+    Input { parent: BlockId, slot: Slot },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttachError {
     NoSuchBlock(BlockId),
     NoSuchBranch { parent: BlockId, branch: String },
-    NoSuchInput { parent: BlockId, input: String },
+    /// Also an index past a list's empty slot.
+    NoSuchInput { parent: BlockId, slot: Slot },
     HatNotAtTop,
     AfterCap,
     /// A fragment ending in a cap would cut off the blocks below the target.
@@ -136,22 +137,27 @@ impl Program {
 
         let depth = match target {
             Target::Free { .. } => 1,
-            Target::Input { parent, input } => {
+            Target::Input { parent, slot } => {
                 let output = def.kind.output().ok_or(AttachError::WrongKind)?;
                 if fragment.blocks.len() != 1 {
                     return Err(AttachError::WrongKind);
                 }
                 let owner = find(*parent).ok_or(AttachError::NoSuchBlock(*parent))?;
-                let slot = language
-                    .block(&owner.opcode)
-                    .and_then(|def| def.input(input))
-                    .ok_or_else(|| AttachError::NoSuchInput {
-                        parent: *parent,
-                        input: input.clone(),
-                    })?;
-                if language.fit(output, &slot.ty) == Fit::No {
+                let owner_def = language.block(&owner.opcode);
+                let ty = match slot.item {
+                    None => owner_def.and_then(|def| def.input(&slot.input)).map(|input| &input.ty),
+                    Some(index) => owner_def
+                        .and_then(|def| def.list(&slot.input))
+                        .filter(|_| index <= owner.list_len(&slot.input, lifted))
+                        .map(|list| &list.ty),
+                };
+                let ty = ty.ok_or_else(|| AttachError::NoSuchInput {
+                    parent: *parent,
+                    slot: slot.clone(),
+                })?;
+                if language.fit(output, ty) == Fit::No {
                     return Err(AttachError::TypeMismatch {
-                        slot: slot.ty.clone(),
+                        slot: ty.clone(),
                         output: output.to_owned(),
                     });
                 }
@@ -264,10 +270,10 @@ impl Program {
                 stack.blocks.extend(below);
                 stack.pos = pos;
             }
-            Target::Input { parent, input } => {
+            Target::Input { parent, slot } => {
                 let owner = self.find_mut(parent).expect("checked by can_attach");
                 let reporter = blocks.into_iter().next().expect("checked by can_attach");
-                let slot = owner.inputs.entry(input).or_default();
+                let slot = owner.slot_entry(&slot).expect("checked by can_attach");
                 let ejected = slot.block.replace(Box::new(reporter));
                 return Ok(ejected.map(|block| Fragment {
                     blocks: vec![*block],
@@ -298,7 +304,7 @@ impl Program {
 
     fn renumber(&mut self, block: &mut Block) {
         block.id = self.fresh_id();
-        for input in block.inputs.values_mut() {
+        for input in block.inputs.values_mut().chain(block.lists.values_mut().flatten()) {
             if let Some(inner) = input.block.as_deref_mut() {
                 self.renumber(inner);
             }
@@ -313,12 +319,12 @@ impl Program {
     /// Deletes one block and what is nested in it; blocks below it close up.
     pub fn remove(&mut self, id: BlockId) -> Option<Block> {
         let removed = match self.locate(id)? {
-            Location::Input { parent, input } => *self
-                .find_mut(parent)?
-                .inputs
-                .get_mut(&input)?
-                .block
-                .take()?,
+            Location::Input { parent, slot } => {
+                let owner = self.find_mut(parent)?;
+                let removed = owner.slot_entry(&slot)?.block.take()?;
+                owner.trim_lists();
+                *removed
+            }
             Location::Stack { .. } | Location::Branch { .. } => {
                 let (seq, index) = self.sequence_of_mut(id)?;
                 seq.remove(index)
@@ -341,7 +347,7 @@ impl Program {
             Location::Branch { parent, branch, index } => {
                 Target::After(self.find(parent)?.branches.get(&branch)?[index - 1].id)
             }
-            Location::Input { parent, input } => Target::Input { parent, input },
+            Location::Input { parent, slot } => Target::Input { parent, slot },
         })
     }
 
@@ -361,10 +367,18 @@ impl Program {
 }
 
 fn take_run_in(block: &mut Block, id: BlockId) -> Option<Vec<Block>> {
-    for input in block.inputs.values_mut() {
+    let mut taken = None;
+    for input in block.inputs.values_mut().chain(block.lists.values_mut().flatten()) {
         if input.block.as_ref().is_some_and(|inner| inner.id == id) {
-            return input.block.take().map(|inner| vec![*inner]);
+            taken = input.block.take().map(|inner| vec![*inner]);
+            break;
         }
+    }
+    if taken.is_some() {
+        block.trim_lists();
+        return taken;
+    }
+    for input in block.inputs.values_mut().chain(block.lists.values_mut().flatten()) {
         if let Some(inner) = input.block.as_deref_mut()
             && let Some(found) = take_run_in(inner, id)
         {
@@ -387,9 +401,8 @@ fn sequence_in(seq: &[Block], id: BlockId) -> Option<(&[Block], usize)> {
         return Some((seq, index));
     }
     seq.iter().find_map(|block| {
-        let inputs = block.inputs.values().filter_map(|input| input.block.as_deref());
-        inputs
-            .into_iter()
+        block
+            .reporters()
             .find_map(|inner| sequence_in(std::slice::from_ref(inner), id).filter(|_| inner.id != id))
             .or_else(|| block.branches.values().find_map(|seq| sequence_in(seq, id)))
     })
@@ -403,7 +416,7 @@ fn sequence_in_mut(seq: &mut Vec<Block>, id: BlockId) -> Option<(&mut Vec<Block>
 }
 
 fn sequence_in_block_mut(block: &mut Block, id: BlockId) -> Option<(&mut Vec<Block>, usize)> {
-    for input in block.inputs.values_mut() {
+    for input in block.inputs.values_mut().chain(block.lists.values_mut().flatten()) {
         if let Some(inner) = input.block.as_deref_mut()
             && let Some(found) = sequence_in_block_mut(inner, id)
         {
@@ -420,6 +433,7 @@ fn sequence_in_block_mut(block: &mut Block, id: BlockId) -> Option<(&mut Vec<Blo
 mod tests {
     use super::*;
     use crate::literal::Validators;
+    use crate::program::Input;
 
     fn tiny() -> Language {
         Language::from_ron(
@@ -608,7 +622,7 @@ mod tests {
         let ids = stack(&mut program, &language, &["print"]);
         let slot = Target::Input {
             parent: ids[0],
-            input: "value".into(),
+            slot: Slot::input("value"),
         };
 
         let join = fresh(&mut program, &language, "join");
@@ -624,6 +638,168 @@ mod tests {
         );
     }
 
+    fn scheme() -> Language {
+        Language::from_ron(
+            include_str!("../../../examples/languages/scheme.ron"),
+            &Validators::new(),
+        )
+        .unwrap()
+    }
+
+    fn items(program: &Program, id: BlockId, list: &str) -> Vec<String> {
+        let block = program.find(id).unwrap();
+        let items = block.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);
+        items
+            .iter()
+            .map(|item| match (&item.block, &item.literal) {
+                (Some(inner), _) => inner.opcode.clone(),
+                (None, Some(text)) => text.clone(),
+                (None, None) => "_".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_empty_slot_appends_and_nothing_lands_past_it() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        let at = |index| Target::Input {
+            parent: ids[0],
+            slot: Slot::item("args", index),
+        };
+
+        let car = fresh(&mut program, &language, "car");
+        assert_eq!(
+            program.can_attach(&language, &car, &at(1)),
+            Err(AttachError::NoSuchInput {
+                parent: ids[0],
+                slot: Slot::item("args", 1)
+            })
+        );
+        program.attach(&language, car, at(0)).unwrap();
+        program.set_literal(ids[0], &Slot::item("args", 1), "2".into());
+        let cdr = fresh(&mut program, &language, "cdr");
+        program.attach(&language, cdr, at(2)).unwrap();
+        assert_eq!(items(&program, ids[0], "args"), ["car", "2", "cdr"]);
+
+        let list = fresh(&mut program, &language, "list");
+        let ejected = program.attach(&language, list, at(0)).unwrap().unwrap();
+        assert_eq!(ejected.blocks[0].opcode, "car");
+        assert_eq!(items(&program, ids[0], "args"), ["list", "2", "cdr"]);
+
+        let binding = fresh(&mut program, &language, "binding");
+        assert!(matches!(
+            program.can_attach(&language, &binding, &at(3)),
+            Err(AttachError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn taking_an_item_out_leaves_a_hole_unless_it_was_last() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        let mut placed = Vec::new();
+        for index in 0..3 {
+            let car = fresh(&mut program, &language, "car");
+            placed.push(car.blocks[0].id);
+            let target = Target::Input {
+                parent: ids[0],
+                slot: Slot::item("args", index),
+            };
+            program.attach(&language, car, target).unwrap();
+        }
+
+        program.detach(placed[1]).unwrap();
+        assert_eq!(items(&program, ids[0], "args"), ["car", "_", "car"]);
+        program.remove(placed[2]).unwrap();
+        assert_eq!(items(&program, ids[0], "args"), ["car"], "trailing holes go");
+    }
+
+    #[test]
+    fn typing_at_the_empty_slot_appends_and_clearing_makes_a_hole() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        let item = |index| Slot::item("args", index);
+
+        assert!(program.set_literal(ids[0], &item(0), "1".into()));
+        assert!(program.set_literal(ids[0], &item(1), "2".into()));
+        assert!(!program.set_literal(ids[0], &item(3), "4".into()), "past the empty slot");
+        assert!(program.set_literal(ids[0], &item(2), "".into()), "nothing to append");
+        assert_eq!(items(&program, ids[0], "args"), ["1", "2"]);
+
+        program.set_literal(ids[0], &item(0), "".into());
+        assert_eq!(items(&program, ids[0], "args"), ["_", "2"]);
+        program.set_literal(ids[0], &item(1), "".into());
+        assert!(items(&program, ids[0], "args").is_empty());
+    }
+
+    #[test]
+    fn an_item_moves_as_if_already_detached() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        program.set_literal(ids[0], &Slot::item("args", 0), "1".into());
+        let car = fresh(&mut program, &language, "car");
+        let car_id = car.blocks[0].id;
+        let last = Target::Input {
+            parent: ids[0],
+            slot: Slot::item("args", 1),
+        };
+        program.attach(&language, car, last.clone()).unwrap();
+
+        // Lifted, the last item leaves a trailing hole, so index 1 is the
+        // empty slot again and 2 is past it.
+        let run = program.run_at(car_id).unwrap();
+        assert_eq!(program.can_move(&language, &run, &last), Ok(()));
+        let past = Target::Input {
+            parent: ids[0],
+            slot: Slot::item("args", 2),
+        };
+        let mut detached = program.clone();
+        detached.detach(car_id).unwrap();
+        assert_eq!(program.can_move(&language, &run, &past), detached.can_attach(&language, &run, &past));
+        assert!(program.can_move(&language, &run, &past).is_err());
+    }
+
+    #[test]
+    fn an_item_goes_back_home_as_it_was() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        let mut placed = Vec::new();
+        for index in 0..3 {
+            let car = fresh(&mut program, &language, "car");
+            placed.push(car.blocks[0].id);
+            let target = Target::Input {
+                parent: ids[0],
+                slot: Slot::item("args", index),
+            };
+            program.attach(&language, car, target).unwrap();
+        }
+        let before = program.stacks.clone();
+        for id in placed {
+            let home = program.home_of(id).unwrap();
+            let run = program.detach(id).unwrap();
+            program.attach(&language, run, home).unwrap();
+            assert_eq!(program.stacks, before, "{id:?}");
+        }
+    }
+
+    #[test]
+    fn loading_drops_trailing_holes() {
+        let language = scheme();
+        let mut program = Program::new(&language);
+        let ids = stack(&mut program, &language, &["add"]);
+        let args = vec![Input::default(), Input { literal: Some("1".into()), block: None }, Input::default()];
+        program.find_mut(ids[0]).unwrap().lists.insert("args".into(), args);
+
+        let back = Program::from_ron(&program.to_ron()).unwrap();
+        assert_eq!(items(&back, ids[0], "args"), ["_", "1"]);
+    }
+
     #[test]
     fn strict_types_refuse_what_loose_ones_convert() {
         for (language, allowed) in [(tiny(), true), (strict(), false)] {
@@ -632,7 +808,7 @@ mod tests {
             let add = fresh(&mut program, &language, "add");
             let slot = Target::Input {
                 parent: ids[0],
-                input: "value".into(),
+                slot: Slot::input("value"),
             };
             assert_eq!(
                 program.can_attach(&language, &add, &slot).is_ok(),
@@ -652,7 +828,7 @@ mod tests {
         let join_id = join.blocks[0].id;
         let slot = Target::Input {
             parent: ids[0],
-            input: "value".into(),
+            slot: Slot::input("value"),
         };
         program.attach(&language, join, slot).unwrap();
 
@@ -793,7 +969,7 @@ mod tests {
         let language = tiny();
         let mut program = Program::new(&language);
         let ids = stack(&mut program, &language, &["when_run", "print"]);
-        program.set_literal(ids[1], "value", "  12.3e ".into());
+        program.set_literal(ids[1], &Slot::input("value"), "  12.3e ".into());
 
         let text = program.to_ron();
         let back = Program::from_ron(&text).unwrap();

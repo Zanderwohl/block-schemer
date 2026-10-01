@@ -359,6 +359,14 @@ impl BlockDef {
         self.lists().find(|list| list.name == name)
     }
 
+    /// The type a slot of this block takes, whatever the item index.
+    pub fn slot_type(&self, slot: &crate::program::Slot) -> Option<&str> {
+        match slot.item {
+            None => self.input(&slot.input).map(|input| input.ty.as_str()),
+            Some(_) => self.list(&slot.input).map(|list| list.ty.as_str()),
+        }
+    }
+
     pub fn input(&self, name: &str) -> Option<&InputDef> {
         self.inputs().find(|input| input.name == name)
     }

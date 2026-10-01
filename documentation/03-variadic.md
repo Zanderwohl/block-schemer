@@ -42,8 +42,8 @@ name or the other way round.
 
 The empty slot after a list's last item is drawn by the GUI and never stored.
 Dropping a reporter on it, or typing into it, appends an item. For a `Bool` or
-`Choice` type the empty slot is the checkbox or menu in its blank state, and
-changing it appends.
+`Choice` type it takes drops only; ticking or choosing into it is not done
+yet.
 
 Slots are addressed by name and, in a list, index:
 
@@ -55,17 +55,22 @@ pub struct Slot {
 }
 ```
 
-`Target::Input { parent, slot }`, `Program::set_literal(block, &Slot, text)` and
+`Target::Input { parent, slot }`, `Location::Input`, `AttachError::NoSuchInput`,
+`Program::set_literal(block, &Slot, text)`, `Block::slot` and
 `Problem::slot: Option<(BlockId, Slot)>` all take it. A target's index may equal
 the list's length, meaning the empty slot; any larger is `NoSuchInput`.
+`Block::list_len(list, lifted)` is that length once a lifted reporter is out
+of the list, so a drag sees the list as it will be: lifting the last item
+leaves a trailing hole, which does not count.
 
 - Dropping on an item ejects the reporter already there, as on a single input.
 - Dragging a reporter out of an item leaves the item's literal, or a hole if it
   had none; trailing holes then go.
-- A list item's field that is empty when it loses focus becomes a hole, so
-  clearing the last item removes it. An empty string is a literal like any
-  other only in a single input; in a list it must come from a reporter or a
-  validator that reads quotes.
+- Emptying a list item's text makes it a hole at once, so clearing the last
+  item removes it. The empty slot and the item typing into it creates share an
+  address, so the field keeps focus as the item comes and goes. An empty
+  string is a literal like any other only in a single input; in a list it
+  must come from a reporter or a validator that reads quotes.
 - Depth counts list items as it counts inputs.
 
 Until inserting between items and closing holes arrive (see Deferred),
@@ -91,7 +96,9 @@ pub struct List {
 ```
 
 `Node::list(name) -> Option<&[Expr]>` sits beside `arg` and `branch`. A `+` list
-with no items is a `TooFewItems` error on its block.
+with no items is a `TooFewItems` error on its block, with the node kept in
+`recovered`. A list the block does not define keeps its items as
+`UnknownInput` warnings, each with its reporter recovered.
 
 ## Layout
 

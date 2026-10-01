@@ -2,7 +2,7 @@ use block_parse::ast::Script;
 use block_parse::host::{Overlay, RunCommand};
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, LiteralKind};
-use block_parse::program::{BlockId, Program};
+use block_parse::program::{BlockId, Program, Slot};
 use block_parse::Language;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Frame, Key, LayerId, Margin, Modifiers, Order, Pos2,
@@ -229,7 +229,7 @@ impl BlockEditor {
             language,
             measure: &measure,
             swatches: &swatches,
-            editing: edit.as_ref().map(|edit| (edit.block, edit.input.as_str())),
+            editing: edit.as_ref().map(|edit| (edit.block, &edit.slot)),
             validate: true,
             lifted: None,
         };
@@ -261,7 +261,7 @@ impl BlockEditor {
             let on_field = over
                 .filter(|at| canvas_rect.contains(*at))
                 .and_then(|at| scene.slot_at(t.canvas(at)))
-                .is_some_and(|slot| open.is(slot.parent, &slot.input));
+                .is_some_and(|slot| open.is(slot.parent, &slot.slot));
             if !on_menu && !on_field {
                 self.choice = None;
             }
@@ -395,7 +395,12 @@ impl BlockEditor {
         }
         if !read_only {
             for slot in scene.slots().filter(|slot| slot.is_field()) {
-                if let SlotContent::Literal { kind, text, .. } = &slot.content {
+                let field = match &slot.content {
+                    SlotContent::Literal { kind, text, .. } => Some((kind, text.as_str())),
+                    SlotContent::Append { kind } => Some((kind, "")),
+                    SlotContent::Empty | SlotContent::Plugged(_) => None,
+                };
+                if let Some((kind, text)) = field {
                     let rect = t.rect(slot.rect);
                     if canvas_rect.intersects(rect)
                         && self.literal_field(&mut fields, rect, slot, kind, text, language, program, t.zoom, &theme)
@@ -429,8 +434,8 @@ impl BlockEditor {
                 .slot_at(t.canvas(at))
                 .filter(|slot| !on_palette && !read_only && slot.is_field())
                 .and_then(|slot| match &slot.content {
-                    SlotContent::Literal { kind, .. } => Some(kind),
-                    SlotContent::Empty | SlotContent::Plugged(_) | SlotContent::Append => None,
+                    SlotContent::Literal { kind, .. } | SlotContent::Append { kind } => Some(kind),
+                    SlotContent::Empty | SlotContent::Plugged(_) => None,
                 });
             let on_switch = (!on_palette)
                 .then(|| switch_at(&scene, overlay, t.canvas(at)))
@@ -637,7 +642,7 @@ impl BlockEditor {
     /// starts, so nothing depends on draw order. True if the program changed.
     pub fn commit_edit(&mut self, ctx: &egui::Context, language: &Language, program: &mut Program) -> bool {
         if let Some(edit) = &self.edit {
-            let id = self.field_id(edit.block, &edit.input);
+            let id = self.field_id(edit.block, &edit.slot);
             ctx.memory_mut(|memory| memory.surrender_focus(id));
         }
         self.settle_edit(ctx, language, program)
@@ -671,7 +676,7 @@ impl BlockEditor {
         };
         let field = scene
             .slots()
-            .find(|slot| open.is(slot.parent, &slot.input))
+            .find(|slot| open.is(slot.parent, &slot.slot))
             .filter(|slot| canvas_rect.intersects(t.rect(slot.rect)))
             .and_then(|slot| match &slot.content {
                 SlotContent::Literal {
@@ -704,11 +709,13 @@ impl BlockEditor {
             return false;
         };
         self.choice = None;
-        options[index] != *text && program.set_literal(slot.parent, &slot.input, options[index].clone())
+        options[index] != *text && program.set_literal(slot.parent, &slot.slot, options[index].clone())
     }
 
-    fn field_id(&self, block: BlockId, input: &str) -> egui::Id {
-        self.id.with((block, input))
+    /// A list's empty slot and the item typing into it creates share an id,
+    /// so focus survives the append.
+    fn field_id(&self, block: BlockId, slot: &Slot) -> egui::Id {
+        self.id.with((block, slot))
     }
 
     /// Normalizes a literal that lost focus without its field being drawn,
@@ -718,7 +725,7 @@ impl BlockEditor {
         let Some(edit) = self.edit.clone() else {
             return false;
         };
-        let id = self.field_id(edit.block, &edit.input);
+        let id = self.field_id(edit.block, &edit.slot);
         if ctx.memory(|memory| memory.has_focus(id)) {
             return false;
         }
@@ -728,14 +735,14 @@ impl BlockEditor {
         };
         let ty = language
             .block(&block.opcode)
-            .and_then(|def| def.input(&edit.input))
-            .map(|input| input.ty.clone());
-        let text = block.inputs.get(&edit.input).and_then(|input| input.literal.clone());
+            .and_then(|def| def.slot_type(&edit.slot))
+            .map(str::to_owned);
+        let text = block.slot(&edit.slot).and_then(|input| input.literal.clone());
         let (Some(ty), Some(text)) = (ty, text) else {
             return false;
         };
         let tidied = language.normalize_literal(&ty, &text);
-        tidied != text && program.set_literal(edit.block, &edit.input, tidied)
+        tidied != text && program.set_literal(edit.block, &edit.slot, tidied)
     }
 
     /// True if the program changed.
@@ -752,21 +759,21 @@ impl BlockEditor {
         zoom: f32,
         theme: &Theme,
     ) -> bool {
-        let id = self.field_id(slot.parent, &slot.input);
+        let id = self.field_id(slot.parent, &slot.slot);
         match kind {
             LiteralKind::Bool => {
                 let mut on = text == "true";
                 if checkbox(ui, rect.center(), zoom, &mut on).changed() {
-                    return program.set_literal(slot.parent, &slot.input, on.to_string());
+                    return program.set_literal(slot.parent, &slot.slot, on.to_string());
                 }
                 false
             }
             LiteralKind::Choice(_) => {
                 if ui.interact(rect, id, Sense::click()).clicked() {
-                    let open = self.choice.as_ref().is_some_and(|open| open.is(slot.parent, &slot.input));
+                    let open = self.choice.as_ref().is_some_and(|open| open.is(slot.parent, &slot.slot));
                     self.choice = (!open).then(|| OpenChoice {
                         block: slot.parent,
-                        input: slot.input.clone(),
+                        slot: slot.slot.clone(),
                         scroll: 0.0,
                     });
                 }
@@ -790,20 +797,20 @@ impl BlockEditor {
                 if response.gained_focus() {
                     select_all(ui.ctx(), id, buffer.chars().count());
                 }
-                let this = |edit: &LiteralEdit| edit.block == slot.parent && edit.input == slot.input;
+                let this = |edit: &LiteralEdit| edit.block == slot.parent && edit.slot == slot.slot;
                 if response.has_focus() {
                     self.edit = Some(LiteralEdit {
                         block: slot.parent,
-                        input: slot.input.clone(),
+                        slot: slot.slot.clone(),
                     });
                 } else if self.edit.as_ref().is_some_and(this) {
                     self.edit = None;
                 }
                 if response.lost_focus() {
                     let tidied = language.normalize_literal(&slot.ty, &buffer);
-                    return tidied != text && program.set_literal(slot.parent, &slot.input, tidied);
+                    return tidied != text && program.set_literal(slot.parent, &slot.slot, tidied);
                 }
-                response.changed() && program.set_literal(slot.parent, &slot.input, buffer)
+                response.changed() && program.set_literal(slot.parent, &slot.slot, buffer)
             }
         }
     }
@@ -832,15 +839,14 @@ fn find_snap(
 
     if let Some(output) = def.kind.output() {
         let probe = pos2(head_rect.min.x, head_rect.center().y);
-        // List items take no drops until `Target` can address them.
-        for slot in scene.slots().filter(|slot| slot.item.is_none()) {
+        for slot in scene.slots() {
             if language.fit(output, &slot.ty) == Fit::No {
                 continue;
             }
             let distance = probe.distance(pos2(slot.rect.min.x, slot.rect.center().y));
             let target = Target::Input {
                 parent: slot.parent,
-                input: slot.input.clone(),
+                slot: slot.slot.clone(),
             };
             let mark = SnapMark::Slot {
                 rect: slot.rect,
@@ -1049,7 +1055,7 @@ mod tests {
         let (language, _, mut editor) = dragging_the_tail();
         let (_, mut other, _) = dragging_the_tail();
         let second = other.stacks[0].blocks[1].id;
-        other.set_literal(second, "value", "another creature".into());
+        other.set_literal(second, &Slot::input("value"), "another creature".into());
         let before = other.stacks.clone();
 
         let Gesture::Dragging(drag) = std::mem::take(&mut editor.gesture) else {
@@ -1121,12 +1127,12 @@ mod tests {
             pos: [0.0, 0.0],
             blocks: vec![start],
         });
-        program.set_literal(id, "code", "ab".into());
+        program.set_literal(id, &Slot::input("code"), "ab".into());
 
         let editor = BlockEditor {
             edit: Some(LiteralEdit {
                 block: id,
-                input: "code".into(),
+                slot: Slot::input("code"),
             }),
             ..BlockEditor::default()
         };
@@ -1146,7 +1152,7 @@ mod tests {
     fn committing_normalizes_a_field_that_still_has_focus() {
         let (language, mut program, id, mut editor) = editing_a_code();
         let ctx = egui::Context::default();
-        let field = editor.field_id(id, "code");
+        let field = editor.field_id(id, &Slot::input("code"));
         ctx.memory_mut(|memory| memory.request_focus(field));
 
         assert!(!editor.settle_edit(&ctx, &language, &mut program), "still being typed into");
@@ -1445,6 +1451,72 @@ mod tests {
     }
 
     #[test]
+    fn typing_into_a_lists_empty_slot_appends_without_losing_focus() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "sums",
+                file: (extension: "s"),
+                types: { "number": (literal: Number) },
+                blocks: [(id: "sum", name: "Sum", kind: Reporter("number"), spec: "sum {xs:number*}")],
+            )"#,
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let sum = program.instantiate(&language, "sum").unwrap();
+        let id = sum.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![sum],
+        });
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        let overlay = Overlay::default();
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+        }
+        .program(&program);
+        let empty = scene.slots().next().unwrap().rect.translate(editor.view.pan);
+        let items = |program: &Program| -> Vec<Option<String>> {
+            let block = program.find(id).unwrap();
+            block.lists.get("xs").into_iter().flatten().map(|item| item.literal.clone()).collect()
+        };
+
+        for events in click(empty.center()) {
+            frame(&ctx, &mut editor, &language, &mut program, &overlay, events);
+        }
+        for key in ["4", "2"] {
+            frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![egui::Event::Text(key.into())]);
+        }
+        assert_eq!(items(&program), [Some("42".to_owned())]);
+        let typing = Some(LiteralEdit {
+            block: id,
+            slot: Slot::item("xs", 0),
+        });
+        assert_eq!(editor.edit, typing, "the new item has the focus the empty slot had");
+
+        let backspace = egui::Event::Key {
+            key: Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        for _ in 0..2 {
+            frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![backspace.clone()]);
+        }
+        assert!(items(&program).is_empty(), "emptied, the last item goes");
+        assert_eq!(editor.edit, typing, "and the field is the empty slot again");
+    }
+
+    #[test]
     fn a_choice_opens_its_own_menu_and_sets_what_is_picked() {
         let (language, mut program, ctx, field) = paint_on_canvas();
         let paint = program.stacks[0].blocks[0].id;
@@ -1454,7 +1526,7 @@ mod tests {
         for events in click(field.center()) {
             texts = frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
-        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")));
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, &Slot::input("hue"))));
         for option in ["green", "blue"] {
             assert!(texts.iter().any(|text| text == option), "{option} is not shown: {texts:?}");
         }
@@ -1472,7 +1544,7 @@ mod tests {
         for events in click(field.center()) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
-        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, &Slot::input("hue"))), "reopened");
         let escape = egui::Event::Key {
             key: Key::Escape,
             physical_key: None,
@@ -1486,7 +1558,7 @@ mod tests {
         for events in click(field.center()) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }
-        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, "hue")), "reopened");
+        assert!(editor.choice.as_ref().is_some_and(|open| open.is(paint, &Slot::input("hue"))), "reopened");
         for events in click(pos2(700.0, 500.0)) {
             frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), events);
         }

@@ -17,8 +17,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     later ones and later lists' items on indented rows of their own
     (`documentation/03-variadic.md`). A blank slot shows its input's name in
     gray, or the block's `hints` text for it; a list's empty slot shows it
-    with `…`. Lists are laid out and drawn, but `edit`,
-    the AST and the editor's fields and drops do not handle them yet.
+    with `…`. A `Slot` addresses an input, or a list item by index; the
+    index one past the last item appends.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the

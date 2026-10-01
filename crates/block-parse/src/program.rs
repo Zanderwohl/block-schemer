@@ -65,6 +65,40 @@ pub struct Block {
     pub branches: BTreeMap<String, Vec<Block>>,
 }
 
+/// A slot of a block: a single input, or one item of a list. Index `len` of
+/// a list is the empty slot after its items, which appends.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Slot {
+    pub input: String,
+    /// `None` for a single input.
+    pub item: Option<usize>,
+}
+
+impl Slot {
+    pub fn input(name: impl Into<String>) -> Self {
+        Self {
+            input: name.into(),
+            item: None,
+        }
+    }
+
+    pub fn item(list: impl Into<String>, index: usize) -> Self {
+        Self {
+            input: list.into(),
+            item: Some(index),
+        }
+    }
+}
+
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.item {
+            Some(index) => write!(f, "{}[{index}]", self.input),
+            None => write!(f, "{}", self.input),
+        }
+    }
+}
+
 /// The literal stays under a plugged reporter and returns when it is removed.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Input {
@@ -73,6 +107,13 @@ pub struct Input {
     pub literal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Box<Block>>,
+}
+
+impl Input {
+    /// A list item holding nothing.
+    pub fn is_hole(&self) -> bool {
+        self.literal.is_none() && self.block.is_none()
+    }
 }
 
 #[derive(Debug)]
@@ -100,13 +141,20 @@ impl Program {
         }
     }
 
+    /// Trailing holes in lists are dropped.
     pub fn from_ron(text: &str) -> Result<Self, ProgramError> {
-        with_deep_stack(|| {
+        let mut program: Self = with_deep_stack(|| {
             ron_options()
                 .with_recursion_limit(RON_RECURSION_LIMIT)
                 .from_str(text)
                 .map_err(ProgramError::Syntax)
-        })
+        })?;
+        for stack in &mut program.stacks {
+            for block in &mut stack.blocks {
+                block.trim_all();
+            }
+        }
+        Ok(program)
     }
 
     pub fn to_ron(&self) -> String {
@@ -236,17 +284,84 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// False if the block is gone.
-    pub fn set_literal(&mut self, block: BlockId, input: &str, text: String) -> bool {
+    /// False if the block is gone or the slot is past a list's empty slot.
+    /// Text at the empty slot appends an item; emptying an item's text makes
+    /// it a hole, so the field that was typed in keeps one address throughout.
+    pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let Some(block) = self.find_mut(block) else {
             return false;
         };
-        block.inputs.entry(input.to_owned()).or_default().literal = Some(text);
+        let Some(index) = slot.item else {
+            block.inputs.entry(slot.input.clone()).or_default().literal = Some(text);
+            return true;
+        };
+        let items = block.lists.entry(slot.input.clone()).or_default();
+        if index > items.len() {
+            return false;
+        }
+        if index == items.len() {
+            if text.is_empty() {
+                return true;
+            }
+            items.push(Input::default());
+        }
+        items[index].literal = (!text.is_empty()).then_some(text);
+        block.trim_lists();
         true
     }
 }
 
 impl Block {
+    pub fn slot(&self, slot: &Slot) -> Option<&Input> {
+        match slot.item {
+            None => self.inputs.get(&slot.input),
+            Some(index) => self.lists.get(&slot.input)?.get(index),
+        }
+    }
+
+    /// An item past a list's end is created at the empty slot, never beyond.
+    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> Option<&mut Input> {
+        match slot.item {
+            None => Some(self.inputs.entry(slot.input.clone()).or_default()),
+            Some(index) => {
+                let items = self.lists.entry(slot.input.clone()).or_default();
+                if index == items.len() {
+                    items.push(Input::default());
+                }
+                items.get_mut(index)
+            }
+        }
+    }
+
+    /// How many items `list` shows once the reporter `lifted` is out of it:
+    /// trailing holes, including the one it may leave, do not count.
+    pub fn list_len(&self, list: &str, lifted: Option<BlockId>) -> usize {
+        let items = self.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);
+        let empty = |input: &Input| {
+            input.literal.is_none() && input.block.as_ref().is_none_or(|inner| Some(inner.id) == lifted)
+        };
+        items.len() - items.iter().rev().take_while(|input| empty(input)).count()
+    }
+
+    pub(crate) fn trim_lists(&mut self) {
+        for items in self.lists.values_mut() {
+            while items.last().is_some_and(Input::is_hole) {
+                items.pop();
+            }
+        }
+    }
+
+    fn trim_all(&mut self) {
+        self.trim_lists();
+        let inputs = self.inputs.values_mut().chain(self.lists.values_mut().flatten());
+        for inner in inputs.filter_map(|input| input.block.as_deref_mut()) {
+            inner.trim_all();
+        }
+        for child in self.branches.values_mut().flatten() {
+            child.trim_all();
+        }
+    }
+
     /// Reporters in single inputs and list items alike.
     pub fn reporters(&self) -> impl Iterator<Item = &Block> {
         self.inputs
@@ -338,12 +453,19 @@ fn find_block_mut(block: &mut Block, id: BlockId) -> Option<&mut Block> {
 }
 
 fn locate_in(block: &Block, id: BlockId) -> Option<Location> {
-    for (name, input) in &block.inputs {
+    let singles = block.inputs.iter().map(|(name, input)| (Slot::input(name.clone()), input));
+    let items = block.lists.iter().flat_map(|(name, items)| {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, input)| (Slot::item(name.clone(), index), input))
+    });
+    for (slot, input) in singles.chain(items) {
         if let Some(inner) = input.block.as_deref() {
             if inner.id == id {
                 return Some(Location::Input {
                     parent: block.id,
-                    input: name.clone(),
+                    slot,
                 });
             }
             if let Some(found) = locate_in(inner, id) {

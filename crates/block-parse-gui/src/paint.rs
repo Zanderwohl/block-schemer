@@ -270,7 +270,7 @@ fn paint_slot(painter: &Painter, slot: &PlacedSlot, t: Transform, theme: &Theme,
             hint(painter, rect, &slot.hint, slot.swatch.ink.gamma_multiply(0.6), t.zoom);
             return;
         }
-        SlotContent::Append => {
+        SlotContent::Append { .. } => {
             outline(painter, slot.shape, rect.shrink(edge.width), rect.height(), edge, t.zoom);
             hint(painter, rect, &append_text(&slot.hint), slot.swatch.ink.gamma_multiply(0.75), t.zoom);
             return;
