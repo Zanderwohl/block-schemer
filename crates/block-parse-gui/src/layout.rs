@@ -1,6 +1,8 @@
 //! Program to [`Scene`]. Pure given a [`Measure`], so tests use a fixed-width
 //! fake. Drawing, hit-testing and snapping all read the one scene.
 
+use std::ops::Range;
+
 use block_parse::edit::Target;
 use block_parse::language::{BlockDef, BlockKind, BlockLayout, ListDef, LiteralKind, Part, Shape};
 use block_parse::program::{Block, BlockId, Input, Program, Slot, Stack};
@@ -73,6 +75,8 @@ pub struct PlacedBlock {
     pub hit: Vec<Rect>,
     /// Where the block's switch sits, if its language gives it one.
     pub switch: Option<Rect>,
+    /// A later stack lies over the switch, so it is drawn but not live.
+    pub switch_covered: bool,
     pub depth: u16,
 }
 
@@ -124,10 +128,16 @@ pub struct PlacedSlot {
     /// The owning block's, for empty slots and edges.
     pub swatch: Swatch,
     pub content: SlotContent,
+    /// A later stack lies over the slot, so it is drawn but takes no typing:
+    /// a live widget would paint over that stack and take its clicks.
+    pub covered: bool,
 }
 
 impl PlacedSlot {
     pub fn is_field(&self) -> bool {
+        if self.covered {
+            return false;
+        }
         match &self.content {
             SlotContent::Literal { .. } => true,
             SlotContent::Append { kind } => is_typed(kind),
@@ -252,7 +262,9 @@ pub struct Layout<'a> {
 impl Layout<'_> {
     pub fn program(&self, program: &Program) -> Scene {
         let mut scene = Scene::empty();
+        let mut stacks = Vec::new();
         for stack in &program.stacks {
+            let first = scene.blocks.len();
             let origin = pos2(stack.pos[0], stack.pos[1]);
             let mut y = origin.y;
             for (index, block) in self.unlifted(&stack.blocks).iter().enumerate() {
@@ -268,7 +280,9 @@ impl Layout<'_> {
                 place(&laid, pos2(origin.x, y), 0, &mut scene);
                 y += laid.size.y;
             }
+            stacks.push(first..scene.blocks.len());
         }
+        mark_covered(&mut scene, &stacks);
         scene
     }
 
@@ -874,6 +888,45 @@ impl Laid {
     }
 }
 
+/// Stacks draw in order, so only a later one can lie over a block's fields;
+/// within a stack, children sit beside their parent's fields, never on them.
+fn mark_covered(scene: &mut Scene, stacks: &[Range<usize>]) {
+    let bounds: Vec<Rect> = stacks
+        .iter()
+        .map(|stack| {
+            scene.blocks[stack.clone()]
+                .iter()
+                .flat_map(|block| &block.hit)
+                .fold(Rect::NOTHING, |all, &hit| all.union(hit))
+        })
+        .collect();
+    let overlaps = |a: Rect, b: Rect| a.intersect(b).is_positive();
+    let covered = |rect: Rect, stack: usize| {
+        (stack + 1..stacks.len()).any(|above| {
+            overlaps(bounds[above], rect)
+                && scene.blocks[stacks[above].clone()]
+                    .iter()
+                    .any(|block| block.hit.iter().any(|&hit| overlaps(hit, rect)))
+        })
+    };
+    let mut marks = Vec::new();
+    for (stack, range) in stacks.iter().enumerate() {
+        for index in range.clone() {
+            let block = &scene.blocks[index];
+            let switch = block.switch.is_some_and(|rect| covered(rect, stack));
+            let slots: Vec<bool> = block.slots.iter().map(|slot| covered(slot.rect, stack)).collect();
+            marks.push((index, switch, slots));
+        }
+    }
+    for (index, switch, slots) in marks {
+        let block = &mut scene.blocks[index];
+        block.switch_covered = switch;
+        for (slot, covered) in block.slots.iter_mut().zip(slots) {
+            slot.covered = covered;
+        }
+    }
+}
+
 fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
     let offset = origin.to_vec2();
     let rect = Rect::from_min_size(origin, laid.size);
@@ -940,6 +993,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
         slots: Vec::new(),
         hit,
         switch: laid.switch.map(|rect| rect.translate(offset)),
+        switch_covered: false,
         depth,
     });
 
@@ -971,6 +1025,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             shape: slot.shape,
             swatch: laid.swatch,
             content,
+            covered: false,
         });
         if let LaidContent::Plugged(inner) = &slot.content {
             place(inner, slot_rect.min, depth + 1, scene);
@@ -1180,6 +1235,26 @@ mod tests {
         let print = placed(&scene, ids[0]);
         assert!(print.rect.width() > before);
         assert!(matches!(print.slots[0].content, SlotContent::Plugged(_)));
+    }
+
+    #[test]
+    fn a_later_stack_covers_the_fields_under_it() {
+        let language = tiny();
+        let (mut program, ids) = with_stack(&language, &["print"]);
+        let top = program.instantiate(&language, "print").unwrap();
+        let top_id = top.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [100.0, 50.0],
+            blocks: vec![top],
+        });
+
+        let scene = scene_of(&language, &program);
+        assert!(placed(&scene, ids[0]).slots.iter().all(|slot| slot.covered && !slot.is_field()));
+        assert!(placed(&scene, top_id).slots.iter().all(|slot| !slot.covered && slot.is_field()));
+
+        program.stacks[1].pos = [100.0, 400.0];
+        let scene = scene_of(&language, &program);
+        assert!(placed(&scene, ids[0]).slots.iter().all(|slot| !slot.covered));
     }
 
     #[test]

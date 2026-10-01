@@ -154,7 +154,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   a host switching programs mid-drag calls `cancel_drag`. Going read-only
   mid-drag lets the run go without dropping it.
 - Layout is pure given a `Measure`, computed at zoom 1 and scaled when drawn.
-  Drawing, hit-testing and snapping all read one `Scene`.
+  Drawing, hit-testing and snapping all read one `Scene`. Fields and
+  switches share the canvas's layer and draw right after their block, so a
+  later stack covers them; one it overlaps is `covered`, drawn static and
+  not live, so presses there go to the stack on top.
 - Opcodes, type names, input and branch names are printable ASCII without
   spaces; names used in specs also exclude `{ } [ ] : = * +`.
 - Nesting is capped at `MAX_DEPTH` (120): deeper blocks load as `TooDeep`
