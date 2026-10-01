@@ -16,8 +16,8 @@ pub struct NativeMenus {
 }
 
 impl NativeMenus {
-    /// Replaces the app's menu bar. Call once NSApp exists, and only once:
-    /// muda keeps the first event handler for the life of the process.
+    /// Call once NSApp exists, and only once: muda keeps the first event
+    /// handler for the life of the process.
     pub fn new(name: &str, ctx: &egui::Context) -> muda::Result<Self> {
         let items = Command::ALL.map(|command| {
             let accelerator = accelerator(command.shortcut());

@@ -17,8 +17,8 @@ mod native;
 
 pub struct AppConfig {
     /// What eframe keys the app's saved state by, and on macOS the name in
-    /// the app menu's About and Quit, so make it readable. The title bar
-    /// shows the file and the language instead.
+    /// the app menu's About and Quit. The title bar shows the file and the
+    /// language instead.
     pub name: String,
     pub language: Language,
     /// Opened if it exists, else written on first save.
