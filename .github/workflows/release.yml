@@ -25,7 +25,7 @@ jobs:
     # The oldest runner, so the builds run on distributions with an older glibc.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p block-schemer
@@ -52,7 +52,7 @@ jobs:
             --desktop-file crates/block-schemer/assets/linux/block-schemer.desktop \
             --icon-file block-schemer.png \
             --output appimage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
@@ -62,7 +62,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -87,7 +87,7 @@ jobs:
           ln -s /Applications dmg/Applications
           hdiutil create -volname "Block Schemer" -srcfolder dmg -format UDZO \
             "block-schemer-$TAG-macos-universal.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: block-schemer-*.dmg
@@ -95,7 +95,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p block-schemer
@@ -106,7 +106,7 @@ jobs:
           New-Item -ItemType Directory "dist/$name" | Out-Null
           Copy-Item target/release/block-schemer.exe, README.md "dist/$name/"
           Compress-Archive -Path "dist/$name" -DestinationPath "$name.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: block-schemer-*.zip
@@ -118,7 +118,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
