@@ -1,8 +1,7 @@
 ;; Where Steel differs from R7RS. A Steel original this redefines is kept as
 ;; `__steel-<name>` by `scheme.rs`, run before this.
 
-;; Steel's `cond` gives nothing for a clause that is only a test, not the
-;; test's value. R7RS's own definition, but with `when` for a one-armed `if`.
+;; R7RS's definition, as Steel's drops the value of a clause that is only a test.
 (define-syntax cond
   (syntax-rules (else =>)
     [(cond [else e1 e2 ...]) (begin e1 e2 ...)]
