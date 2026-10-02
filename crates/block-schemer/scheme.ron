@@ -18,7 +18,7 @@ Language(
         "symbol": (shape: Square, literal: Custom("symbol")),
         "binding": (shape: Square),
         // A procedure block with nothing filled in goes out by name: `+`, not `(+)`.
-        "procedure": (shape: Square, literal: Custom("symbol"), accepts: Types(["datum"])),
+        "procedure": (shape: Square, literal: Custom("symbol"), accepts: Types(["datum"]), reshape: true),
     },
 
     categories: [

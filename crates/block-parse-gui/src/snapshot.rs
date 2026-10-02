@@ -2,6 +2,7 @@
 //! adapter.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use block_parse::host::Overlay;
 use block_parse::program::{BlockId, Program};
@@ -35,6 +36,19 @@ pub fn program(
 ) -> Result<RgbaImage, String> {
     let declarers = Layout::declarers(language, program);
     render(language, overlay, theme, scale, declarers, |layout| layout.program(program))
+}
+
+/// Load warnings, such as another language's name, do not stop it.
+pub fn program_file(language: &Language, path: &Path, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
+    let (loaded, _) = Program::load(path, language).map_err(|error| format!("{}: {error}", path.display()))?;
+    program(language, &loaded, &Overlay::default(), theme, scale)
+}
+
+/// Writes `image` to `path` as a PNG, whatever its extension.
+pub fn save(image: &RgbaImage, path: &Path) -> Result<(), String> {
+    image
+        .save_with_format(path, image::ImageFormat::Png)
+        .map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// Every block in the language, or only those with a tag in `tags`, laid

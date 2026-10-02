@@ -273,12 +273,17 @@ impl Layout<'_> {
     }
 
     fn block(&self, block: &Block) -> Laid {
+        self.shaped(block, None)
+    }
+
+    /// `shape` overrides a reporter's own, as a `reshape` slot asks.
+    fn shaped(&self, block: &Block, shape: Option<Shape>) -> Laid {
         let Some(def) = self.language.block(&block.opcode) else {
             return self.unknown(block);
         };
         let swatch = self.swatch(self.declarer(block).unwrap_or(def));
         match &def.kind {
-            BlockKind::Reporter(_) => self.reporter(block, def, swatch),
+            BlockKind::Reporter(_) => self.reporter(block, def, swatch, shape),
             BlockKind::Hat | BlockKind::Statement | BlockKind::Cap | BlockKind::HatCap => {
                 self.stack_block(block, def, swatch)
             }
@@ -330,12 +335,13 @@ impl Layout<'_> {
         }
     }
 
-    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch) -> Laid {
-        let shape = def
-            .kind
-            .output()
-            .and_then(|ty| self.language.ty(ty))
-            .map_or(Shape::Round, |ty| ty.shape);
+    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch, shape: Option<Shape>) -> Laid {
+        let shape = shape.unwrap_or_else(|| {
+            def.kind
+                .output()
+                .and_then(|ty| self.language.ty(ty))
+                .map_or(Shape::Round, |ty| ty.shape)
+        });
         let rows = self.rows(block, def, &def.parts);
         let height_of = |row: &[Item]| {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
@@ -608,7 +614,7 @@ impl Layout<'_> {
             .and_then(|stored| stored.block.as_deref())
             .filter(|inner| Some(inner.id) != self.lifted);
         if let Some(inner) = plugged {
-            let laid = self.block(inner);
+            let laid = self.shaped(inner, ty.filter(|ty| ty.reshape).map(|ty| ty.shape));
             return Item::Slot {
                 slot,
                 ty: ty_name.to_owned(),
@@ -1204,6 +1210,41 @@ mod tests {
         let scene = scene_of(&language, &program);
         assert!(placed(&scene, ids[0]).slots[0].covered);
         assert!(scene.grip_at(handle).is_none());
+    }
+
+    #[test]
+    fn a_reshaping_slot_gives_its_shape_to_the_reporter_in_it() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "shapes",
+                file: (extension: "s"),
+                types: {
+                    "value": (shape: Round, literal: Text),
+                    "procedure": (shape: Square, accepts: All, reshape: true),
+                    "loose": (shape: Square, accepts: All),
+                },
+                blocks: [
+                    (id: "one", name: "One", kind: Reporter("value"), spec: "one"),
+                    (id: "apply", name: "Apply", spec: "apply {f:procedure} {g:loose}"),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let (mut program, ids) = with_stack(&language, &["apply"]);
+        let (f, g) = (program.instantiate(&language, "one").unwrap(), program.instantiate(&language, "one").unwrap());
+        let (f_id, g_id) = (f.id, g.id);
+        let apply = program.find_mut(ids[0]).unwrap();
+        apply.inputs.entry("f".into()).or_default().block = Some(Box::new(f));
+        apply.inputs.entry("g".into()).or_default().block = Some(Box::new(g));
+
+        let scene = scene_of(&language, &program);
+        let shape = |id| match placed(&scene, id).form {
+            Form::Reporter { shape, .. } => shape,
+            Form::Stack(_) => panic!("a reporter"),
+        };
+        assert_eq!(shape(f_id), Shape::Square);
+        assert_eq!(shape(g_id), Shape::Round, "its own shape unless the slot reshapes");
     }
 
     #[test]

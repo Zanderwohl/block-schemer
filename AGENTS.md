@@ -36,7 +36,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     built in. A reporter fits a slot on an exact type match, or when the
     slot's type `accepts` it or the reporter's type `fits` the slot; the last
     two appear in the AST as `Expr::Convert`, and converting is the consumer's
-    job.
+    job. A reporter keeps its own shape in a slot, unless the slot's type
+    has `reshape`, which draws it in the slot's.
   - `literal`: literals are stored as typed and parsed when the AST is built,
     so invalid text stays in the program and shows as a problem. Built-in
     kinds (Float with e-notation, Integer, Number as an i64|f64 union,
@@ -118,9 +119,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   winit's default menu is off, since `terminate:` would skip the save prompt.
   Feature `snapshot` (off by default) renders programs to images offscreen
   through egui_kittest's wgpu renderer; with it, `--command snapshot` (`cargo
-  snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
-  column per category, or with `--tags="a,b"` only blocks with one of those
-  tags, instead of opening the window.
+  snapshot -l <language> [program] <out.png>`) writes the program, or
+  without one `Layout::grid`, every block in a column per category, or with
+  `--tags="a,b"` only blocks with one of those tags, instead of opening the
+  window.
 - `crates/block-schemer` — Block Schemer, a consumer: R7RS's standard
   procedures (short of files, process, eval and mutating pairs and strings)
   and a few of its forms, whose blocks run in Steel when double-clicked;
@@ -133,12 +135,14 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   it said into the console. Code shown in the console or Inspect is as
   entered, unless the "Schemer Harness" toggle (off by default) shows the
   `__out` port that carries `display` to the console (`cargo schemer
-  [program.scmb]`,
-  `documentation/05-block-schemer.md`). Its language is embedded; its
+  [program.scmb]`, `documentation/05-block-schemer.md`). Its feature
+  `snapshot` adds `--snapshot <program.scmb> <out.png> [--scale <n>]`
+  (`cargo schemer-snapshot`), as the editor's, with its own validators. Its language is embedded; its
   `codegen` turns its blocks into Scheme, refusing a script with problems,
   and escapes strings before Scheme sees them, and writes a procedure
   block with nothing filled in by name in a square `procedure` slot
-  (`call`'s operator, `fold`, `map`, `apply`); `define`, `define …
+  (`call`'s operator, `fold`, `map`, `apply`), which squares whatever is
+  plugged into it; `define`, `define …
   _taking_`, `lambda` and `let` (through `binding`) are scopes whose
   references are `variable` blocks, definitions' names global; Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
@@ -227,8 +231,11 @@ To check a drawing change without opening a window, render every block of a
 language and look at the image:
 `cargo snapshot -l examples/languages/tiny.ron <scratch>/tiny.png`
 (`--scale` sets pixels per canvas unit, default 2; `--tags="a,b"` keeps
-only blocks with one of those tags). For a particular program,
-call `block_parse_gui::snapshot::program`.
+only blocks with one of those tags). For a program file, put it before the
+PNG; Block Schemer's need `cargo schemer-snapshot <program.scmb> <out.png>`,
+whose validators the editor lacks. For a program with an overlay (bubbles,
+highlights), call `block_parse_gui::snapshot::program`. The README's images
+come from these.
 
 ## Deferred
 

@@ -9,6 +9,7 @@ that hands them to `block_parse_gui::app::run`.
 ```sh
 cargo schemer                                              # a new program
 cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
+cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.png  # an image, no window
 ```
 
 ![Runs answered by Steel](images/04-schemer-run.png)

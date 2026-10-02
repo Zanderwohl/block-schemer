@@ -27,15 +27,19 @@ struct Args {
     #[arg(long, value_delimiter = ',')]
     tags: Option<Vec<String>>,
     /// The program to open, created on first save if it does not exist. For
-    /// `snapshot`, the PNG to write.
+    /// `snapshot`, the program to render, or with no PNG after it, the PNG
+    /// to write the language's blocks to.
     program: Option<PathBuf>,
+    /// With `--command snapshot`: the PNG to write the program to.
+    output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Command {
     /// Open the editor window.
     Editor,
-    /// Render every block in the language, a column per category, to a PNG.
+    /// Render a program to a PNG, or without one, every block in the
+    /// language, a column per category.
     Snapshot,
 }
 
@@ -56,7 +60,23 @@ fn main() -> ExitCode {
         eprintln!("--tags is for --command snapshot");
         return ExitCode::from(2);
     }
+    if args.output.is_some() && args.command != Command::Snapshot {
+        eprintln!("only --command snapshot takes a second path");
+        return ExitCode::from(2);
+    }
     if args.command == Command::Snapshot {
+        let (program, output) = match (args.program, args.output) {
+            (Some(program), Some(output)) => (Some(program), output),
+            (Some(output), None) => (None, output),
+            (None, _) => {
+                eprintln!("no output given: pass the path of the PNG to write");
+                return ExitCode::from(2);
+            }
+        };
+        if program.is_some() && args.tags.is_some() {
+            eprintln!("--tags is for snapshots of the language's blocks, not of a program");
+            return ExitCode::from(2);
+        }
         let unknown: Vec<&str> = args
             .tags
             .iter()
@@ -68,7 +88,7 @@ fn main() -> ExitCode {
             eprintln!("no block is tagged {}", unknown.join(", "));
             return ExitCode::from(2);
         }
-        return snapshot(&language, args.tags.as_deref(), args.program.as_deref(), args.scale);
+        return snapshot(&language, program.as_deref(), args.tags.as_deref(), &output, args.scale);
     }
     app::run(AppConfig {
         name: "block-parse-editor".into(),
@@ -81,30 +101,24 @@ fn main() -> ExitCode {
 }
 
 #[cfg(feature = "snapshot")]
-fn snapshot(language: &Language, tags: Option<&[String]>, output: Option<&Path>, scale: f32) -> ExitCode {
-    let Some(output) = output else {
-        eprintln!("no output given: pass the path of the PNG to write");
-        return ExitCode::from(2);
+fn snapshot(language: &Language, program: Option<&Path>, tags: Option<&[String]>, output: &Path, scale: f32) -> ExitCode {
+    use block_parse_gui::{Theme, snapshot};
+
+    let image = match program {
+        Some(program) => snapshot::program_file(language, program, &Theme::default(), scale),
+        None => snapshot::grid(language, tags, &Theme::default(), scale),
     };
-    let image = match block_parse_gui::snapshot::grid(language, tags, &block_parse_gui::Theme::default(), scale) {
-        Ok(image) => image,
-        Err(error) => {
-            eprintln!("could not render: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match image.save_with_format(output, image::ImageFormat::Png) {
+    match image.and_then(|image| snapshot::save(&image, output)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{}: {error}", output.display());
+            eprintln!("could not snapshot: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
 #[cfg(not(feature = "snapshot"))]
-fn snapshot(_: &Language, _: Option<&[String]>, _: Option<&Path>, _: f32) -> ExitCode {
+fn snapshot(_: &Language, _: Option<&Path>, _: Option<&[String]>, _: &Path, _: f32) -> ExitCode {
     eprintln!("built without snapshots: rebuild with --features snapshot");
     ExitCode::from(2)
 }
-

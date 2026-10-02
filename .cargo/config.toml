@@ -3,3 +3,4 @@
 editor = "run -p block-parse-gui --features cli --bin block-parse-editor --"
 snapshot = "run -p block-parse-gui --features cli,snapshot --bin block-parse-editor -- --command snapshot"
 schemer = "run -p block-schemer --"
+schemer-snapshot = "run -p block-schemer --features snapshot -- --snapshot"

@@ -60,6 +60,9 @@ pub struct TypeConfig {
     /// values typed only at run time, such as a variable getter's.
     #[serde(default)]
     pub fits: TypeSet,
+    /// Reporters in this type's slots take its shape instead of their own.
+    #[serde(default)]
+    pub reshape: bool,
 }
 
 /// One side of type compatibility. A reporter fits a slot when the types are
@@ -262,6 +265,7 @@ pub struct TypeDef {
     pub literal: LiteralKind,
     pub accepts: TypeSet,
     pub fits: TypeSet,
+    pub reshape: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -616,6 +620,7 @@ impl LanguageConfig {
                     literal: config.literal.clone(),
                     accepts: config.accepts.clone(),
                     fits: config.fits.clone(),
+                    reshape: config.reshape,
                 },
             );
         }

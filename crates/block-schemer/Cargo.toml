@@ -4,6 +4,10 @@ description = "Block Schemer: Scheme from blocks"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# `block-schemer --snapshot <program.scmb> <out.png>`, which renders offscreen.
+snapshot = ["block-parse-gui/snapshot"]
+
 [dependencies]
 block-parse.workspace = true
 block-parse-gui = { path = "../block-parse-gui", features = ["app"] }
