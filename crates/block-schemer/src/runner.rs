@@ -43,6 +43,9 @@ pub struct SchemerRunner<D> {
     console: String,
     /// A run is waiting for a line from the console.
     waiting: bool,
+    /// Lines the runner wrote while runs were going, each to follow a run's
+    /// answer.
+    held: Vec<(Ticket, String)>,
     /// Show the `__out` port in echoed and inspected code.
     harness: bool,
 }
@@ -68,6 +71,7 @@ impl<D: Dispatch> SchemerRunner<D> {
             answers: HashMap::new(),
             console: String::new(),
             waiting: false,
+            held: Vec::new(),
             harness: false,
         }
     }
@@ -98,6 +102,15 @@ impl<D: Dispatch> SchemerRunner<D> {
             && let Some(echo) = echo.take()
         {
             self.write(&format!("> {echo}"));
+        }
+    }
+
+    /// As `write`, but after every run sent so far, so it never lands in
+    /// one's output or between its prompt and the line entered for it.
+    fn write_after_runs(&mut self, text: &str) {
+        match self.pending.keys().max_by_key(|ticket| ticket.0) {
+            Some(last) => self.held.push((*last, text.to_owned())),
+            None => self.write(text),
         }
     }
 
@@ -159,7 +172,7 @@ impl<D: Dispatch> SchemerRunner<D> {
             .and_then(Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("untitled.{}", self.language.file.extension));
-        self.write(&format!("> block-schemer {file}"));
+        self.write_after_runs(&format!("> block-schemer {file}"));
         match self.file(program, codegen::script) {
             Ok(parts) => {
                 let ticket = self.dispatch.send(Job {
@@ -168,11 +181,10 @@ impl<D: Dispatch> SchemerRunner<D> {
                 });
                 self.pending.insert(ticket, Pending::Play);
             }
-            Err(why) => self.write(&why),
+            Err(why) => self.write_after_runs(&why),
         }
     }
 
-    /// Echoed with its answer, so the echo and what it said stay together.
     fn evaluate(&mut self, block: BlockId, script: &Script) {
         // Nothing to echo when even the reading form fails; the error follows.
         let echo = codegen::flat(&self.language, script, self.harness)
@@ -188,10 +200,10 @@ impl<D: Dispatch> SchemerRunner<D> {
             Err(problem) => {
                 self.latest = None;
                 if let Some(echo) = echo {
-                    self.write(&format!("> {echo}"));
+                    self.write_after_runs(&format!("> {echo}"));
                 }
                 let said = format!("Can't run: {problem}");
-                self.write(&said);
+                self.write_after_runs(&said);
                 self.answers.insert(block, said);
             }
         }
@@ -212,6 +224,11 @@ impl<D: Dispatch> SchemerRunner<D> {
                 .collect::<Vec<_>>()
                 .join("\n");
             self.answers.insert(block, if bubble.is_empty() { "ok".into() } else { bubble });
+        }
+        let (now, later) = std::mem::take(&mut self.held).into_iter().partition(|(after, _)| *after == ticket);
+        self.held = later;
+        for (_, text) in now {
+            self.write(&text);
         }
     }
 }
@@ -590,7 +607,29 @@ mod tests {
         assert_eq!(runner.overlay().bubbles[&BlockId(6)], "(eof)", "ended by Ctrl+D");
 
         runner.console_input(&console, "idle");
-        assert!(runner.console().ends_with("\nidle\n"), "only echoed while nothing runs");
+        assert!(runner.console().ends_with("\nidle\n"), "echoed");
+        let read_line = program.script_at(&language, BlockId(6)).unwrap();
+        runner.run_block(&program, None, BlockId(6), &read_line);
+        wait_for_input(&mut runner);
+
+        let before = runner.console().len();
+        let script = program.script_at(&language, BlockId(7)).unwrap();
+        runner.run_block(&program, None, BlockId(7), &script);
+        assert_eq!(&runner.console()[before..], "", "held until the waiting run is answered");
+        runner.console_input(&console, "x");
+        let start = Instant::now();
+        while !runner.console().ends_with("Name? ") {
+            assert!(start.elapsed() < Duration::from_secs(20), "never played: {}", runner.console());
+            runner.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            runner.console().ends_with("> (read-line)\nx\n\"x\"\n> block-schemer untitled.scmb\nName? "),
+            "the idle line was never read: {}",
+            runner.console()
+        );
+        runner.stop();
+        settle(&mut runner);
     }
 
     #[test]

@@ -109,8 +109,8 @@ entered in the console. A read that wants more than was entered waits:
 the dispatch says so (`Dispatch::waiting`), the runner marks its Console
 tab `waiting`, and the editor brings it forward, even past a bubble, and
 focuses its line. Each line entered is echoed after what the run wrote, as
-in a terminal, and handed to the dispatch, which keeps lines entered ahead
-of a read until every run sent so far is answered. Ctrl+D on an empty line
+in a terminal, and handed to the dispatch for the runs sent so far: they
+may read lines entered ahead of a read, and a run sent later skips them. Ctrl+D on an empty line
 ends input, so a waiting read gets end of file; later reads wait again.
 While nothing runs, a line is only echoed. Stop ends a waiting read with
 the run, and drops any unread lines.
@@ -120,7 +120,9 @@ Rust `Read` that asks the console for a line when the last is used up.
 Steel 0.8.3 has no public way to make one, and its `peek-char` read four
 bytes ahead, waiting on the next line; `vendor/steel-core` patches both
 (`PATCH.md`). Steel's `read` takes whole lines, so whatever follows a
-datum on its last line is lost to later reads. `char-ready?` is false for
+datum on its last line is lost to later reads. What `read-char` or
+`peek-char` leaves of a line stays in the session's input port, for the
+next run in the session to read. `char-ready?` is false for
 the console, which may make a read wait.
 
 The native dispatch's worker keeps output and unread lines in a mutex the
@@ -212,7 +214,9 @@ calls every frame:
 
 While a job runs, Play is disabled and Stop enabled. A double-click's echo
 reaches the console with the first sign of it running; a Play's
-`> block-schemer` line goes there at once. Only the latest double-click's
+`> block-schemer` line, and a double-click's that cannot run, go there at
+once, or while runs are going, after the last of them is answered, so
+they never land inside a run's output. Only the latest double-click's
 answer becomes a bubble; an earlier one still answering goes to the
 console alone.
 
