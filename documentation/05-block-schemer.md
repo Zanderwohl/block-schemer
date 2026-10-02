@@ -44,7 +44,8 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   newline, tab and return are refused.
   A named block goes out as its name: a square Add is `+`, a round one
   `(+)`. A procedure dropped with nothing filled in into a `procedure` slot
-  (Call's operator, and `apply`, `map` and `fold`'s procedure) is named
+  (Call's operator, `apply`, `map` and `fold`'s procedure, and a `cond`
+  clause's receiver) is named
   there; a round block in one is called, and its result is the procedure.
   Syntax blocks (`if`, `lambda`, …) are not callable. A `define … taking`'s
   name drags out a `procedure_call`, an argument slot per parameter; a call
@@ -70,8 +71,8 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   `__steel-<name>`. It adds what Steel lacks (`string-map`, `list-copy`,
   `read-string`, …) and fixes what it gets wrong (`=` and `gcd` with any
   number of arguments, `member` and `assoc` with a compare procedure, `atan`
-  of two, a `cond` clause that is only a test). The Unicode character classes are Rust functions registered on
-  the engine.
+  of two, a `cond` clause that is only a test). The Unicode character
+  classes are Rust functions registered on the engine.
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
@@ -159,10 +160,10 @@ from Steel does not say which definition it came from.
 | `binding` | `(variable init)`, for `let`, `letrec` and `letrec*` |
 | `define_procedure` | `(define (variable formals…) body…)` |
 | `lambda` | `(lambda (formals…) body…)` |
-| `let`, `letrec`, `letrec*` | `(let (bindings…) body…)`, and so on |
+| `let`, `letrec`, `letrec*` | `(let (bindings…) body…)`, and the same |
 | `clause` | `(test expressions…)`, for `cond` |
 | `arrow_clause` | `(test => receiver)` |
-| `else_clause` | `(else expressions…)`, which Scheme wants last; nothing enforces it |
+| `else_clause` | `(else expressions…)`, last, though nothing enforces it |
 | `display` | `(display obj __out)` given no port, shown as `(display obj)` unless the harness is |
 | `string_chars` | `(string char…)` |
 

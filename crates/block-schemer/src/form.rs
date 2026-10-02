@@ -150,6 +150,8 @@ mod tests {
     fn several_body_forms_go_one_to_a_line() {
         let form = read("(let ((a 3) (b 4)) (display a) (+ a b))");
         assert_eq!(form.pretty(60), "(let ((a 3) (b 4))\n  (display a)\n  (+ a b))");
+        let form = read("(letrec* ((a 3) (b a)) (display a) (+ a b))");
+        assert_eq!(form.pretty(60), "(letrec* ((a 3) (b a))\n  (display a)\n  (+ a b))");
     }
 
     #[test]

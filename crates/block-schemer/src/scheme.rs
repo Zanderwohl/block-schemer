@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn letrec_and_cond_are_steels_too() {
+    fn letrec_and_cond_run() {
         let (mut steel, _) = steel();
         let parity = "(letrec ((ev? (lambda (n) (if (zero? n) #t (od? (- n 1))))) \
                               (od? (lambda (n) (if (zero? n) #f (ev? (- n 1)))))) \
@@ -278,7 +278,6 @@ mod tests {
         assert_eq!(steel.run("(letrec* ((a 1) (b (+ a 1))) (list a b))").unwrap(), "(1 2)");
         let sign = "(map (lambda (x) (cond ((negative? x) 'minus) ((assv x '((0 . zero))) => cdr) (else 'plus))) '(-1 0 1))";
         assert_eq!(steel.run(sign).unwrap(), "(minus zero plus)");
-        assert_eq!(steel.run("(list (cond (#f 1) (7)) (cond ((memv 2 '(1 2)))))").unwrap(), "(7 (2))", "a test alone gives its value");
     }
 
     #[test]
@@ -390,6 +389,9 @@ mod tests {
             ("(inexact? (rationalize .3 1/10))", "#t"),
             ("(rationalize -3/10 1/10)", "-1/3"),
             ("(make-list 2 'x)", "(x x)"),
+            ("(cond (#f 1) (7))", "7"),
+            ("(cond ((memv 2 '(1 2))))", "(2)"),
+            ("(cond (#f 1) ((memv 2 '(1 2)) => length))", "1"),
             ("(list-copy '(1 2 . 3))", "(1 2 . 3)"),
             ("(member 2.0 '(1 2 3) =)", "(2 3)"),
             ("(member \"B\" '(\"a\" \"b\") string-ci=?)", "(\"b\")"),

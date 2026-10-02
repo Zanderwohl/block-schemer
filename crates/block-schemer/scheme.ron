@@ -157,7 +157,7 @@ Language(
             spec: "{test:datum} _then_ {expressions:datum*}",
             hints: {"expressions": "expression"},
             description: "With no expressions, the clause's value is its test's.",
-            tags: ["basics"],
+            tags: ["basics", "base"],
         ),
         (
             id: "arrow_clause",
@@ -177,7 +177,7 @@ Language(
             spec: "else {expressions:datum+}",
             hints: {"expressions": "expression"},
             description: "Taken when no clause before it is; it goes last.",
-            tags: ["basics"],
+            tags: ["basics", "base"],
         ),
         (
             id: "let",
@@ -200,7 +200,7 @@ Language(
             spec: "{variable:symbol} _be_ {init:datum}",
             // Into the scope of the `let` or `letrec` holding it.
             scope: (declares: ["variable"], reference: "variable"),
-            tags: ["basics"],
+            tags: ["basics", "base"],
         ),
         (
             id: "letrec",
