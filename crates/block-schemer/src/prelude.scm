@@ -11,8 +11,6 @@
   (and (boolean? a) (boolean? b) (eq? a b)
        (or (null? rest) (apply boolean=? b rest))))
 
-;; Numbers
-
 (define (gcd . ns)
   (let loop ((acc 0) (ns ns))
     (if (null? ns) acc (loop (__steel-gcd acc (car ns)) (cdr ns)))))
@@ -40,8 +38,6 @@
   (let* ((ex (exact x)) (ey (abs (exact y)))
          (r (simplest (- ex ey) (+ ex ey))))
     (if (and (exact? x) (exact? y)) r (inexact r))))
-
-;; Pairs and lists
 
 (define (make-list k . fill)
   (let ((fill (if (null? fill) #f (car fill))))
@@ -71,14 +67,10 @@
               (((car compare) x (car (car alist))) (car alist))
               (else (loop (cdr alist)))))))
 
-;; Strings
-
 (define (string-copy string . range)
   (let ((start (if (null? range) 0 (car range)))
         (end (if (or (null? range) (null? (cdr range))) (string-length string) (car (cdr range)))))
     (substring string start end)))
-
-;; Control features
 
 ;; Steel's takes no converter. Without `parameterize`, only the initial
 ;; value is ever converted.
@@ -97,7 +89,7 @@
 (define (vector-for-each proc vector . vectors)
   (apply for-each proc (vector->list vector) (map vector->list vectors)))
 
-;; Exceptions. Handlers are kept here rather than in Steel, whose handler
+;; Handlers are kept here rather than in Steel, whose handler
 ;; replaces the value of the whole call and so cannot continue a raise.
 
 (struct __error-object (message irritants))
@@ -182,7 +174,7 @@
 (define (file-error? obj) #f)
 (define (read-error? obj) #f)
 
-;; Delayed evaluation. Without `delay`, every promise is already forced.
+;; Without `delay`, every promise is already forced.
 
 (struct __promise (value))
 
@@ -194,7 +186,7 @@
 (define (force obj)
   (if (__promise? obj) (__promise-value obj) obj))
 
-;; Input and output. Every port is in memory, so one is always ready.
+;; Every port is in memory, so one is always ready.
 
 (define __closed '())
 (define __binary '())
@@ -280,8 +272,6 @@
 ;; Pairs cannot be cyclic in Steel, so labels are never needed.
 (define (write-shared obj . port) (apply write obj port))
 (define (write-simple obj . port) (apply write obj port))
-
-;; System interface
 
 (define (current-second) (/ (current-inexact-milliseconds) 1000.0))
 (define (jiffies-per-second) 1000)

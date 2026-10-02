@@ -60,7 +60,6 @@ const STEEL_ORIGINALS: [&str; 17] = [
     "make-parameter",
 ];
 
-/// Evens out where Steel differs from R7RS, after [`STEEL_ORIGINALS`].
 const STEEL_PRELUDE: &str = include_str!("prelude.scm");
 
 /// Sends everything written without a port, errors included, to the console.

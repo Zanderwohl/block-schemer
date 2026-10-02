@@ -217,7 +217,6 @@ pub struct Language {
     categories: Vec<Category>,
     blocks: Vec<BlockDef>,
     by_opcode: HashMap<String, usize>,
-    /// Every block's tags, in order of first use.
     tags: Vec<String>,
     checked_tags: Option<Vec<String>>,
     /// Every `Custom` literal is resolved here, or the language fails to compile.

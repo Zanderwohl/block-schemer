@@ -30,7 +30,6 @@ pub(crate) fn height(language: &Language) -> f32 {
     }
 }
 
-/// Two columns as wide as the longest label.
 pub(crate) fn width(ctx: &egui::Context, language: &Language) -> f32 {
     if language.checked_tags().is_none() {
         return 0.0;
@@ -78,7 +77,7 @@ pub(crate) fn show(
     let mut checked = options.palette_tags.clone().unwrap_or_else(|| default.to_vec());
     let mut all = options.palette_all;
     let (mut changed, mut ticked) = (false, false);
-    // Down the left column, then the right, each box at its column's left edge.
+    // Down the left column, then the right.
     for (index, tag) in std::iter::once(None).chain(tags.iter().map(Some)).enumerate() {
         let (x, y) = (index / rows, index % rows);
         let min = rect.min + vec2(MARGIN + x as f32 * (column + MARGIN), MARGIN + y as f32 * ROW);

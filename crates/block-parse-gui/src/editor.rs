@@ -69,7 +69,7 @@ pub struct EditorOptions {
     /// The tags whose blocks the palette shows. `None` until the user ticks
     /// a box, meaning the language's `checked_tags`.
     pub palette_tags: Option<Vec<String>>,
-    /// The filter's All box: every block shows, untagged ones included.
+    /// The filter's All box, which shows untagged blocks too.
     pub palette_all: bool,
     /// The panel right of the canvas, holding the host's `Overlay::tabs`.
     pub side_width: f32,
