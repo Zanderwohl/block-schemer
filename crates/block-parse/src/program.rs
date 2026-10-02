@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::edit::Location;
 use crate::language::{BlockDef, Language, Part, is_blank, ron_options};
 
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
+
+/// Before it, a procedure block with nothing filled in, in a `by_name` slot,
+/// was passed by name without saying so.
+const NAMES_REACH: u32 = 4;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
@@ -197,7 +201,11 @@ impl Program {
     ) -> Result<(Self, Vec<LoadWarning>), ProgramError> {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path).map_err(ProgramError::Io)?;
-        let program = Self::from_ron(&text)?;
+        let mut program = Self::from_ron(&text)?;
+        if program.version < NAMES_REACH {
+            program.name_bare_procedures(language);
+            program.version = FORMAT_VERSION;
+        }
 
         let mut warnings = Vec::new();
         let found = path.extension().map(|ext| ext.to_string_lossy().into_owned());
@@ -219,6 +227,34 @@ impl Program {
             });
         }
         Ok((program, warnings))
+    }
+
+    /// What a file older than [`NAMES_REACH`] meant: every callable block
+    /// with nothing filled in, in a `by_name` slot, is named.
+    fn name_bare_procedures(&mut self, language: &Language) {
+        let mut bare = Vec::new();
+        self.each_block(|block| {
+            let Some(def) = language.block(&block.opcode) else { return };
+            let singles = block.inputs.iter().map(|(name, input)| (Slot::input(name.clone()), input));
+            let items = block.lists.iter().flat_map(|(name, items)| {
+                items.iter().enumerate().map(|(index, input)| (Slot::item(name.clone(), index), input))
+            });
+            for (slot, input) in singles.chain(items) {
+                let by_name = def.slot_type(&slot).and_then(|ty| language.ty(ty)).is_some_and(|ty| ty.by_name);
+                let Some(inner) = input.block.as_deref().filter(|inner| by_name && inner.reach.is_none()) else {
+                    continue;
+                };
+                let extent = language.block(&inner.opcode).and_then(|def| def.extent(inner, self.arity(language, inner)));
+                if extent.is_some_and(|extent| extent.filled == 0) {
+                    bare.push(inner.id);
+                }
+            }
+        });
+        for id in bare {
+            if let Some(block) = self.find_mut(id) {
+                block.reach = Some(Reach::Name);
+            }
+        }
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -315,16 +351,17 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// False if the block is gone, is a reference, or the slot is past a
-    /// list's empty slot. Emptying an item's text makes it a hole, so a field
-    /// keeps one address as its item comes and goes. References to the slot
-    /// follow the new text.
+    /// False if the block is gone, the slot is a reference's name, or the
+    /// slot is past a list's empty slot, except in a procedure reference's
+    /// arguments, which show one per parameter however many are stored.
+    /// Emptying an item's text makes it a hole, so a field keeps one address
+    /// as its item comes and goes. References to the slot follow the new text.
     pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let declaration = Declaration {
             block,
             slot: slot.clone(),
         };
-        let Some(block) = self.find_mut(block).filter(|block| block.refers.is_none()) else {
+        let Some(block) = self.find_mut(block).filter(|block| block.refers.is_none() || slot.item.is_some()) else {
             return false;
         };
         let Some(index) = slot.item else {
@@ -333,15 +370,15 @@ impl Program {
             return true;
         };
         let len = block.lists.get(&slot.input).map_or(0, Vec::len);
-        if index > len {
+        if index > len && block.refers.is_none() {
             return false;
         }
-        if index == len && text.is_empty() {
+        if index >= len && text.is_empty() {
             return true;
         }
         let items = block.lists.entry(slot.input.clone()).or_default();
-        if index == len {
-            items.push(Input::default());
+        if index >= len {
+            items.resize(index + 1, Input::default());
         }
         items[index].literal = (!text.is_empty()).then(|| text.clone());
         block.trim_lists();
@@ -480,19 +517,17 @@ impl Block {
         }
     }
 
-    /// An item past a list's end is created at the empty slot, never beyond.
-    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> Option<&mut Input> {
+    /// An item past a list's end is created, after holes; callers check
+    /// that the slot is one the block shows.
+    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> &mut Input {
         match slot.item {
-            None => Some(self.inputs.entry(slot.input.clone()).or_default()),
+            None => self.inputs.entry(slot.input.clone()).or_default(),
             Some(index) => {
-                if index > self.lists.get(&slot.input).map_or(0, Vec::len) {
-                    return None;
-                }
                 let items = self.lists.entry(slot.input.clone()).or_default();
-                if index == items.len() {
-                    items.push(Input::default());
+                if index >= items.len() {
+                    items.resize(index + 1, Input::default());
                 }
-                items.get_mut(index)
+                &mut items[index]
             }
         }
     }

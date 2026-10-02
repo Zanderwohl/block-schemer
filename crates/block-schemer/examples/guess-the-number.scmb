@@ -1,7 +1,7 @@
 #![enable(implicit_some)]
 Program(
     language: "Block Schemer",
-    version: 3,
+    version: 4,
     stacks: [
         (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "program",
             inputs: {"main": (block: (id: 2, opcode: "procedure_call",

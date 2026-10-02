@@ -53,7 +53,8 @@ index). Its one input holds a copy of the name, so a file stays readable and
 a consumer that ignores `refers` still sees a plain block with a literal.
 `Program::set_literal` keeps the copies in step, finding them by
 declaration, never by name; loading does the same, for files edited by hand.
-`set_literal` on a reference is refused.
+`set_literal` on a reference's name is refused; a procedure reference's
+arguments are typed into as any list's (`documentation/07-calls.md`).
 
 `Program::reference` makes one, out of the program, like `instantiate`, and
 only for a declaring slot holding a non-blank literal. `Program::duplicate`

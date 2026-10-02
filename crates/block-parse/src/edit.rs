@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::language::{BlockKind, Fit, Language, is_blank};
+use crate::language::{BlockKind, Callable, Fit, Language, is_blank};
 use crate::program::{Block, BlockId, Declaration, MAX_DEPTH, Program, Reach, Slot, Stack, find_in};
 
 /// Blocks out of the program: a statement and everything below it, or one
@@ -150,7 +150,10 @@ impl Program {
                     None => owner_def.and_then(|def| def.input(&slot.input)).map(|input| &input.ty),
                     Some(index) => owner_def
                         .and_then(|def| def.list(&slot.input))
-                        .filter(|_| index <= owner.list_len(&slot.input, lifted))
+                        .filter(|_| match self.arguments_shown(language, owner, &slot.input) {
+                            Some(shown) => index < shown,
+                            None => index <= owner.list_len(&slot.input, lifted),
+                        })
                         .map(|list| &list.ty),
                 };
                 let ty = ty.ok_or_else(|| AttachError::NoSuchInput {
@@ -287,7 +290,7 @@ impl Program {
             Target::Input { parent, slot } => {
                 let owner = self.find_mut(parent).expect("checked by can_attach");
                 let reporter = blocks.into_iter().next().expect("checked by can_attach");
-                let slot = owner.slot_entry(&slot).expect("checked by can_attach");
+                let slot = owner.slot_entry(&slot);
                 let ejected = slot.block.replace(Box::new(reporter));
                 return Ok(ejected.map(|block| Fragment {
                     blocks: vec![*block],
@@ -295,6 +298,14 @@ impl Program {
             }
         }
         Ok(None)
+    }
+
+    /// How many argument slots a procedure reference shows in `list`, stored
+    /// or not; it has no empty slot to grow it.
+    fn arguments_shown(&self, language: &Language, owner: &Block, list: &str) -> Option<usize> {
+        let def = language.block(&owner.opcode).filter(|_| owner.refers.is_some())?;
+        let arguments = matches!(&def.callable, Some(Callable::Arguments(name)) if name == list);
+        Some(def.extent(owner, self.arity(language, owner)).filter(|_| arguments)?.shown)
     }
 
     /// The slot's type leaves callable blocks there as their names.
@@ -365,7 +376,7 @@ impl Program {
         let removed = match self.locate(id)? {
             Location::Input { parent, slot } => {
                 let owner = self.find_mut(parent)?;
-                let removed = owner.slot_entry(&slot)?.block.take()?;
+                let removed = owner.slot_entry(&slot).block.take()?;
                 owner.trim_lists();
                 *removed
             }

@@ -1068,6 +1068,70 @@ mod tests {
         }
 
         #[test]
+        fn any_argument_a_reference_shows_takes_text_or_a_drop_but_its_name_does_not() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let (define, call) = procedure(&language, &mut program);
+            let id = call.id;
+            let body = Target::Input {
+                parent: define,
+                slot: Slot::input("body"),
+            };
+            program.attach(&language, Fragment { blocks: vec![call] }, body).unwrap();
+
+            assert!(!program.set_literal(id, &Slot::input("name"), "g".into()), "the name is the declaration's");
+            assert!(program.set_literal(id, &Slot::item("args", 1), "2".into()), "the second before the first");
+            assert!(program.find(id).unwrap().lists["args"][0].is_hole());
+            assert!(program.set_literal(id, &Slot::item("args", 1), String::new()));
+            assert!(!program.find(id).unwrap().lists.contains_key("args"), "emptied, it trims");
+
+            let quote = block(&mut program, &language, "quote");
+            let second = Target::Input {
+                parent: id,
+                slot: Slot::item("args", 1),
+            };
+            program.attach(&language, Fragment { blocks: vec![quote] }, second).unwrap();
+            assert!(program.find(id).unwrap().lists["args"][1].block.is_some());
+            let third = Target::Input {
+                parent: id,
+                slot: Slot::item("args", 2),
+            };
+            let quote = Fragment {
+                blocks: vec![block(&mut program, &language, "quote")],
+            };
+            assert!(program.can_attach(&language, &quote, &third).is_err(), "f takes two");
+        }
+
+        #[test]
+        fn a_signatures_reference_may_say_it_is_callable() {
+            let text = CALLS.replace(r#"spec: "{name:name} {args:value*}")"#, r#"spec: "{name:name} {args:value*}", callable: true)"#);
+            let language = Language::from_ron(&text, &Validators::new()).unwrap();
+            assert_eq!(language.block("call").unwrap().callable, Some(Callable::Arguments("args".into())));
+        }
+
+        #[test]
+        fn a_version_3_file_names_the_bare_procedures_it_meant_by_name() {
+            let language = calls();
+            let mut old = Program::new(&language);
+            old.version = 3;
+            let mut fold = block(&mut old, &language, "fold");
+            let (bare, called) = (block(&mut old, &language, "add"), block(&mut old, &language, "add"));
+            let (bare_id, called_id) = (bare.id, called.id);
+            plug(&mut fold, "kons", bare);
+            plug(&mut fold, "knil", called);
+            on_canvas(&mut old, fold);
+            let path = std::env::temp_dir().join(format!("calls-{}.c", std::process::id()));
+            old.save(&path).unwrap();
+            let (loaded, warnings) = Program::load(&path, &language).unwrap();
+            std::fs::remove_file(&path).unwrap();
+
+            assert!(warnings.is_empty(), "{warnings:?}");
+            assert_eq!(loaded.find(bare_id).unwrap().reach, Some(Reach::Name));
+            assert_eq!(loaded.find(called_id).unwrap().reach, None, "only in by_name slots");
+            assert_eq!(loaded.version, crate::program::FORMAT_VERSION, "so it is not named again");
+        }
+
+        #[test]
         fn blank_parameters_are_unnamed() {
             let language = calls();
             let mut program = Program::new(&language);

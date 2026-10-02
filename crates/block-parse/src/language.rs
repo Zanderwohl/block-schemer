@@ -7,8 +7,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::calls;
+pub use crate::calls::{Callable, Extent};
 use crate::literal::{self, Validators};
-use crate::program::{Block, Reach};
 use crate::spec::{self, Arity, SpecPart};
 use crate::value::Value;
 
@@ -330,29 +331,6 @@ pub struct BlockDef {
     pub callable: Option<Callable>,
 }
 
-/// What a callable block's parameters are. See `documentation/07-calls.md`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Callable {
-    /// Its inputs and lists in spec order, one parameter each, after the
-    /// labels that name it.
-    Parts,
-    /// A procedure reference's: this list, an item per parameter its
-    /// declaration gives.
-    Arguments(String),
-}
-
-/// How a callable block shows: called with its first `shown` parameters,
-/// or named.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Extent {
-    pub parameters: usize,
-    /// Through the last parameter holding something; the block cannot show
-    /// fewer.
-    pub filled: usize,
-    pub shown: usize,
-    /// Left as its name, not called; `shown` is then 0.
-    pub named: bool,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Part {
@@ -544,93 +522,6 @@ impl BlockDef {
         self.scope.as_ref()?.signature.as_ref().filter(|signature| signature.name == name)
     }
 
-    /// What a callable block shows with its first `shown` parameters. Labels
-    /// before a hidden parameter go with it; those before the first name the
-    /// block and always show.
-    pub fn shown_parts(&self, shown: usize) -> &[Part] {
-        if self.callable != Some(Callable::Parts) {
-            return &self.parts;
-        }
-        let mut end = None;
-        let mut count = 0;
-        for (index, part) in self.parts.iter().enumerate() {
-            if matches!(part, Part::Input(_) | Part::List(_)) {
-                if count == shown {
-                    return &self.parts[..end.unwrap_or(index)];
-                }
-                count += 1;
-                end = Some(index + 1);
-            }
-        }
-        &self.parts
-    }
-
-    /// `None` unless callable. `arity` is how many parameters a procedure
-    /// reference's declaration gives.
-    pub fn extent(&self, block: &Block, arity: Option<usize>) -> Option<Extent> {
-        let (parameters, filled) = match self.callable.as_ref()? {
-            Callable::Parts => {
-                let (mut parameters, mut filled) = (0, 0);
-                for part in &self.parts {
-                    let holds = match part {
-                        Part::Input(input) => block.inputs.get(&input.name).is_some_and(|stored| {
-                            stored.block.is_some()
-                                || stored
-                                    .literal
-                                    .as_deref()
-                                    .is_some_and(|text| !is_blank(text) && Some(text) != input.default.as_deref())
-                        }),
-                        Part::List(list) => block
-                            .lists
-                            .get(&list.name)
-                            .is_some_and(|items| items.iter().any(|item| !item.is_hole())),
-                        Part::Label(_) | Part::Branch(_) => continue,
-                    };
-                    parameters += 1;
-                    if holds {
-                        filled = parameters;
-                    }
-                }
-                (parameters, filled)
-            }
-            // Trimmed, so it ends at the last item holding something.
-            Callable::Arguments(list) => {
-                let len = block.lists.get(list).map_or(0, Vec::len);
-                (arity.unwrap_or(0).max(len), len)
-            }
-        };
-        let (shown, named) = match block.reach {
-            None => (parameters, false),
-            Some(Reach::Name) if filled == 0 => (0, true),
-            Some(Reach::Name) => (filled, false),
-            Some(Reach::Call(n)) => (n.clamp(filled, parameters), false),
-        };
-        Some(Extent {
-            parameters,
-            filled,
-            shown,
-            named,
-        })
-    }
-}
-
-impl Extent {
-    /// Every reach the block may take, narrowest first. `None`, showing
-    /// every parameter, stands for `Call(parameters)`.
-    pub fn stops(&self) -> Vec<Option<Reach>> {
-        let name = (self.filled == 0).then_some(Some(Reach::Name));
-        let calls = (self.filled..self.parameters).map(|n| Some(Reach::Call(n)));
-        name.into_iter().chain(calls).chain([None]).collect()
-    }
-
-    /// The stop the block is at.
-    pub fn reach(&self) -> Option<Reach> {
-        match self.shown {
-            _ if self.named => Some(Reach::Name),
-            shown if shown == self.parameters => None,
-            shown => Some(Reach::Call(shown)),
-        }
-    }
 }
 
 impl Language {
@@ -808,6 +699,7 @@ impl LanguageConfig {
 
         let mut blocks = Vec::new();
         let mut by_opcode = HashMap::new();
+        let mut refused = Vec::new();
         for config in self.blocks {
             let opcode = config.id.as_str();
             let at = Some(opcode);
@@ -926,20 +818,12 @@ impl LanguageConfig {
                 }
             }
 
-            let names_it = matches!(parts.first(), Some(Part::Label(_)));
-            let callable = match (config.callable, config.kind.output()) {
-                (Some(true), None) => {
-                    problem(at, "only reporters are callable".into());
+            // Judged once signatures are known, as a procedure reference is callable anyway.
+            let callable = calls::resolve(config.callable, &config.kind, &parts, self.callable)
+                .unwrap_or_else(|message| {
+                    refused.push((blocks.len(), message));
                     None
-                }
-                (Some(true), Some(_)) if !names_it => {
-                    problem(at, "a callable block's spec starts with a label, its name".into());
-                    None
-                }
-                (Some(true), Some(_)) => Some(Callable::Parts),
-                (None, Some(_)) if self.callable && names_it => Some(Callable::Parts),
-                (Some(false) | None, _) => None,
-            };
+                });
 
             for name in config.hints.keys() {
                 if !parts.iter().any(|part| match part {
@@ -991,26 +875,12 @@ impl LanguageConfig {
                 input
             });
             let signature = scope.signature.as_ref().map(|signature| {
-                let opcode = &signature.reference;
-                let target =
-                    reporter(opcode).filter(|target| target.inputs().count() == 1 && target.lists().count() == 1);
-                match target {
-                    Some(target) => {
-                        let list = target.lists().next().expect("counted").name.clone();
-                        procedures.push((by_opcode[opcode], list));
-                    }
-                    None => problem(
-                        at,
-                        format!("signature reference `{opcode}` must be a reporter with one input and one list"),
-                    ),
-                }
-                if def.input(&signature.name).is_none() || !scope.declares.contains(&signature.name) {
-                    problem(at, format!("signature name `{}` is no declaring input", signature.name));
-                }
-                if def.list(&signature.parameters).is_none() || !scope.declares.contains(&signature.parameters) {
-                    problem(at, format!("signature parameters `{}` are no declaring list", signature.parameters));
-                }
-                target.and_then(|target| target.inputs().next())
+                let target = reporter(&signature.reference);
+                let (list, input) = calls::check_signature(def, scope, signature, target, &mut |message| {
+                    problem(at, message)
+                });
+                procedures.extend(list.map(|list| (by_opcode[&signature.reference], list)));
+                input
             });
             for name in &scope.declares {
                 let ty = def
@@ -1048,6 +918,11 @@ impl LanguageConfig {
             }
         }
 
+        for (index, message) in refused {
+            if !procedures.iter().any(|(procedure, _)| *procedure == index) {
+                problem(Some(&blocks[index].opcode), message.into());
+            }
+        }
         for (index, list) in procedures {
             blocks[index].callable = Some(Callable::Arguments(list));
         }

@@ -19,8 +19,7 @@ type SwatchKey = (
 use crate::dropdown::Menu;
 use crate::filter;
 use crate::interact::{
-    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, REACH_GRIP, Reaching, drop_run,
-    find_snap,
+    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
     start_drag,
 };
 use crate::layout::{
@@ -321,21 +320,10 @@ impl BlockEditor {
             }
         }
 
-        // The right end of a callable block on the canvas, to show more or
-        // fewer of its parameters.
         let reach_at = |at: Pos2| {
-            let point = t.canvas(at);
-            let hit = scene
-                .hit(point)
-                .filter(|hit| !read_only && canvas_rect.contains(at) && point.x >= hit.rect.max.x - REACH_GRIP)?;
-            let stops = layout.stops(program.find(hit.id)?);
-            (stops.len() > 1).then_some(Reaching {
-                block: hit.id,
-                left: hit.rect.min.x,
-                stops,
-                grab: point.x - hit.rect.max.x,
-                moved: false,
-            })
+            (!read_only && canvas_rect.contains(at))
+                .then(|| crate::interact::reach_at(&layout, &scene, program, t.canvas(at)))
+                .flatten()
         };
         let on_reach = matches!(self.gesture, Gesture::Idle) && over.and_then(reach_at).is_some();
         let mut settle = false;
@@ -348,15 +336,15 @@ impl BlockEditor {
                     self.last_click = None;
                 } else if let Some(at) = over.filter(|_| input.pressed && !on_toggle) {
                     self.gesture = match reach_at(at) {
-                        Some(reaching) => Gesture::Reaching(reaching),
+                        Some(reaching) => Gesture::Pressed(Press { at, on: Pressed::Reach(reaching) }),
                         None => self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay),
                     };
                     // Only an uninterrupted pair of clicks on one block runs it.
                     let same = match &self.gesture {
-                        Gesture::Pressed(Press {
-                            on: Pressed::Block { id, .. },
-                            ..
-                        }) => self.last_click.is_some_and(|(last, _)| last == *id),
+                        Gesture::Pressed(press) => press
+                            .on
+                            .clicked()
+                            .is_some_and(|id| self.last_click.is_some_and(|(last, _)| last == id)),
                         _ => false,
                     };
                     if !same {
@@ -367,7 +355,7 @@ impl BlockEditor {
             Gesture::Pressed(press) => {
                 if input.down {
                     self.gesture = Gesture::Pressed(press);
-                } else if let Pressed::Block { id, .. } = press.on {
+                } else if let Some(id) = press.on.clicked() {
                     output.events.push(EditorEvent::BlockClicked(id));
                     let second = self
                         .last_click
@@ -394,22 +382,13 @@ impl BlockEditor {
                     self.gesture = Gesture::Resizing { edge, grab };
                 }
             }
-            Gesture::Reaching(mut reaching) => {
-                let nearest = input.at.and_then(|at| reaching.nearest(t.canvas(at).x - reaching.grab));
-                if let Some(reach) = nearest
-                    && !read_only
-                    && program.find(reaching.block).is_some_and(|block| block.reach != reach)
-                    && program.set_reach(language, reaching.block, reach)
-                {
-                    output.changed = true;
-                    reaching.moved = true;
+            Gesture::Reaching(mut reaching) if input.down && !read_only => {
+                if let Some(at) = input.at {
+                    output.changed |= reaching.follow(language, program, t.canvas(at).x);
                 }
-                if input.down && !read_only {
-                    self.gesture = Gesture::Reaching(reaching);
-                } else {
-                    settle = reaching.moved;
-                }
+                self.gesture = Gesture::Reaching(reaching);
             }
+            Gesture::Reaching(reaching) => settle = reaching.moved,
             Gesture::Dragging(mut drag) => {
                 if let Some(at) = input.at {
                     drag.head = t.canvas(at) - drag.grab_offset;
@@ -2033,8 +2012,9 @@ mod tests {
         program.find(id).unwrap().inputs["code"].literal.clone()
     }
 
-    #[test]
-    fn dragging_a_callables_end_hides_its_parameters_in_one_step() {
+    /// A callable block alone on the canvas, and the screen point of its
+    /// right end.
+    fn fold_on_canvas() -> (Language, Program, BlockId, egui::Context, BlockEditor, Pos2) {
         let language = Language::from_ron(
             r#"Language(
                 name: "calls",
@@ -2068,7 +2048,39 @@ mod tests {
         }
         .program(&program);
         let rect = scene.blocks[0].rect.translate(editor.view.pan);
-        let end = pos2(rect.max.x - 2.0, rect.center().y);
+        (language, program, id, ctx, editor, pos2(rect.max.x - 2.0, rect.center().y))
+    }
+
+    #[test]
+    fn a_double_click_on_a_callables_end_still_runs_it() {
+        let (language, mut program, id, ctx, mut editor, end) = fold_on_canvas();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let mut events = Vec::new();
+        for time in [1.0, 1.1] {
+            for input in [vec![egui::Event::PointerMoved(end)], vec![button(true)], vec![button(false)]] {
+                let raw = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+                    time: Some(time),
+                    events: input,
+                    ..Default::default()
+                };
+                ctx.run_ui(raw, |ui| events.extend(editor.show_with(ui, &language, &mut program, &Overlay::default()).events))
+                    .textures_delta
+                    .clear();
+            }
+        }
+        assert_eq!(runs(&events), [(id, 1)]);
+        assert_eq!(program.find(id).unwrap().reach, None, "a click is no reach");
+    }
+
+    #[test]
+    fn dragging_a_callables_end_hides_its_parameters_in_one_step() {
+        let (language, mut program, id, ctx, mut editor, end) = fold_on_canvas();
         let button = |at, pressed| egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,

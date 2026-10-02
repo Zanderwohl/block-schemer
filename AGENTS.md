@@ -55,7 +55,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     stack are derived, never stored. Loading is tolerant. A reference's
     `refers` names its `Declaration` (block and slot); its input copies the
     name, which `set_literal` and loading keep in step. A callable block's
-    `reach` is `Name`, `Call(n)`, or `None` for every parameter.
+    `reach` is `Name`, `Call(n)`, or `None` for every parameter; `load`
+    names a pre-version-4 file's empty procedures in by-name slots.
   - `edit`: tree operations by id (`detach`, `run_at`, `can_attach`,
     `can_move`, `attach`, `reference`, `set_reach`, which never hides a
     filled parameter; `duplicate` points references inside the copy at its
@@ -103,9 +104,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   panel goes back where it came from. A declaring literal sits in a raised
   chip with a grip (≡) to its right; dragging the chip drags out a new
   reference, as from the palette, drawn in the declaring block's color, and
-  leaves the declaration where it is. A callable block's right end, grabbed
-  with a ↔ cursor, snaps through its stops as it is dragged, its left edge
-  fixed, and settles as one step when let go. The side panel shows the host's tabs in
+  leaves the declaration where it is. A callable block's right end, shown
+  by a ↔ cursor, is taken once the pointer moves (a click there is the
+  block's) and snaps through its stops, its left edge fixed, settling as
+  one step when let go. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
   to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
@@ -272,8 +274,8 @@ come from these.
   menu of hidden tabs would fix it.
 - Runtime-supplied dropdowns (variables, procedures).
 - Calls: a mark on a callable block's draggable end before it is hovered;
-  signatures for a `define` of a `lambda`; rest parameters
-  (`documentation/07-calls.md`).
+  signatures for a `define` of a `lambda`; rest parameters; parameter
+  names for Inspect's missing arguments (`documentation/07-calls.md`).
 - Scopes: an internal `define`'s name is global like a top-level one's;
   showing or enforcing a reference's scope while it is dragged; flagging a
   name declared twice in one scope (`documentation/06-scopes.md`).
