@@ -283,6 +283,35 @@ mod tests {
     }
 
     #[test]
+    fn peeking_asks_for_no_more_than_the_character_it_peeks() {
+        /// Like a person who has typed one line so far.
+        struct OneLine(Mutex<bool>);
+        impl Console for OneLine {
+            fn write(&self, _: &str) {}
+            fn read_line(&self) -> io::Result<String> {
+                match std::mem::replace(&mut *self.0.lock().unwrap(), true) {
+                    false => Ok("a\n".into()),
+                    true => Err(io::Error::other("asked for a line not yet entered")),
+                }
+            }
+        }
+        let mut steel = Steel::new(Arc::new(OneLine(Mutex::new(false))));
+        let peeked = steel.run("(list (peek-char) (read-char) (peek-char) (read-char))");
+        assert_eq!(peeked.unwrap(), "(#\\a #\\a #\\newline #\\newline)");
+    }
+
+    #[test]
+    fn a_character_split_across_writes_is_written_whole() {
+        let console = Arc::new(Transcript::default());
+        let mut writer = ConsoleWriter::new(console.clone());
+        let [first, second] = *"λ".as_bytes() else { unreachable!() };
+        writer.write_all(&[b'x', first]).unwrap();
+        assert_eq!(console.take(), "x");
+        writer.write_all(&[second]).unwrap();
+        assert_eq!(console.take(), "λ");
+    }
+
+    #[test]
     fn a_read_stopped_while_waiting_ends_the_run() {
         struct Stopped;
         impl Console for Stopped {
