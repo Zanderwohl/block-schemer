@@ -79,6 +79,7 @@ impl Generator<'_> {
         Ok(match node.opcode.as_str() {
             "program" => one("main")?,
             "string" => Form::Atom(self.text(node, "text")?),
+            "nil" => atom("'()"),
             "variable" => one("variable")?,
             "call" => wrap([vec![one("operator")?], many("operands")?].concat()),
             "procedure_call" => wrap([vec![one("variable")?], many("arguments")?].concat()),
@@ -88,7 +89,12 @@ impl Generator<'_> {
                 wrap([vec![atom("define"), head], many("body")?].concat())
             }
             "lambda" => wrap([vec![atom("lambda"), wrap(many("formals")?)], many("body")?].concat()),
-            "let" => wrap([vec![atom("let"), wrap(many("bindings")?)], many("body")?].concat()),
+            "let" | "letrec" | "letrec*" => {
+                wrap([vec![atom(&node.opcode), wrap(many("bindings")?)], many("body")?].concat())
+            }
+            "clause" => wrap([vec![one("test")?], many("expressions")?].concat()),
+            "arrow_clause" => wrap(vec![one("test")?, atom("=>"), one("receiver")?]),
+            "else_clause" => wrap([vec![atom("else")], many("expressions")?].concat()),
             "display" if self.harness && node.list("port").is_none_or(<[Expr]>::is_empty) => {
                 wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)])
             }
@@ -300,6 +306,69 @@ mod tests {
         let mut call = b.block("call");
         set(&mut call, Slot::input("operator"), text("f"));
         assert_eq!(b.code(call), Ok("(f)".into()));
+
+        let mut pair = b.block("cons");
+        set(&mut pair, Slot::input("car"), text("1"));
+        let nil = b.block("nil");
+        set(&mut pair, Slot::input("cdr"), plug(nil));
+        assert_eq!(b.code(pair), Ok("(cons 1 '())".into()));
+    }
+
+    #[test]
+    fn cond_clauses_are_lists_and_else_goes_out_as_else() {
+        let mut b = Builder::new();
+        let mut negative = b.block("clause");
+        let mut is_negative = b.block("negative?");
+        set(&mut is_negative, Slot::input("x"), text("x"));
+        set(&mut negative, Slot::input("test"), plug(is_negative));
+        set(&mut negative, item("expressions"), text("-1"));
+        let mut found = b.block("clause");
+        set(&mut found, Slot::input("test"), text("x"));
+        let mut passed = b.block("arrow_clause");
+        set(&mut passed, Slot::input("test"), text("x"));
+        set(&mut passed, Slot::input("receiver"), text("abs"));
+        let mut otherwise = b.block("else_clause");
+        set(&mut otherwise, item("expressions"), text("0"));
+        let mut cond = b.block("cond");
+        for clause in [negative, found, passed, otherwise] {
+            set(&mut cond, item("clauses"), plug(clause));
+        }
+        assert_eq!(b.code(cond), Ok("(cond ((negative? x) -1) (x) (x => abs) (else 0))".into()));
+    }
+
+    #[test]
+    fn letrec_bindings_see_each_other() {
+        use block_parse::edit::{Fragment, Target};
+        use block_parse::Declaration;
+
+        for opcode in ["letrec", "letrec*"] {
+            let mut b = Builder::new();
+            let mut scope = b.block(opcode);
+            let mut ids = Vec::new();
+            for name in ["even", "odd"] {
+                let mut binding = b.block("binding");
+                set(&mut binding, Slot::input("variable"), text(name));
+                ids.push(binding.id);
+                set(&mut scope, item("bindings"), plug(binding));
+            }
+            let scope_id = scope.id;
+            b.program.stacks.push(Stack {
+                pos: [0.0, 0.0],
+                blocks: vec![scope],
+            });
+            let odd = Declaration {
+                block: ids[1],
+                slot: Slot::input("variable"),
+            };
+            for (parent, slot) in [(ids[0], Slot::input("init")), (scope_id, item("body"))] {
+                let reference = b.program.reference(&b.language, &odd).unwrap();
+                let target = Target::Input { parent, slot };
+                b.program.attach(&b.language, Fragment { blocks: vec![reference] }, target).unwrap();
+            }
+            b.program.set_literal(ids[1], &Slot::input("init"), "1".into());
+            let run = b.program.script_at(&b.language, scope_id).unwrap();
+            assert_eq!(script(&b.language, &run), Ok(format!("({opcode} ((even odd) (odd 1)) odd)")));
+        }
     }
 
     #[test]

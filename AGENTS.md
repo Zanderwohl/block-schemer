@@ -28,9 +28,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     usable `over` some of its parts, or anywhere for those it makes
     `global`; a `reference` block dragged out of a declaring literal's grip
     shows the name, uneditable, or "Unnamed {hint} {n}" while it is blank
-    (`documentation/06-scopes.md`). A declaring slot holding a block with no
-    `over` or `global` of its own takes that block's names, as `let` takes
-    its bindings'.
+    (`documentation/06-scopes.md`). A declaring slot holding a block with
+    no `over` or `global` of its own takes that block's names, as `let`
+    takes its bindings'; one `over` itself lets blocks in it see them, as
+    `letrec`'s bindings see each other.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the
@@ -156,10 +157,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `codegen` turns its blocks into Scheme, refusing a script with problems,
   and escapes strings before Scheme sees them, and writes a named block by
   name; a procedure dropped empty into a `procedure` slot (`call`'s
-  operator, `fold`, `map`, `apply`) is named, and a round one there is
+  operator, `fold`, `map`, `apply`, a `cond` clause's receiver) is named, and a round one there is
   called for its procedure. Every procedure block is callable and syntax
-  opts out; Scheme does not curry. `define`, `define … _taking_`, `lambda`
-  and `let` (through `binding`) are scopes whose references are `variable`
+  opts out; Scheme does not curry. `define`, `define … _taking_`, `lambda`,
+  `let`, `letrec` and `letrec*` (through `binding`, a `letrec`'s inits in
+  scope too) are scopes whose references are `variable`
   blocks, definitions' names global, but a `define … _taking_`'s name
   drags out a `procedure_call` with an argument per parameter; Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
@@ -304,7 +306,7 @@ come from these.
 - `dispatch::native` replaces a dead worker inside `poll`, on the UI
   thread: building Steel's prelude blocks a frame, and a `make` that panics
   takes the UI down with it.
-- Block Schemer: the rest of R7RS's syntax (`cond`, `and`, `let*`, `do`,
+- Block Schemer: the rest of R7RS's syntax (`case`, `and`, `let*`, `do`,
   `guard`, …), and a maximum for a list of optional arguments.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a web build
   once a WASM Scheme replaces Steel, with a Web Worker `Dispatch`. A native

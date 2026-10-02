@@ -22,6 +22,10 @@ const LANGUAGE: &str = r#"Language(
             scope: (declares: ["pairs"], over: ["body"]),
         ),
         (
+            id: "letrec", name: "Letrec", kind: Reporter("value"), spec: "letrec {pairs:pair*} {body:value}",
+            scope: (declares: ["pairs"], over: ["pairs", "body"]),
+        ),
+        (
             id: "pair", name: "Pair", kind: Reporter("pair"), spec: "{name:name} = {init:value}",
             scope: (declares: ["name"], reference: "get"),
         ),
@@ -303,6 +307,35 @@ fn a_binding_hands_its_name_to_the_body_of_the_block_holding_it() {
 }
 
 #[test]
+fn a_declaring_slot_in_scope_lets_its_bindings_see_each_other() {
+    let language = language();
+    let mut program = Program::new(&language);
+    let mut pairs = Vec::new();
+    for name in ["even", "odd"] {
+        let mut pair = program.instantiate(&language, "pair").unwrap();
+        pair.inputs.insert("name".into(), literal(name));
+        pairs.push(pair);
+    }
+    let (even, odd) = (pairs[0].id, pairs[1].id);
+    let mut scope = program.instantiate(&language, "letrec").unwrap();
+    let items = pairs.into_iter().map(|pair| block_parse::Input { literal: None, block: Some(Box::new(pair)) });
+    scope.lists.insert("pairs".into(), items.collect());
+    program.stacks.push(Stack {
+        pos: [0.0, 0.0],
+        blocks: vec![scope],
+    });
+    let declared = |block| Declaration {
+        block,
+        slot: Slot::input("name"),
+    };
+    let to_odd = program.reference(&language, &declared(odd)).unwrap();
+    plug(&mut program, &language, to_odd, even, Slot::input("init"));
+    let to_itself = program.reference(&language, &declared(odd)).unwrap();
+    plug(&mut program, &language, to_itself, odd, Slot::input("init"));
+    assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+}
+
+#[test]
 fn a_branch_can_be_a_scope() {
     let language = language();
     let mut program = Program::new(&language);
@@ -394,8 +427,8 @@ fn scopes_are_checked_when_the_language_compiles() {
             scope: (declares: ["each"], over: ["body"], reference: "get")"#, r#"spec: "for {each:value} [body]",
             scope: (declares: ["each"], over: ["each"], global: ["other"], reference: "say")"#);
     let found = problems(&bad);
-    assert_eq!(found.len(), 6, "{found:#?}");
-    for expected in ["`nope`", "`elsewhere`", "no reference", "`say` must be a reporter", "both declares", "global `other`"] {
+    assert_eq!(found.len(), 5, "{found:#?}");
+    for expected in ["`nope`", "`elsewhere`", "no reference", "`say` must be a reporter", "global `other`"] {
         assert!(found.iter().any(|p| p.contains(expected)), "{expected}: {found:#?}");
     }
 

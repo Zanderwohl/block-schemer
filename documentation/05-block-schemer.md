@@ -44,7 +44,8 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   newline, tab and return are refused.
   A named block goes out as its name: a square Add is `+`, a round one
   `(+)`. A procedure dropped with nothing filled in into a `procedure` slot
-  (Call's operator, and `apply`, `map` and `fold`'s procedure) is named
+  (Call's operator, `apply`, `map` and `fold`'s procedure, and a `cond`
+  clause's receiver) is named
   there; a round block in one is called, and its result is the procedure.
   Syntax blocks (`if`, `lambda`, …) are not callable. A `define … taking`'s
   name drags out a `procedure_call`, an argument slot per parameter; a call
@@ -70,8 +71,8 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   `__steel-<name>`. It adds what Steel lacks (`string-map`, `list-copy`,
   `read-string`, …) and fixes what it gets wrong (`=` and `gcd` with any
   number of arguments, `member` and `assoc` with a compare procedure, `atan`
-  of two). The Unicode character classes are Rust functions registered on
-  the engine.
+  of two, a `cond` clause that is only a test). The Unicode character
+  classes are Rust functions registered on the engine.
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
@@ -154,16 +155,21 @@ from Steel does not say which definition it came from.
 | `program` | its one expression |
 | `string` | a string literal |
 | `variable` | the name |
+| `nil` | `'()` |
 | `call` | `(operator operands…)` |
-| `binding` | `(variable init)`, for `let` |
+| `binding` | `(variable init)`, for `let`, `letrec` and `letrec*` |
 | `define_procedure` | `(define (variable formals…) body…)` |
 | `lambda` | `(lambda (formals…) body…)` |
-| `let` | `(let (bindings…) body…)` |
+| `let`, `letrec`, `letrec*` | `(let (bindings…) body…)`, and the same |
+| `clause` | `(test expressions…)`, for `cond` |
+| `arrow_clause` | `(test => receiver)` |
+| `else_clause` | `(else expressions…)`, last, though nothing enforces it |
 | `display` | `(display obj __out)` given no port, shown as `(display obj)` unless the harness is |
 | `string_chars` | `(string char…)` |
 
 `define_procedure`'s formals, `lambda`'s and the variables of `let`'s
-bindings are scopes over their bodies; the names `define` and
+bindings are scopes over their bodies, and `letrec`'s and `letrec*`'s over
+their bindings' inits too; the names `define` and
 `define_procedure` give are global. A grip beside each name drags out a
 `variable` block in the declaring block's color that follows the name when it
 is renamed and is a problem outside its scope (`06-scopes.md`). A `variable`
@@ -238,8 +244,8 @@ console alone.
   a list held elsewhere: `(apply list 'x (cdr l))` gives `l`. It is im-lists'
   `cons` growing a list whose `cdr` only moved its offset. The prelude
   avoids it; programs can still meet it.
-- The rest of R7RS's syntax: `cond`, `case`, `and`, `or`, `when`, `unless`,
-  `let*`, `letrec`, named `let`, `do`, `set!`, `delay`, `guard`,
+- The rest of R7RS's syntax: `case`, `and`, `or`, `when`, `unless`,
+  `let*`, named `let`, `do`, `set!`, `delay`, `guard`,
   `parameterize`, quasiquote, `define-record-type` and the rest.
 
 - Steel will be replaced by a Scheme that runs in WASM, for a web version

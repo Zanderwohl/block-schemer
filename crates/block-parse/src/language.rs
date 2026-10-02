@@ -913,9 +913,6 @@ impl LanguageConfig {
                     ),
                     _ => {}
                 }
-                if scope.over.contains(name) {
-                    problem(at, format!("`{name}` both declares and is in scope"));
-                }
             }
             for name in scope.global.iter().filter(|name| !scope.declares.contains(name)) {
                 problem(at, format!("global `{name}` is not declared"));
