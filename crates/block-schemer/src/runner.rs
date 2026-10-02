@@ -594,6 +594,46 @@ mod tests {
     }
 
     #[test]
+    fn the_guessing_game_can_be_won_by_halving() {
+        const PROMPT: &str = "Guess a number from 1 to 100: ";
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/guess-the-number.scmb")).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let mut runner = runner(&language);
+        runner.start(&program, None, &program.ast(&language));
+        wait_for_input(&mut runner);
+        // What the game says to `line`, up to its next prompt or the end.
+        let mut answer = |line: &str| {
+            runner.console_input(&TabId::from("console"), line);
+            let before = runner.console().len();
+            let start = Instant::now();
+            while !runner.console().ends_with(PROMPT) || runner.console().len() == before {
+                if runner.status() == RunStatus::Idle {
+                    break;
+                }
+                assert!(start.elapsed() < Duration::from_secs(20), "no answer to {line}");
+                runner.poll();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            runner.console()[before..].trim_end_matches(PROMPT).trim().to_owned()
+        };
+        assert_eq!(answer("lots"), "That's not a number.");
+        let (mut low, mut high) = (1, 100);
+        for tries in 1..=7 {
+            let middle = (low + high) / 2;
+            match answer(&middle.to_string()).as_str() {
+                "Higher!" => low = middle + 1,
+                "Lower!" => high = middle - 1,
+                said => {
+                    assert_eq!(said, format!("Got it! Guesses: {tries}"));
+                    return;
+                }
+            }
+        }
+        panic!("halving finds it in seven");
+    }
+
+    #[test]
     fn a_run_answers_later_and_stop_ends_a_runaway_one() {
         let language = crate::language();
         let program = Program::from_ron(

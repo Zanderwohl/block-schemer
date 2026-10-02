@@ -1,0 +1,81 @@
+#![enable(implicit_some)]
+Program(
+    language: "Block Schemer",
+    version: 2,
+    stacks: [
+        (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "program",
+            inputs: {"main": (block: (id: 2, opcode: "call",
+                inputs: {"operator": (literal: "play")},
+                lists: {"operands": [
+                    (block: (id: 3, opcode: "+", lists: {"z": [
+                        (literal: "1"),
+                        (block: (id: 4, opcode: "modulo", inputs: {
+                            "n1": (block: (id: 5, opcode: "current-jiffy")),
+                            "n2": (literal: "100"),
+                        })),
+                    ]})),
+                    (literal: "1"),
+                ]}))})]),
+        (pos: (24.0, 120.0), blocks: [(id: 10, opcode: "define_procedure",
+            inputs: {"variable": (literal: "play")},
+            lists: {
+                "formals": [(literal: "secret"), (literal: "tries")],
+                "body": [
+                    (block: (id: 11, opcode: "display", inputs: {"obj": (block: (id: 12, opcode: "string", inputs: {"text": (literal: "Guess a number from 1 to 100: ")}))})),
+                    (block: (id: 13, opcode: "let",
+                        lists: {
+                            "bindings": [(block: (id: 14, opcode: "binding", inputs: {
+                                "variable": (literal: "line"),
+                                "init": (block: (id: 15, opcode: "read-line")),
+                            }))],
+                            "body": [(block: (id: 16, opcode: "if", inputs: {
+                                "test": (block: (id: 17, opcode: "eof-object?", inputs: {"obj": (literal: "line")})),
+                                "consequent": (block: (id: 18, opcode: "display", inputs: {"obj": (block: (id: 19, opcode: "string", inputs: {"text": (literal: "Bye.")}))})),
+                                "alternate": (block: (id: 20, opcode: "let",
+                                    lists: {
+                                        "bindings": [(block: (id: 21, opcode: "binding", inputs: {
+                                            "variable": (literal: "guess"),
+                                            "init": (block: (id: 22, opcode: "string->number", inputs: {"string": (literal: "line")})),
+                                        }))],
+                                        "body": [(block: (id: 23, opcode: "if", inputs: {
+                                            "test": (block: (id: 24, opcode: "not", inputs: {"obj": (literal: "guess")})),
+                                            "consequent": (block: (id: 25, opcode: "begin", lists: {"expressions": [
+                                                (block: (id: 26, opcode: "display", inputs: {"obj": (block: (id: 27, opcode: "string", inputs: {"text": (literal: "That's not a number.")}))})),
+                                                (block: (id: 28, opcode: "newline")),
+                                                (block: (id: 29, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [(literal: "secret"), (literal: "tries")]})),
+                                            ]})),
+                                            "alternate": (block: (id: 30, opcode: "if", inputs: {
+                                                "test": (block: (id: 31, opcode: "<", lists: {"x": [(literal: "guess"), (literal: "secret")]})),
+                                                "consequent": (block: (id: 32, opcode: "begin", lists: {"expressions": [
+                                                    (block: (id: 33, opcode: "display", inputs: {"obj": (block: (id: 34, opcode: "string", inputs: {"text": (literal: "Higher!")}))})),
+                                                    (block: (id: 35, opcode: "newline")),
+                                                    (block: (id: 36, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [
+                                                        (literal: "secret"),
+                                                        (block: (id: 37, opcode: "+", lists: {"z": [(literal: "tries"), (literal: "1")]})),
+                                                    ]})),
+                                                ]})),
+                                                "alternate": (block: (id: 40, opcode: "if", inputs: {
+                                                    "test": (block: (id: 41, opcode: ">", lists: {"x": [(literal: "guess"), (literal: "secret")]})),
+                                                    "consequent": (block: (id: 42, opcode: "begin", lists: {"expressions": [
+                                                        (block: (id: 43, opcode: "display", inputs: {"obj": (block: (id: 44, opcode: "string", inputs: {"text": (literal: "Lower!")}))})),
+                                                        (block: (id: 45, opcode: "newline")),
+                                                        (block: (id: 46, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [
+                                                            (literal: "secret"),
+                                                            (block: (id: 47, opcode: "+", lists: {"z": [(literal: "tries"), (literal: "1")]})),
+                                                        ]})),
+                                                    ]})),
+                                                    "alternate": (block: (id: 50, opcode: "begin", lists: {"expressions": [
+                                                        (block: (id: 51, opcode: "display", inputs: {"obj": (block: (id: 52, opcode: "string", inputs: {"text": (literal: "Got it! Guesses: ")}))})),
+                                                        (block: (id: 53, opcode: "display", inputs: {"obj": (literal: "tries")})),
+                                                        (block: (id: 54, opcode: "newline")),
+                                                    ]})),
+                                                })),
+                                            })),
+                                        }))],
+                                    })),
+                            }))],
+                        })),
+                ],
+            })]),
+    ],
+)
