@@ -69,11 +69,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-bundle --locked
       - run: cargo build --release --locked -p block-schemer --target x86_64-apple-darwin
-      - run: cargo bundle --release -p block-schemer --target aarch64-apple-darwin
+      # cargo-bundle globs the icon paths from the working directory.
+      - run: cargo bundle --release --target aarch64-apple-darwin
+        working-directory: crates/block-schemer
       - name: Make the app universal
         run: |
           app="target/aarch64-apple-darwin/release/bundle/osx/Block Schemer.app"
           test -f "$app/Contents/MacOS/block-schemer"
+          test -f "$app/Contents/Resources/Block Schemer.icns"
           lipo -create -output "$app/Contents/MacOS/block-schemer" \
             target/aarch64-apple-darwin/release/block-schemer \
             target/x86_64-apple-darwin/release/block-schemer
