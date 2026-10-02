@@ -447,6 +447,17 @@ mod tests {
     }
 
     #[test]
+    fn a_defined_procedure_calls_itself_through_a_reference_to_its_name() {
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/factorial.scmb")).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let mut runner = runner(&language);
+        let file = runner.inspect(&program, BlockId(20), &program.script_at(&language, BlockId(20)).unwrap()).unwrap();
+        assert!(file.contains("(* n (factorial (- n 1)))"), "{file}");
+        assert_eq!(play(&mut runner, &language, &program), "> block-schemer untitled.scmb\n3628800\n");
+    }
+
+    #[test]
     fn each_play_starts_a_fresh_session() {
         let (language, mut program, mut runner) = example();
         double_click(&mut runner, &language, &program, 1);
