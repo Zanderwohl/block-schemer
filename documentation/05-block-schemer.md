@@ -26,7 +26,8 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   Scheme, such as `if`'s `then` and `else`, are faint. `fold` is SRFI 1's,
   with its names, filed under Pairs and lists; Steel's takes one list.
   Every block is tagged `basics` if it is among the most used, and with the
-  library it comes from (`(scheme char)`, `(srfi 1)`), for filtering later.
+  library it comes from, `char` for `(scheme char)` and so on, or
+  `(srfi 1)`; the palette starts with only `basics` checked.
   The `string` procedure's block is `string_chars`, as `string` is the
   string literal's.
 - `literals`: validators for the `datum` type (a number, boolean, character,
