@@ -106,7 +106,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   [program.scmb]`,
   `documentation/05-block-schemer.md`). Its language is embedded; its
   `codegen` is the layer that refuses anything the language does not offer
-  and escapes strings before Scheme sees them; Inspect shows the same code
+  and escapes strings before Scheme sees them, and writes a procedure
+  block with nothing filled in by name in a square `procedure` slot
+  (`call`'s operator, `fold`, `map`, `apply`); Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
   behind the `Scheme` trait so a WASM Scheme can replace it. Every run goes
   through a `dispatch::Dispatch`, which spawns, tracks and kills the workers

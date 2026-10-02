@@ -14,6 +14,8 @@ Language(
         "string": (shape: Round, literal: Text),
         "symbol": (shape: Square, literal: Custom("symbol")),
         "binding": (shape: Square),
+        // A procedure block with nothing filled in goes out by name: `+`, not `(+)`.
+        "procedure": (shape: Square, literal: Custom("symbol"), accepts: Types(["datum"])),
     },
 
     categories: [
@@ -63,7 +65,7 @@ Language(
             name: "Call",
             category: "Primitive expression types",
             kind: Reporter("datum"),
-            spec: "{operator:datum} {operands:datum*}",
+            spec: "{operator:procedure} {operands:datum*}",
             hints: {"operands": "operand"},
             description: "Calls any procedure, named or computed.",
         ),
@@ -118,7 +120,7 @@ Language(
             name: "Apply",
             category: "Control features",
             kind: Reporter("datum"),
-            spec: "apply {proc:datum} {args:datum+}",
+            spec: "apply {proc:procedure} {args:datum+}",
             hints: {"args": "arg"},
             description: "Calls the procedure with the arguments, the last of which is a list spread out.",
         ),
@@ -127,7 +129,7 @@ Language(
             name: "Map",
             category: "Control features",
             kind: Reporter("datum"),
-            spec: "map {proc:datum} {lists:datum+}",
+            spec: "map {proc:procedure} {lists:datum+}",
             hints: {"lists": "list"},
         ),
 
@@ -149,7 +151,7 @@ Language(
             name: "Fold",
             category: "Pairs and lists",
             kind: Reporter("datum"),
-            spec: "fold {kons:datum} {knil:datum} {clist:datum}",
+            spec: "fold {kons:procedure} {knil:datum} {clist:datum}",
             description: "SRFI 1's fold over one list: calls kons with each element and the result so far, starting from knil.",
         ),
 
