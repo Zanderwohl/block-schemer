@@ -9,10 +9,8 @@ use block_parse::{Language, Value};
 
 use crate::form::Form;
 
-/// The slot type whose bare procedure blocks are passed by name.
 const PROCEDURE: &str = "procedure";
 
-/// Blocks that are syntax, not procedures, so never passed by name.
 const SYNTAX: [&str; 12] = [
     "program", "define", "define_procedure", "variable", "quote", "string", "call", "lambda", "if", "let", "binding",
     "begin",
@@ -43,8 +41,7 @@ pub fn flat(language: &Language, script: &Script, harness: bool) -> Result<Strin
     Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
 }
 
-/// Problems are refused as generation reaches them rather than up front, as
-/// a procedure passed by name is a problem to the AST (`-` with no operand).
+/// Problems are refused where reached, not up front: `-` passed by name has too few items.
 fn forms(language: &Language, script: &Script, holes: bool, harness: bool) -> Result<Vec<Form>, String> {
     let mut forms = Vec::new();
     for statement in &script.body {
@@ -159,8 +156,7 @@ impl Generator<'_> {
         }
     }
 
-    /// The procedure's name, if `node` is a procedure block with every input
-    /// blank and every list empty.
+    /// The name of a procedure block with nothing filled in.
     fn reference(&self, node: &Node) -> Option<Form> {
         let def = self.language.block(&node.opcode)?;
         let blank = |expr: &Expr| {
