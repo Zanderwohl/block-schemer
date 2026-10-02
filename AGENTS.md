@@ -21,7 +21,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     faded hint, or the block's `hints` text for it, and no validation error
     until there is text to check; a list's empty slot shows it
     with `…`. A `Slot` addresses an input, or a list item by index; the
-    index one past the last item appends.
+    index one past the last item appends. A block's `tags` are free text;
+    `checked_tags` names those whose blocks the palette shows at first;
+    without it the palette has no filter.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the
@@ -67,7 +69,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   canvas and, right of it, the side panel, which starts collapsed. Dragging a
   panel's edge sets `EditorOptions::palette_width` or `side_width`, and a
   button half its width inside the canvas collapses or restores it at that
-  width (`palette_collapsed`, `side_collapsed`). A run dropped over the side
+  width (`palette_collapsed`, `side_collapsed`). For a language with
+  `checked_tags`, checkboxes in two columns above the palette's blocks
+  filter them: All, off at first, shows every block, untagged ones
+  included; otherwise a block shows when any of its tags is checked
+  (`palette_all`, `palette_tags`, `None` until the user ticks one, meaning
+  the language's `checked_tags`). A run dropped over the side
   panel goes back where it came from. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
@@ -92,7 +99,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   Feature `snapshot` (off by default) renders programs to images offscreen
   through egui_kittest's wgpu renderer; with it, `--command snapshot` (`cargo
   snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
-  column per category, instead of opening the window.
+  column per category, or with `--tags="a,b"` only blocks with one of those
+  tags, instead of opening the window.
 - `crates/block-schemer` — Block Schemer, a consumer: R7RS's standard
   procedures (short of files, process, eval and mutating pairs and strings)
   and a few of its forms, whose blocks run in Steel when double-clicked;
@@ -190,7 +198,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 To check a drawing change without opening a window, render every block of a
 language and look at the image:
 `cargo snapshot -l examples/languages/tiny.ron <scratch>/tiny.png`
-(`--scale` sets pixels per canvas unit, default 2). For a particular program,
+(`--scale` sets pixels per canvas unit, default 2; `--tags="a,b"` keeps
+only blocks with one of those tags). For a particular program,
 call `block_parse_gui::snapshot::program`.
 
 ## Deferred

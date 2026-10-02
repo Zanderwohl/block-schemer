@@ -17,6 +17,7 @@ type SwatchKey = (
     Vec<Option<block_parse::CategoryColor>>,
 );
 use crate::dropdown::Menu;
+use crate::filter;
 use crate::interact::{
     DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
 };
@@ -65,6 +66,11 @@ pub struct EditorOptions {
     pub palette_width: Option<f32>,
     /// Hides the palette without forgetting `palette_width`.
     pub palette_collapsed: bool,
+    /// The tags whose blocks the palette shows. `None` until the user ticks
+    /// a box, meaning the language's `checked_tags`.
+    pub palette_tags: Option<Vec<String>>,
+    /// The filter's All box: every block shows, untagged ones included.
+    pub palette_all: bool,
     /// The panel right of the canvas, holding the host's `Overlay::tabs`.
     pub side_width: f32,
     pub side_collapsed: bool,
@@ -85,6 +91,8 @@ impl Default for EditorOptions {
             breakpoints: true,
             palette_width: None,
             palette_collapsed: false,
+            palette_tags: None,
+            palette_all: false,
             side_width: 320.0,
             side_collapsed: true,
             tab_order: Vec::new(),
@@ -211,10 +219,17 @@ impl BlockEditor {
             validate: false,
             lifted: None,
         }
-        .palette();
-        let panels = Panels::new(bounds, &self.options, palette.width);
+        .palette(filter::shown(&self.options, language));
+        let fitted = palette.width.max(filter::width(&ctx, language));
+        let panels = Panels::new(bounds, &self.options, fitted);
         tabs::arrange(&mut self.options, &mut self.tabs, &overlay.tabs);
-        let (palette_rect, canvas_rect) = (panels.palette, panels.canvas);
+        let canvas_rect = panels.canvas;
+        let filter_rect = Rect::from_min_size(
+            panels.palette.min,
+            vec2(panels.palette.width(), filter::height(language).min(panels.palette.height())),
+        );
+        // The blocks, which scroll under the filter.
+        let palette_rect = Rect::from_min_max(pos2(panels.palette.min.x, filter_rect.max.y), panels.palette.max);
 
         let double_click_delay = ctx.options(|o| o.input_options.max_double_click_delay);
         let input = ctx.input(|i| PointerInput {
@@ -234,8 +249,8 @@ impl BlockEditor {
             .at
             .filter(|&at| bounds.contains(at) && ctx.layer_id_at(at) == Some(ui.layer_id()));
         let divider = over.and_then(|at| panels.edge_at(&self.options, at));
-        // The side panel's widgets take what lands on them.
-        let over = over.filter(|at| divider.is_some() || !panels.side.contains(*at));
+        // The side panel's and filter's widgets take what lands on them.
+        let over = over.filter(|at| divider.is_some() || !(panels.side.contains(*at) || filter_rect.contains(*at)));
         let on_toggle = over.is_some_and(|at| panels.on_toggle(at));
 
         if let Some(at) = over {
@@ -366,7 +381,7 @@ impl BlockEditor {
                 } else if !hidden {
                     // Checked before the snap, so dragging out to delete never
                     // catches a seam on the way.
-                    let delete = input.at.is_some_and(|at| palette_rect.contains(at));
+                    let delete = input.at.is_some_and(|at| panels.palette.contains(at));
                     output.changed |= drop_run(language, program, drag, delete);
                 }
             }
@@ -401,6 +416,9 @@ impl BlockEditor {
             );
         }
         paint::scene(&painter, &palette.scene, palette_t, &theme, false, &Overlay::default());
+        if filter::show(ui, filter_rect, language, &mut self.options, &theme) {
+            ctx.request_repaint();
+        }
 
         let canvas = ui.painter_at(canvas_rect);
         canvas.rect_filled(canvas_rect, 0.0, theme.canvas);
@@ -1395,6 +1413,63 @@ mod tests {
         let mut editor = BlockEditor::default();
         editor.options.palette_width = Some(0.0);
         editor
+    }
+
+    /// A click at `at`, then the text painted the frame after.
+    fn click_at(
+        ctx: &egui::Context,
+        editor: &mut BlockEditor,
+        language: &Language,
+        program: &mut Program,
+        at: Pos2,
+    ) -> Vec<String> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for events in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
+            frame(ctx, editor, language, program, &Overlay::default(), events);
+        }
+        frame(ctx, editor, language, program, &Overlay::default(), vec![])
+    }
+
+    #[test]
+    fn ticking_a_tag_in_the_palette_filter_shows_its_blocks() {
+        let text = include_str!("../../../examples/languages/strict_tiny.ron");
+        let language = Language::from_ron(
+            &text.replace("blocks: [", r#"checked_tags: ["loop"], blocks: ["#),
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        assert_eq!(language.tags()[0], "branching", "the second box, under All");
+        let mut program = Program::new(&language);
+        let ctx = egui::Context::default();
+        let mut editor = BlockEditor::default();
+        let painted = |texts: &[String], label: &str| texts.iter().any(|text| text == label);
+
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let texts = frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        for label in std::iter::once("All").chain(language.tags().iter().map(String::as_str)) {
+            assert!(painted(&texts, label), "no box for {label}: {texts:?}");
+        }
+        assert!(!painted(&texts, "if"), "branching starts unchecked: {texts:?}");
+        assert!(!painted(&texts, "when program starts"), "untagged blocks wait for All");
+
+        let texts = click_at(&ctx, &mut editor, &language, &mut program, pos2(18.0, 43.0));
+        assert_eq!(editor.options.palette_tags, Some(vec!["loop".to_owned(), "branching".to_owned()]));
+        assert!(matches!(editor.gesture, Gesture::Idle), "the press was the box's, not the palette's");
+        assert!(painted(&texts, "if"), "{texts:?}");
+
+        let texts = click_at(&ctx, &mut editor, &language, &mut program, pos2(18.0, 21.0));
+        assert!(editor.options.palette_all);
+        assert!(painted(&texts, "when program starts"), "{texts:?}");
+
+        let unfiltered = Language::from_ron(text, &block_parse::Validators::new()).unwrap();
+        let texts = frame(&ctx, &mut BlockEditor::default(), &unfiltered, &mut program, &Overlay::default(), vec![]);
+        assert!(!painted(&texts, "All"), "no filter without checked tags");
+        assert!(painted(&texts, "when program starts") && painted(&texts, "if"), "{texts:?}");
     }
 
     #[test]

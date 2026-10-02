@@ -22,6 +22,10 @@ struct Args {
     /// With `--command snapshot`: pixels per canvas unit.
     #[arg(long, default_value_t = 2.0)]
     scale: f32,
+    /// With `--command snapshot`: only blocks with one of these tags, as
+    /// `--tags="foo,bar"`. Every block when left out.
+    #[arg(long, value_delimiter = ',')]
+    tags: Option<Vec<String>>,
     /// The program to open, created on first save if it does not exist. For
     /// `snapshot`, the PNG to write.
     program: Option<PathBuf>,
@@ -49,7 +53,18 @@ fn main() -> ExitCode {
         }
     };
     if args.command == Command::Snapshot {
-        return snapshot(&language, args.program.as_deref(), args.scale);
+        let unknown: Vec<&str> = args
+            .tags
+            .iter()
+            .flatten()
+            .filter(|tag| !language.tags().contains(tag))
+            .map(String::as_str)
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!("no block is tagged {}", unknown.join(", "));
+            return ExitCode::from(2);
+        }
+        return snapshot(&language, args.tags.as_deref(), args.program.as_deref(), args.scale);
     }
     app::run(AppConfig {
         name: "block-parse-editor".into(),
@@ -62,12 +77,12 @@ fn main() -> ExitCode {
 }
 
 #[cfg(feature = "snapshot")]
-fn snapshot(language: &Language, output: Option<&Path>, scale: f32) -> ExitCode {
+fn snapshot(language: &Language, tags: Option<&[String]>, output: Option<&Path>, scale: f32) -> ExitCode {
     let Some(output) = output else {
         eprintln!("no output given: pass the path of the PNG to write");
         return ExitCode::from(2);
     };
-    let image = match block_parse_gui::snapshot::grid(language, &block_parse_gui::Theme::default(), scale) {
+    let image = match block_parse_gui::snapshot::grid(language, tags, &block_parse_gui::Theme::default(), scale) {
         Ok(image) => image,
         Err(error) => {
             eprintln!("could not render: {error}");
@@ -84,7 +99,7 @@ fn snapshot(language: &Language, output: Option<&Path>, scale: f32) -> ExitCode 
 }
 
 #[cfg(not(feature = "snapshot"))]
-fn snapshot(_: &Language, _: Option<&Path>, _: f32) -> ExitCode {
+fn snapshot(_: &Language, _: Option<&[String]>, _: Option<&Path>, _: f32) -> ExitCode {
     eprintln!("built without snapshots: rebuild with --features snapshot");
     ExitCode::from(2)
 }
