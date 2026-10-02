@@ -80,7 +80,12 @@ pub enum TabContent {
     /// Read-only, but it can be selected and copied.
     Text(String),
     /// Standard output above a line to type standard input into.
-    Console { output: String },
+    Console {
+        output: String,
+        /// The host wants a line, as for a program waiting on a read. The
+        /// editor marks the line and focuses it when this turns on.
+        waiting: bool,
+    },
 }
 
 /// An on/off setting a runner offers, drawn by the host.
@@ -166,6 +171,9 @@ pub trait Runner {
 
     /// A line entered on one of the overlay's console tabs.
     fn console_input(&mut self, _tab: &TabId, _line: &str) {}
+
+    /// The end of input, asked for on one of the overlay's console tabs.
+    fn console_end(&mut self, _tab: &TabId) {}
 
     /// Settings for the host to offer, asked for again after `set_toggle`.
     fn toggles(&self) -> Vec<Toggle> {

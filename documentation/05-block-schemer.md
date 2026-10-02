@@ -52,13 +52,14 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   and indent their body two, one body form to a line when there are several;
   other calls line their arguments up under the first, or indent two under
   a name longer than ten characters.
-- `scheme`: the `Scheme` trait, `run(source) -> Answer { output, value }`,
-  and `Steel`, its implementation on Steel's sandboxed engine. Definitions
-  last for the session, as in a REPL. Output goes to a string port
-  (`__out`), which is why names starting `__` are refused: it is the
-  current output and error port, so `write`, `newline` and a `display`
-  passed by name reach the console too. The current input port is an empty
-  string port, as reading the app's stdin would block beyond Stop's reach.
+- `scheme`: the `Scheme` trait, `run(source)` giving back the written form
+  of the last value, and `Steel`, its implementation on Steel's sandboxed
+  engine, built on a `Console` it writes to and reads lines from.
+  Definitions last for the session, as in a REPL. Output goes to a port on
+  the console (`__out`), which is why names starting `__` are refused: it
+  is the current output and error port, so `write`, `newline` and a
+  `display` passed by name reach the console too. The current input port,
+  `__in`, reads the console (see below).
 - `prelude.scm`: evens out where Steel differs from R7RS, run into every
   session after the Steel originals it replaces are kept as
   `__steel-<name>`. It adds what Steel lacks (`string-map`, `list-copy`,
@@ -69,8 +70,7 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
-  columns, which its tab wraps if it is narrower. Lines typed into the
-  console are echoed until programs can read them.
+  columns, which its tab wraps if it is narrower.
 
 ## Playing the program
 
@@ -96,6 +96,38 @@ saved: the command that will one day run the file from a shell, which this
 line should then match. A double-click on any other block answers in a
 bubble and also writes `> ` and the expression, on one line, then what it
 said, to the console.
+
+## The console
+
+What a run writes reaches the console as it is written, not when the run
+ends, so a prompt shows before the read that follows it. A double-click's
+`> ` line is written before the first of its output, its answer or the
+input it waits for; its bubble still gets all its output, then its value.
+
+Reading without a port, or from `(current-input-port)`, reads lines
+entered in the console. A read that wants more than was entered waits:
+the dispatch says so (`Dispatch::waiting`), the runner marks its Console
+tab `waiting`, and the editor brings it forward, even past a bubble, and
+focuses its line. Each line entered is echoed after what the run wrote, as
+in a terminal, and handed to the dispatch for the runs sent so far: they
+may read lines entered ahead of a read, and a run sent later skips them. Ctrl+D on an empty line
+ends input, so a waiting read gets end of file; later reads wait again.
+While nothing runs, a line is only echoed. Stop ends a waiting read with
+the run, and drops any unread lines.
+
+Steel's own reading procedures do the work, on an input port made from a
+Rust `Read` that asks the console for a line when the last is used up.
+Steel 0.8.3 has no public way to make one, and its `peek-char` read four
+bytes ahead, waiting on the next line; `vendor/steel-core` patches both
+(`PATCH.md`). Steel's `read` takes whole lines, so whatever follows a
+datum on its last line is lost to later reads. What `read-char` or
+`peek-char` leaves of a line stays in the session's input port, for the
+next run in the session to read. `char-ready?` is false for
+the console, which may make a read wait.
+
+The native dispatch's worker keeps output and unread lines in a mutex the
+UI thread drains, with a condition variable a read waits on; Stop wakes it
+as well as interrupting Steel, so a read never outlives Stop.
 
 ## The harness
 
@@ -165,8 +197,10 @@ calls every frame:
 
 - Jobs run one at a time, in the order sent, in one session; a Play's job
   asks for a fresh one first. Every job gets exactly one answer.
-- Stop ends the running job and drops the queued ones, each answering
-  "Stopped.", and the next job starts a fresh session. A Web Worker can only
+- Output comes back as it is written, each job's before its answer.
+- Stop ends the running job, a waiting read included, and drops the queued
+  ones, each answering "Stopped.", and any unread input; the next job starts
+  a fresh session. A Web Worker can only
   be stopped by terminating it, so losing the session is the rule for every
   implementation.
 - `dispatch::native` is one thread that builds and owns the Scheme, so the
@@ -179,8 +213,10 @@ calls every frame:
   with an error and is replaced.
 
 While a job runs, Play is disabled and Stop enabled. A double-click's echo
-and answer reach the console together when it is answered; a Play's
-`> block-schemer` line goes there at once. Only the latest double-click's
+reaches the console with the first sign of it running; a Play's
+`> block-schemer` line, and a double-click's that cannot run, go there at
+once, or while runs are going, after the last of them is answered, so
+they never land inside a run's output. Only the latest double-click's
 answer becomes a bubble; an earlier one still answering goes to the
 console alone.
 

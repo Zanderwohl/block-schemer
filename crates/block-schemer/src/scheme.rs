@@ -1,6 +1,7 @@
 //! The interpreter behind Block Schemer, kept to one small trait so Steel can
 //! be swapped for another Scheme, such as one that runs in WASM.
 
+use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 
 use steel::SteelVal;
@@ -12,9 +13,10 @@ use crate::codegen::OUTPUT_PORT;
 
 /// One session: definitions from earlier runs stay in scope.
 pub trait Scheme {
-    /// Runs `source` and gives back what `display` wrote and the written form
-    /// of the last value, empty for none.
-    fn run(&mut self, source: &str) -> Result<Answer, String>;
+    /// Runs `source` and gives back the written form of the last value,
+    /// empty for none. What it writes and reads goes through the session's
+    /// [`Console`] as it runs.
+    fn run(&mut self, source: &str) -> Result<String, String>;
 
     /// A fresh session, with no definitions but the prelude's.
     fn reset(&mut self);
@@ -31,10 +33,13 @@ pub trait Interrupt: Send + Sync {
     fn clear(&self);
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Answer {
-    pub output: String,
-    pub value: String,
+/// Where a session's current ports lead, called from the thread running it.
+pub trait Console: Send + Sync {
+    fn write(&self, text: &str);
+
+    /// The next line entered, newline included, waiting for one. Empty at
+    /// the end of input; an error once the run is stopped.
+    fn read_line(&self) -> io::Result<String>;
 }
 
 /// Steel builtins the prelude redefines, each kept as `__steel-<name>`.
@@ -62,10 +67,9 @@ const STEEL_ORIGINALS: [&str; 17] = [
 
 const STEEL_PRELUDE: &str = include_str!("prelude.scm");
 
-/// Sends everything written without a port, errors included, to the console.
-fn ports() -> String {
-    format!("(current-output-port {OUTPUT_PORT}) (current-error-port {OUTPUT_PORT})")
-}
+/// The console's input port, the current one in every session; `prelude.scm`
+/// names it too.
+const INPUT_PORT: &str = "__in";
 
 /// Character classes R7RS defines by Unicode property, which Steel lacks.
 /// `digit-value` knows only ASCII digits.
@@ -81,6 +85,7 @@ fn register_chars(engine: &mut Engine) {
 /// Steel's sandboxed engine, which loads no native libraries.
 pub struct Steel {
     engine: Engine,
+    console: Arc<dyn Console>,
     interrupter: Arc<SteelInterrupt>,
 }
 
@@ -104,62 +109,44 @@ impl Interrupt for SteelInterrupt {
 }
 
 impl Steel {
-    pub fn new() -> Self {
-        let engine = Self::engine();
+    pub fn new(console: Arc<dyn Console>) -> Self {
+        let engine = Self::engine(&console);
         let interrupter = Arc::new(SteelInterrupt(Mutex::new(engine.get_thread_state_controller())));
-        Self { engine, interrupter }
+        Self {
+            engine,
+            console,
+            interrupter,
+        }
     }
 
-    fn engine() -> Engine {
+    fn engine(console: &Arc<dyn Console>) -> Engine {
         let mut engine = Engine::new_sandboxed();
         register_chars(&mut engine);
         let originals: String = STEEL_ORIGINALS.iter().map(|name| format!("(define __steel-{name} {name})")).collect();
         engine.run(originals).expect("Steel has every original");
+        engine.register_value(OUTPUT_PORT, SteelVal::new_dyn_writer_port(ConsoleWriter::new(console.clone())));
+        engine.register_value(INPUT_PORT, SteelVal::new_dyn_reader_port(ConsoleReader::new(console.clone())));
         engine.run(STEEL_PRELUDE).expect("the prelude runs");
-        // Reading the app's own stdin would block the worker beyond Stop's reach.
         engine
             .run(format!(
-                "(define {OUTPUT_PORT} (open-output-string)) {} (current-input-port (open-input-string \"\"))",
-                ports()
+                "(current-output-port {OUTPUT_PORT}) (current-error-port {OUTPUT_PORT}) (current-input-port {INPUT_PORT})"
             ))
-            .expect("Steel opens string ports");
+            .expect("Steel takes the console's ports");
         engine
-    }
-
-    fn take_output(&mut self) -> String {
-        let source = format!(
-            "(define {OUTPUT_PORT}-text (get-output-string {OUTPUT_PORT})) \
-             (set! {OUTPUT_PORT} (open-output-string)) {} \
-             {OUTPUT_PORT}-text",
-            ports()
-        );
-        match self.engine.run(source).ok().and_then(|values| values.into_iter().last()) {
-            Some(SteelVal::StringV(text)) => text.to_string(),
-            _ => String::new(),
-        }
-    }
-}
-
-impl Default for Steel {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl Scheme for Steel {
-    fn run(&mut self, source: &str) -> Result<Answer, String> {
-        let result = self.engine.run(source.to_owned());
-        let output = self.take_output();
-        let values = result.map_err(|error| error.to_string())?;
-        let value = match values.last() {
+    fn run(&mut self, source: &str) -> Result<String, String> {
+        let values = self.engine.run(source.to_owned()).map_err(|error| error.to_string())?;
+        Ok(match values.last() {
             None | Some(SteelVal::Void) => String::new(),
             Some(value) => value.to_string(),
-        };
-        Ok(Answer { output, value })
+        })
     }
 
     fn reset(&mut self) {
-        self.engine = Self::engine();
+        self.engine = Self::engine(&self.console);
         *self.interrupter.controller() = self.engine.get_thread_state_controller();
     }
 
@@ -168,24 +155,179 @@ impl Scheme for Steel {
     }
 }
 
+/// Holds back a character split across writes until it is whole.
+struct ConsoleWriter {
+    console: Arc<dyn Console>,
+    pending: Vec<u8>,
+}
+
+impl ConsoleWriter {
+    fn new(console: Arc<dyn Console>) -> Self {
+        Self {
+            console,
+            pending: Vec::new(),
+        }
+    }
+}
+
+impl Write for ConsoleWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.pending.extend_from_slice(bytes);
+        let whole = match std::str::from_utf8(&self.pending) {
+            Ok(text) => text.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => self.pending.len(),
+        };
+        let text: Vec<u8> = self.pending.drain(..whole).collect();
+        if !text.is_empty() {
+            self.console.write(&String::from_utf8_lossy(&text));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Asks the console for a line only once the last is used up, so a read
+/// waits only when the program wants more than was entered.
+struct ConsoleReader {
+    console: Arc<dyn Console>,
+    line: Vec<u8>,
+    at: usize,
+}
+
+impl ConsoleReader {
+    fn new(console: Arc<dyn Console>) -> Self {
+        Self {
+            console,
+            line: Vec::new(),
+            at: 0,
+        }
+    }
+}
+
+impl Read for ConsoleReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.at == self.line.len() {
+            self.line = self.console.read_line()?.into_bytes();
+            self.at = 0;
+        }
+        let count = buffer.len().min(self.line.len() - self.at);
+        buffer[..count].copy_from_slice(&self.line[self.at..self.at + count]);
+        self.at += count;
+        Ok(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
 
+    /// Collects output; input is whatever was entered before the read.
+    #[derive(Default)]
+    struct Transcript {
+        output: Mutex<String>,
+        input: Mutex<VecDeque<String>>,
+    }
+
+    impl Transcript {
+        fn take(&self) -> String {
+            std::mem::take(&mut self.output.lock().unwrap())
+        }
+
+        fn enter(&self, line: &str) {
+            self.input.lock().unwrap().push_back(format!("{line}\n"));
+        }
+    }
+
+    impl Console for Transcript {
+        fn write(&self, text: &str) {
+            self.output.lock().unwrap().push_str(text);
+        }
+
+        fn read_line(&self) -> io::Result<String> {
+            Ok(self.input.lock().unwrap().pop_front().unwrap_or_default())
+        }
+    }
+
+    fn steel() -> (Steel, Arc<Transcript>) {
+        let transcript = Arc::new(Transcript::default());
+        (Steel::new(transcript.clone()), transcript)
+    }
+
     #[test]
-    fn definitions_last_and_display_is_captured_per_run() {
-        let mut steel = Steel::new();
-        assert_eq!(steel.run("(define (sq x) (* x x))").unwrap(), Answer::default());
-        let answer = steel.run(&format!("(display \"n=\" {OUTPUT_PORT}) (sq 5)")).unwrap();
-        assert_eq!(answer, Answer { output: "n=".into(), value: "25".into() });
-        assert_eq!(steel.run("(sq 2)").unwrap().output, "", "output does not carry over");
+    fn definitions_last_and_display_goes_to_the_console() {
+        let (mut steel, console) = steel();
+        assert_eq!(steel.run("(define (sq x) (* x x))").unwrap(), "");
+        assert_eq!(steel.run(&format!("(display \"n=\" {OUTPUT_PORT}) (sq 5)")).unwrap(), "25");
+        assert_eq!(console.take(), "n=");
         assert!(steel.run("(car '())").is_err());
     }
 
     #[test]
+    fn reading_without_a_port_reads_the_console() {
+        let (mut steel, console) = steel();
+        for line in ["hello there", "(1 2", "3)", " é"] {
+            console.enter(line);
+        }
+        assert_eq!(steel.run("(read-line)").unwrap(), "\"hello there\"");
+        assert_eq!(steel.run("(read)").unwrap(), "(1 2 3)", "a datum may span lines, and takes the rest of its last");
+        let rest = "(list (peek-char) (read-char) (read-char) (peek-char) (read-line) (eof-object? (read-line)))";
+        assert_eq!(steel.run(rest).unwrap(), "(#\\space #\\space #\\é #\\newline \"\" #true)");
+        assert_eq!(steel.run("(char-ready?)").unwrap(), "#false", "the console may make a read wait");
+        assert_eq!(steel.run("(char-ready? (open-input-string \"\"))").unwrap(), "#true");
+    }
+
+    #[test]
+    fn peeking_asks_for_no_more_than_the_character_it_peeks() {
+        /// One line entered; asking for a second is an error.
+        struct OneLine(Mutex<bool>);
+        impl Console for OneLine {
+            fn write(&self, _: &str) {}
+            fn read_line(&self) -> io::Result<String> {
+                match std::mem::replace(&mut *self.0.lock().unwrap(), true) {
+                    false => Ok("a\n".into()),
+                    true => Err(io::Error::other("asked for a line not yet entered")),
+                }
+            }
+        }
+        let mut steel = Steel::new(Arc::new(OneLine(Mutex::new(false))));
+        let peeked = steel.run("(list (peek-char) (read-char) (peek-char) (read-char))");
+        assert_eq!(peeked.unwrap(), "(#\\a #\\a #\\newline #\\newline)");
+    }
+
+    #[test]
+    fn a_character_split_across_writes_is_written_whole() {
+        let console = Arc::new(Transcript::default());
+        let mut writer = ConsoleWriter::new(console.clone());
+        let [first, second] = *"λ".as_bytes() else { unreachable!() };
+        writer.write_all(&[b'x', first]).unwrap();
+        assert_eq!(console.take(), "x");
+        writer.write_all(&[second]).unwrap();
+        assert_eq!(console.take(), "λ");
+    }
+
+    #[test]
+    fn a_read_stopped_while_waiting_ends_the_run() {
+        struct Stopped;
+        impl Console for Stopped {
+            fn write(&self, _: &str) {}
+            fn read_line(&self) -> io::Result<String> {
+                Err(io::Error::other("Stopped."))
+            }
+        }
+        let mut steel = Steel::new(Arc::new(Stopped));
+        assert!(steel.run("(read-line)").is_err());
+    }
+
+    #[test]
     fn equals_takes_any_number_of_operands() {
-        let mut steel = Steel::new();
-        let value = |steel: &mut Steel, source: &str| steel.run(source).unwrap().value;
+        let mut steel = steel().0;
+        let value = |steel: &mut Steel, source: &str| steel.run(source).unwrap();
         assert_eq!(value(&mut steel, "(= 2 2 2)"), value(&mut steel, "#t"));
         assert_eq!(value(&mut steel, "(= 2 2 3)"), value(&mut steel, "#f"));
         assert_eq!(value(&mut steel, "(= 3 2 2)"), value(&mut steel, "#f"));
@@ -195,7 +337,7 @@ mod tests {
 
     fn is_true(steel: &mut Steel, source: &str) -> bool {
         match steel.run(source) {
-            Ok(answer) => answer.value == "#true",
+            Ok(value) => value == "#true",
             Err(error) => panic!("{source}: {error}"),
         }
     }
@@ -206,7 +348,7 @@ mod tests {
     #[test]
     fn every_procedure_block_names_a_procedure() {
         let language = crate::language();
-        let mut steel = Steel::new();
+        let mut steel = steel().0;
         let missing: Vec<&str> = language
             .blocks()
             .iter()
@@ -220,7 +362,7 @@ mod tests {
 
     #[test]
     fn the_prelude_follows_r7rs() {
-        let mut steel = Steel::new();
+        let mut steel = steel().0;
         for (expression, expected) in [
             ("(boolean=? #t #t #t)", "#t"),
             ("(boolean=? #f #f 1)", "#f"),
@@ -296,7 +438,7 @@ mod tests {
 
     #[test]
     fn exceptions_follow_r7rs() {
-        let mut steel = Steel::new();
+        let mut steel = steel().0;
         let escape = |handler: &str, body: &str| {
             format!("(call/cc (lambda (k) (with-exception-handler (lambda (e) (k {handler})) (lambda () {body}))))")
         };
@@ -342,20 +484,20 @@ mod tests {
 
     #[test]
     fn writing_without_a_port_goes_to_the_console() {
-        let mut steel = Steel::new();
-        let answer = steel
+        let (mut steel, console) = steel();
+        steel
             .run("(write \"a\") (newline) (write-char #\\b) (write-string \"c\") (display 1)")
             .unwrap();
-        assert_eq!(answer.output, "\"a\"\nbc1");
-        let answer = steel
-            .run("(write 'x (current-error-port)) (for-each display '(1 2))")
-            .unwrap();
-        assert_eq!(answer.output, "x12", "and so does a procedure passed by name");
+        assert_eq!(console.take(), "\"a\"\nbc1");
+        steel.run("(write 'x (current-error-port)) (for-each display '(1 2))").unwrap();
+        assert_eq!(console.take(), "x12", "and so does a procedure passed by name");
+        steel.run("(display \"λ\")").unwrap();
+        assert_eq!(console.take(), "λ");
     }
 
     #[test]
     fn stop_ends_a_run_inside_a_handler() {
-        let mut steel = Steel::new();
+        let mut steel = steel().0;
         let interrupter = steel.interrupter();
         let stopper = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(200));

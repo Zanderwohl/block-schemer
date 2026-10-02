@@ -1,5 +1,7 @@
 //! Answers the editor's runs: generate, run, and put what came back in a
-//! speech bubble, or for the whole program, in the console.
+//! speech bubble, or for the whole program, in the console. Output reaches
+//! the console as it is written, and a run waiting on a read takes the
+//! console's next line.
 //!
 //! The whole program is the canvas read as one file: every definition stack
 //! in reading order, then the program block's expression, run as one source
@@ -20,8 +22,7 @@ use block_parse::program::{Block, BlockId, Program};
 use block_parse::Language;
 
 use crate::codegen;
-use crate::dispatch::{Dispatch, Job, Ticket};
-use crate::scheme::Answer;
+use crate::dispatch::{Dispatch, Event, Job, Ticket};
 
 /// Columns `inspect` lays code out to; its tab wraps anything wider.
 const INSPECT_WIDTH: usize = 48;
@@ -40,12 +41,23 @@ pub struct SchemerRunner<D> {
     latest: Option<Ticket>,
     answers: HashMap<BlockId, String>,
     console: String,
+    /// As last polled, so `poll` reports a change.
+    waiting: bool,
+    /// Lines the runner wrote while runs were going, each to follow a run's
+    /// answer.
+    held: Vec<(Ticket, String)>,
     /// Show the `__out` port in echoed and inspected code.
     harness: bool,
 }
 
 enum Pending {
-    Evaluate { block: BlockId, echo: Option<String> },
+    /// `echo` is taken when written, before the first of its output, which
+    /// `output` keeps for the bubble.
+    Evaluate {
+        block: BlockId,
+        echo: Option<String>,
+        output: String,
+    },
     Play,
 }
 
@@ -58,6 +70,8 @@ impl<D: Dispatch> SchemerRunner<D> {
             latest: None,
             answers: HashMap::new(),
             console: String::new(),
+            waiting: false,
+            held: Vec::new(),
             harness: false,
         }
     }
@@ -67,11 +81,43 @@ impl<D: Dispatch> SchemerRunner<D> {
         &self.console
     }
 
-    /// Ends with a newline, so the next run starts on its own line.
+    /// On a line of its own, so it never runs on from what a program wrote.
     fn write(&mut self, text: &str) {
-        self.console.push_str(text);
-        if !text.is_empty() && !text.ends_with('\n') {
+        if text.is_empty() {
+            return;
+        }
+        if !self.console.is_empty() && !self.console.ends_with('\n') {
             self.console.push('\n');
+        }
+        self.console.push_str(text);
+        if !text.ends_with('\n') {
+            self.console.push('\n');
+        }
+    }
+
+    /// Before the first of a double-click's output, its answer, or any
+    /// input it waits for.
+    fn echo(&mut self, ticket: Ticket) {
+        if let Some(Pending::Evaluate { echo, .. }) = self.pending.get_mut(&ticket)
+            && let Some(echo) = echo.take()
+        {
+            self.write(&format!("> {echo}"));
+        }
+    }
+
+    /// As `write`, but after every run sent so far, so it never lands in
+    /// one's output or between its prompt and the line entered for it.
+    fn write_after_runs(&mut self, text: &str) {
+        match self.pending.keys().max_by_key(|ticket| ticket.0) {
+            Some(last) => self.held.push((*last, text.to_owned())),
+            None => self.write(text),
+        }
+    }
+
+    /// Jobs run in the order sent, so the earliest unanswered one is running.
+    fn echo_running(&mut self) {
+        if let Some(running) = self.pending.keys().min_by_key(|ticket| ticket.0) {
+            self.echo(*running);
         }
     }
 
@@ -126,7 +172,7 @@ impl<D: Dispatch> SchemerRunner<D> {
             .and_then(Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("untitled.{}", self.language.file.extension));
-        self.write(&format!("> block-schemer {file}"));
+        self.write_after_runs(&format!("> block-schemer {file}"));
         match self.file(program, codegen::script) {
             Ok(parts) => {
                 let ticket = self.dispatch.send(Job {
@@ -135,11 +181,10 @@ impl<D: Dispatch> SchemerRunner<D> {
                 });
                 self.pending.insert(ticket, Pending::Play);
             }
-            Err(why) => self.write(&why),
+            Err(why) => self.write_after_runs(&why),
         }
     }
 
-    /// Echoed with its answer, so the echo and what it said stay together.
     fn evaluate(&mut self, block: BlockId, script: &Script) {
         // Nothing to echo when even the reading form fails; the error follows.
         let echo = codegen::flat(&self.language, script, self.harness)
@@ -149,29 +194,41 @@ impl<D: Dispatch> SchemerRunner<D> {
             Ok(source) => {
                 let ticket = self.dispatch.send(Job { source, fresh: false });
                 self.latest = Some(ticket);
-                self.pending.insert(ticket, Pending::Evaluate { block, echo });
+                let output = String::new();
+                self.pending.insert(ticket, Pending::Evaluate { block, echo, output });
             }
             Err(problem) => {
                 self.latest = None;
-                self.answer(block, echo, Err(format!("Can't run: {problem}")), true);
+                if let Some(echo) = echo {
+                    self.write_after_runs(&format!("> {echo}"));
+                }
+                let said = format!("Can't run: {problem}");
+                self.write_after_runs(&said);
+                self.answers.insert(block, said);
             }
         }
     }
 
     /// The console is a transcript, so it gets every answer; a bubble, only
     /// the `latest`.
-    fn answer(&mut self, block: BlockId, echo: Option<String>, result: Result<Answer, String>, latest: bool) {
-        if let Some(echo) = echo {
-            self.write(&format!("> {echo}"));
-        }
-        let (said, bubble) = match result {
-            Ok(answer) if answer == Answer::default() => (String::new(), "ok".into()),
-            Ok(answer) => (shown(&answer), shown(&answer)),
-            Err(error) => (error.clone(), error),
-        };
+    fn done(&mut self, ticket: Ticket, result: Result<String, String>) {
+        self.echo(ticket);
+        let said = result.unwrap_or_else(|error| error);
         self.write(&said);
-        if latest {
-            self.answers.insert(block, bubble);
+        if let Some(Pending::Evaluate { block, output, .. }) = self.pending.remove(&ticket)
+            && self.latest == Some(ticket)
+        {
+            let bubble = [output.as_str(), said.as_str()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.answers.insert(block, if bubble.is_empty() { "ok".into() } else { bubble });
+        }
+        let (now, later) = std::mem::take(&mut self.held).into_iter().partition(|(after, _)| *after == ticket);
+        self.held = later;
+        for (_, text) in now {
+            self.write(&text);
         }
     }
 }
@@ -186,6 +243,7 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
                 closable: false,
                 content: TabContent::Console {
                     output: self.console.clone(),
+                    waiting: self.waiting,
                 },
             }],
             ..Overlay::default()
@@ -204,17 +262,24 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
     }
 
     fn poll(&mut self) -> bool {
-        let answers = self.dispatch.poll();
-        let changed = !answers.is_empty();
-        for (ticket, result) in answers {
-            match self.pending.remove(&ticket) {
-                Some(Pending::Evaluate { block, echo }) => {
-                    let latest = self.latest == Some(ticket);
-                    self.answer(block, echo, result, latest);
+        let events = self.dispatch.poll();
+        let waiting = self.dispatch.waiting();
+        let changed = !events.is_empty() || waiting != self.waiting;
+        self.waiting = waiting;
+        for event in events {
+            match event {
+                Event::Output(ticket, text) => {
+                    self.echo(ticket);
+                    self.console.push_str(&text);
+                    if let Some(Pending::Evaluate { output, .. }) = self.pending.get_mut(&ticket) {
+                        output.push_str(&text);
+                    }
                 }
-                Some(Pending::Play) => self.write(&result.map_or_else(|error| error, |answer| shown(&answer))),
-                None => {}
+                Event::Done(ticket, result) => self.done(ticket, result),
             }
+        }
+        if waiting {
+            self.echo_running();
         }
         changed
     }
@@ -244,9 +309,21 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
         }
     }
 
-    /// Echoed until programs can read input.
+    /// Echoed after what the run wrote, as a terminal does, and only echoed
+    /// while nothing runs.
     fn console_input(&mut self, _tab: &TabId, line: &str) {
-        self.write(&format!("{line}\n"));
+        let line = format!("{line}\n");
+        if self.dispatch.busy() {
+            self.echo_running();
+            self.dispatch.input(&line);
+        }
+        self.console.push_str(&line);
+    }
+
+    fn console_end(&mut self, _tab: &TabId) {
+        if self.dispatch.busy() {
+            self.dispatch.end_input();
+        }
     }
 
     /// The program block plays.
@@ -269,14 +346,6 @@ impl<D: Dispatch> Runner for SchemerRunner<D> {
         };
         Some(text.unwrap_or_else(|why| why))
     }
-}
-
-fn shown(answer: &Answer) -> String {
-    [answer.output.as_str(), answer.value.as_str()]
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn is_program(program: &Program, block: BlockId) -> bool {
@@ -473,6 +542,134 @@ mod tests {
         assert_eq!(bubbles.get(&BlockId(1)).map(String::as_str), Some("ok"));
         assert!(!bubbles.contains_key(&BlockId(10)), "superseded before it answered");
         assert!(runner.console().contains("hypotenuse squared:\n25\n"), "the transcript keeps it");
+    }
+
+    const GREET: &str = r#"Program(language: "Block Schemer", version: 2, stacks: [
+        (pos: (0.0, 0.0), blocks: [(id: 1, opcode: "define_procedure",
+            inputs: {"variable": (literal: "greet")},
+            lists: {"body": [
+                (block: (id: 2, opcode: "display", inputs: {"obj": (block: (id: 3, opcode: "string", inputs: {"text": (literal: "Name? ")}))})),
+                (block: (id: 4, opcode: "string-append", lists: {"string": [
+                    (block: (id: 5, opcode: "string", inputs: {"text": (literal: "hi ")})),
+                    (block: (id: 6, opcode: "read-line")),
+                ]})),
+            ]})]),
+        (pos: (0.0, 200.0), blocks: [(id: 7, opcode: "program",
+            inputs: {"main": (block: (id: 8, opcode: "call", inputs: {"operator": (literal: "greet")}))})]),
+    ])"#;
+
+    fn waiting(runner: &Tested) -> bool {
+        matches!(runner.overlay().tabs[0].content, TabContent::Console { waiting: true, .. })
+    }
+
+    fn wait_for_input(runner: &mut Tested) {
+        let start = Instant::now();
+        while !waiting(runner) {
+            assert!(start.elapsed() < Duration::from_secs(20), "never waited");
+            runner.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_run_reading_the_console_waits_for_a_line_after_showing_its_prompt() {
+        let language = crate::language();
+        let program = Program::from_ron(GREET).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let mut runner = runner(&language);
+        let console = TabId::from("console");
+        runner.start(&program, None, &program.ast(&language));
+        wait_for_input(&mut runner);
+        assert_eq!(runner.console(), "> block-schemer untitled.scmb\nName? ");
+        runner.console_input(&console, "Ada");
+        settle(&mut runner);
+        assert!(!waiting(&runner));
+        assert_eq!(runner.console(), "> block-schemer untitled.scmb\nName? Ada\n\"hi Ada\"\n");
+
+        let before = runner.console().len();
+        let script = program.script_at(&language, BlockId(4)).unwrap();
+        runner.run_block(&program, None, BlockId(4), &script);
+        runner.console_input(&console, "Grace");
+        settle(&mut runner);
+        assert_eq!(
+            &runner.console()[before..],
+            "> (string-append \"hi \" (read-line))\nGrace\n\"hi Grace\"\n",
+            "the echo comes before the line typed for it"
+        );
+        assert_eq!(runner.overlay().bubbles.get(&BlockId(4)).map(String::as_str), Some("\"hi Grace\""));
+
+        let script = program.script_at(&language, BlockId(6)).unwrap();
+        runner.run_block(&program, None, BlockId(6), &script);
+        wait_for_input(&mut runner);
+        assert!(runner.console().ends_with("> (read-line)\n"), "echoed while it waits: {}", runner.console());
+        runner.console_end(&console);
+        settle(&mut runner);
+        assert_eq!(runner.overlay().bubbles[&BlockId(6)], "(eof)", "ended by Ctrl+D");
+
+        runner.console_input(&console, "idle");
+        assert!(runner.console().ends_with("\nidle\n"), "echoed");
+        let read_line = program.script_at(&language, BlockId(6)).unwrap();
+        runner.run_block(&program, None, BlockId(6), &read_line);
+        wait_for_input(&mut runner);
+
+        let before = runner.console().len();
+        let script = program.script_at(&language, BlockId(7)).unwrap();
+        runner.run_block(&program, None, BlockId(7), &script);
+        assert_eq!(&runner.console()[before..], "", "held until the waiting run is answered");
+        runner.console_input(&console, "x");
+        let start = Instant::now();
+        while !runner.console().ends_with("Name? ") {
+            assert!(start.elapsed() < Duration::from_secs(20), "never played: {}", runner.console());
+            runner.poll();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            runner.console().ends_with("> (read-line)\nx\n\"x\"\n> block-schemer untitled.scmb\nName? "),
+            "the idle line was never read: {}",
+            runner.console()
+        );
+        runner.stop();
+        settle(&mut runner);
+    }
+
+    #[test]
+    fn the_guessing_game_can_be_won_by_halving() {
+        const PROMPT: &str = "Guess a number from 1 to 100: ";
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/guess-the-number.scmb")).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let mut runner = runner(&language);
+        runner.start(&program, None, &program.ast(&language));
+        wait_for_input(&mut runner);
+        // What the game says to `line`, up to its next prompt or the end.
+        let mut answer = |line: &str| {
+            runner.console_input(&TabId::from("console"), line);
+            let before = runner.console().len();
+            let start = Instant::now();
+            while !runner.console().ends_with(PROMPT) || runner.console().len() == before {
+                if runner.status() == RunStatus::Idle {
+                    break;
+                }
+                assert!(start.elapsed() < Duration::from_secs(20), "no answer to {line}");
+                runner.poll();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            runner.console()[before..].trim_end_matches(PROMPT).trim().to_owned()
+        };
+        assert_eq!(answer("lots"), "That's not a number.");
+        let (mut low, mut high) = (1, 100);
+        for tries in 1..=7 {
+            let middle = (low + high) / 2;
+            match answer(&middle.to_string()).as_str() {
+                "Higher!" => low = middle + 1,
+                "Lower!" => high = middle - 1,
+                said => {
+                    assert_eq!(said, format!("Got it! Guesses: {tries}"));
+                    return;
+                }
+            }
+        }
+        panic!("halving finds it in seven");
     }
 
     #[test]

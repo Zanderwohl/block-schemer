@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/block-parse", "crates/block-parse-gui", "crates/block-schemer"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -20,3 +21,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 winit = "0.30"
 muda = { version = "0.21", default-features = false }
 palette = { version = "0.7", default-features = false, features = ["std"] }
+
+# Steel 0.8.3 plus `SteelVal::new_dyn_reader_port`, which Block Schemer's
+# console input needs; drop once upstream has one (vendor/steel-core/PATCH.md).
+[patch.crates-io]
+steel-core = { path = "vendor/steel-core" }
