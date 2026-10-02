@@ -80,6 +80,11 @@
 
 ;; Control features
 
+;; Steel's takes no converter. Without `parameterize`, only the initial
+;; value is ever converted.
+(define (make-parameter value . converter)
+  (__steel-make-parameter (if (null? converter) value ((car converter) value))))
+
 (define (string-map proc string . strings)
   (list->string (apply map proc (string->list string) (map string->list strings))))
 
@@ -103,6 +108,12 @@
 ;; Steel handler each `with-exception-handler` installs lets it through.
 (define __uncaught #f)
 
+;; How many handlers a Steel error raised inside a handler is for: those
+;; outside it. Set where it is raised, as unwinding restores `__handlers`
+;; before any Steel handler runs. A count, as Steel's `cdr` is never `eq?`
+;; to the list it came from.
+(define __target #f)
+
 (define (__escape message . irritants)
   (set! __uncaught #t)
   (apply __steel-error message irritants))
@@ -121,7 +132,12 @@
       (let ((outer __handlers))
         (dynamic-wind
           (lambda () (set! __handlers (cdr outer)))
-          (lambda () ((car outer) obj))
+          (lambda ()
+            (call-with-exception-handler
+              (lambda (e)
+                (if (not __target) (set! __target (length (cdr outer))))
+                (raise-error e))
+              (lambda () ((car outer) obj))))
           (lambda () (set! __handlers outer))))))
 
 (define (raise obj)
@@ -133,15 +149,17 @@
 ;; `raise`.
 (define (with-exception-handler handler thunk)
   (set! __uncaught #f)
-  (let ((outer __handlers))
+  (set! __target #f)
+  (let* ((outer __handlers) (mine (cons handler outer)))
     (dynamic-wind
-      (lambda () (set! __handlers (cons handler outer)))
+      (lambda () (set! __handlers mine))
       (lambda ()
         (call-with-exception-handler
           (lambda (e)
-            (if __uncaught
+            (if (or __uncaught (and __target (not (= __target (length mine)))))
                 (raise-error e)
                 (begin
+                  (set! __target #f)
                   (set! __handlers outer)
                   (handler e)
                   (__escape "a handler returned from an error:" (error-object-message e)))))

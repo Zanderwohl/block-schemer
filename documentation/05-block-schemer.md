@@ -99,9 +99,11 @@ said, to the console.
 
 ## The harness
 
-What runs is not quite what was entered: `display` writes to the `__out`
-port so the console can show it. Code shown to the user, in Inspect and in
-the console's echo, leaves that out, unless the "Schemer Harness" checkbox
+What runs is not quite what was entered: `display` with no port is given
+the `__out` port the console shows. Every session's current output port is
+`__out` too, so leaving it out would change nothing; the harness only shows
+where output goes. Code shown to the user, in Inspect and in the console's
+echo, leaves that out, unless the "Schemer Harness" checkbox
 at the left of the actions bar, a `Toggle` the runner offers, is on. It is
 off at launch and not saved. Flipping it regenerates open inspections; lines
 already in the console stay as they were written.
@@ -139,10 +141,15 @@ except:
 Where the prelude can only come close:
 
 - Exceptions keep their own handler stack, so `raise-continuable` returns
-  the handler's value and a handler returning from `raise` or `error` is
-  itself an error. Steel's own errors, such as `(car '())`, have unwound
-  before the handler sees them, so its handler must escape, as with
-  `call/cc`. `file-error?` and `read-error?` are always false.
+  the handler's value and an error inside a handler goes to the handlers
+  outside it. A handler returning from `raise` or `error` ends the run,
+  past every handler, where R7RS raises an error the outer handlers could
+  catch. Steel's own errors, such as `(car '())`, have unwound before the
+  handler sees them, so its handler must escape, as with `call/cc`.
+  `file-error?` and `read-error?` are always false.
+- A parameter is not `procedure?`, and called with a value it sets itself.
+  Its converter applies only to the initial value, there being no
+  `parameterize`.
 - Promises come only from `make-promise`, so every one is already forced.
 - `char-ready?` and `u8-ready?` are always true, every port being in
   memory. `digit-value` knows only ASCII digits, and `char-numeric?` takes

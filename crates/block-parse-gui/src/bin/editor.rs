@@ -52,6 +52,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args.tags.is_some() && args.command != Command::Snapshot {
+        eprintln!("--tags is for --command snapshot");
+        return ExitCode::from(2);
+    }
     if args.command == Command::Snapshot {
         let unknown: Vec<&str> = args
             .tags

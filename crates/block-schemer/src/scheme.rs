@@ -40,7 +40,7 @@ pub struct Answer {
 /// Steel builtins the prelude redefines, each kept as `__steel-<name>`.
 /// Saved in a run of their own: in one program, Steel would take `=` in
 /// `(define (= …) … =)` to mean the one being defined.
-const STEEL_ORIGINALS: [&str; 16] = [
+const STEEL_ORIGINALS: [&str; 17] = [
     "=",
     "gcd",
     "lcm",
@@ -57,6 +57,7 @@ const STEEL_ORIGINALS: [&str; 16] = [
     "open-output-bytevector",
     "write-string",
     "flush-output-port",
+    "make-parameter",
 ];
 
 /// Evens out where Steel differs from R7RS, after [`STEEL_ORIGINALS`].
@@ -258,6 +259,8 @@ mod tests {
             ("(char-lower-case? #\\A)", "#f"),
             ("(digit-value #\\7)", "7"),
             ("(digit-value #\\a)", "#f"),
+            ("((make-parameter 5 (lambda (x) (* x 2))))", "10"),
+            ("((make-parameter 5))", "5"),
             ("(force (make-promise 5))", "5"),
             ("(promise? (make-promise 5))", "#t"),
             ("(force 5)", "5"),
@@ -317,6 +320,15 @@ mod tests {
         ));
         let continued = "(with-exception-handler (lambda (e) 10) (lambda () (+ 1 (raise-continuable 'c))))";
         assert!(is_true(&mut steel, &format!("(= {continued} 11)")));
+
+        let calls = "(let ((calls 0)) \
+             (call/cc (lambda (k) \
+               (with-exception-handler (lambda (e) (k 'outer)) \
+                 (lambda () \
+                   (with-exception-handler (lambda (e) (set! calls (+ calls 1)) (car '())) \
+                     (lambda () (raise 'x))))))) \
+             calls)";
+        assert!(is_true(&mut steel, &format!("(= {calls} 1)")), "an error in a handler goes outward, once");
 
         let returned = steel.run("(with-exception-handler (lambda (e) 0) (lambda () (raise 'oops)))");
         assert!(returned.is_err(), "a handler may not return from raise");

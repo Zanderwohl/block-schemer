@@ -214,6 +214,11 @@ call `block_parse_gui::snapshot::program`.
 - A cap on undo history; each step holds a whole copy of the stacks.
 - A cap on a console's output, which grows for the session and is cloned
   on each `Runner::overlay` call and laid out every frame.
+- Block Schemer's prelude keeps every closed or bytevector port it sees,
+  for `input-port-open?` and `binary-port?`, until the session resets.
+- The palette's fitted width follows the widest block the filter shows, so
+  ticking a tag can move the canvas when `palette_width` is unset; the
+  filter's labels are also measured every frame.
 - Tabs past the strip's width: they shrink to `MIN_TAB_WIDTH`, then are
   clipped and cannot be reached until others close. A scrolling strip or a
   menu of hidden tabs would fix it.
