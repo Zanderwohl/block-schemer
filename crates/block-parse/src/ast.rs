@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::program::{BlockId, Slot};
+use crate::program::{BlockId, Declaration, Slot};
 use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,6 +49,9 @@ pub struct Node {
     pub lists: Vec<List>,
     /// Spec order.
     pub branches: Vec<Branch>,
+    /// For a reference, the declaration it names. Always in scope: one
+    /// that is not is a problem instead.
+    pub refers: Option<Declaration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,6 +104,12 @@ pub enum ProblemCode {
     AfterCap,
     /// Reported on the second block.
     DuplicateId,
+    /// A reference outside its declaration's scope, or to one that is gone.
+    /// Nothing is recovered: it reads as an empty slot.
+    OutOfScope,
+    /// A declaring slot left blank, or a reference to one. No language
+    /// takes an empty name.
+    Unnamed,
     /// Nested past `MAX_DEPTH`. Replaces the first block past the limit; nothing
     /// below it is parsed.
     TooDeep,

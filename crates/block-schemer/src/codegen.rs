@@ -323,6 +323,42 @@ mod tests {
     }
 
     #[test]
+    fn a_reference_goes_out_as_the_name_it_was_given_last() {
+        use block_parse::{Declaration, Fragment};
+        use block_parse::edit::Target;
+
+        let mut b = Builder::new();
+        let mut lambda = b.block("lambda");
+        set(&mut lambda, item("formals"), text("x"));
+        let (lambda_id, times) = (lambda.id, b.block("*"));
+        let times_id = times.id;
+        set(&mut lambda, item("body"), plug(times));
+        b.program.stacks.push(Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![lambda],
+        });
+        let x = Declaration {
+            block: lambda_id,
+            slot: item("formals"),
+        };
+        for index in 0..2 {
+            let reference = b.program.reference(&b.language, &x).unwrap();
+            let target = Target::Input {
+                parent: times_id,
+                slot: Slot::item("z", index),
+            };
+            b.program.attach(&b.language, Fragment { blocks: vec![reference] }, target).unwrap();
+        }
+        assert!(b.program.set_literal(lambda_id, &item("formals"), "n".into()));
+        let run = b.program.script_at(&b.language, lambda_id).unwrap();
+        assert_eq!(script(&b.language, &run), Ok("(lambda (n) (* n n))".into()));
+
+        let outside = b.program.script_at(&b.language, times_id).unwrap();
+        let refused = script(&b.language, &outside).unwrap_err();
+        assert!(refused.contains("outside"), "{refused}");
+    }
+
+    #[test]
     fn the_output_port_is_shown_only_with_the_harness() {
         let mut b = Builder::new();
         let mut display = b.block("display");

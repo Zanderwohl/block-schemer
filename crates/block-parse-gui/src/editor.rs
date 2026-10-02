@@ -1,8 +1,8 @@
 use block_parse::ast::Script;
 use block_parse::host::{Overlay, RunCommand, TabId};
-use block_parse::edit::{Fragment, Target};
+use block_parse::edit::Target;
 use block_parse::language::LiteralKind;
-use block_parse::program::{BlockId, Program, Slot};
+use block_parse::program::{BlockId, Declaration, Program, Slot};
 use block_parse::Language;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Frame, Key, LayerId, Margin, Modifiers, Order, Pos2,
@@ -20,9 +20,11 @@ use crate::dropdown::Menu;
 use crate::filter;
 use crate::interact::{
     DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
+    start_drag,
 };
 use crate::layout::{
-    FAINT_SIZE, Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedBlock, PlacedSlot, Scene, SlotContent,
+    FAINT_SIZE, Font, LABEL_SIZE, LITERAL_SIZE, Layout, Measure, PlacedBlock, PlacedSlot, REPORTER_HEIGHT, Scene,
+    SlotContent,
 };
 use crate::paint::{self, Transform};
 use crate::panels::Panels;
@@ -220,6 +222,7 @@ impl BlockEditor {
             editing: None,
             validate: false,
             lifted: None,
+            declarers: Default::default(),
         }
         .palette(filter::shown(&self.options, language));
         let fitted = palette.width.max(filter::width(&ctx, language));
@@ -281,6 +284,7 @@ impl BlockEditor {
             editing: edit.as_ref().map(|edit| (edit.block, &edit.slot)),
             validate: true,
             lifted: None,
+            declarers: Layout::declarers(language, program),
         };
         if let Gesture::Pressed(press) = &self.gesture
             && input.down
@@ -290,7 +294,7 @@ impl BlockEditor {
                 unreachable!()
             };
             self.last_click = None;
-            self.gesture = self.start_drag(press, language, program, t);
+            self.gesture = start_drag(press, language, program, t, self.options.read_only);
         }
         // A drop now would edit a program the host has locked.
         if read_only && self.is_dragging() {
@@ -403,6 +407,7 @@ impl BlockEditor {
 
         if output.changed {
             layout.lifted = self.lifted();
+            layout.declarers = Layout::declarers(language, program);
             scene = layout.program(program);
         }
 
@@ -544,6 +549,19 @@ impl BlockEditor {
         }
 
         let point = t.canvas(at);
+        if !read_only && let Some(slot) = scene.grip_at(point) {
+            let lift = (REPORTER_HEIGHT - slot.rect.height()) / 2.0;
+            return Gesture::Pressed(Press {
+                at,
+                on: Pressed::Handle {
+                    declaration: Declaration {
+                        block: slot.parent,
+                        slot: slot.slot.clone(),
+                    },
+                    top_left: slot.rect.min - vec2(0.0, lift),
+                },
+            });
+        }
         // A switch is never a handle on its block, live or not: one without
         // state is drawn as a checkbox, and grabbing the block instead would
         // read as the checkbox being broken.
@@ -567,38 +585,6 @@ impl BlockEditor {
                 },
             }),
             None => Gesture::Panning,
-        }
-    }
-
-    /// Offsets are taken from the press, so the run does not jump by the
-    /// threshold.
-    fn start_drag(&self, press: Press, language: &Language, program: &mut Program, t: Transform) -> Gesture {
-        match press.on {
-            Pressed::Palette { opcode, top_left } => {
-                let Some(block) = program.instantiate(language, &opcode) else {
-                    return Gesture::Idle;
-                };
-                let grab_offset = (press.at - top_left) / t.zoom;
-                Gesture::Dragging(Drag {
-                    fragment: Fragment { blocks: vec![block] },
-                    source: DragSource::Palette { opcode },
-                    grab_offset,
-                    head: t.canvas(press.at) - grab_offset,
-                    snap: None,
-                })
-            }
-            // Read-only blocks cannot move, so dragging one pans instead.
-            Pressed::Block { .. } if self.options.read_only => Gesture::Panning,
-            Pressed::Block { id, top_left } => match program.run_at(id) {
-                Some(fragment) => Gesture::Dragging(Drag {
-                    fragment,
-                    source: DragSource::Canvas { head: id },
-                    grab_offset: t.canvas(press.at) - top_left,
-                    head: top_left,
-                    snap: None,
-                }),
-                None => Gesture::Idle,
-            },
         }
     }
 
@@ -1228,6 +1214,99 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dragging_a_declarations_handle_drops_a_reference_and_leaves_the_name() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "scoped",
+                file: (extension: "s"),
+                types: { "name": (shape: Square, literal: Text), "value": (literal: Text) },
+                categories: [(name: "Values", color: (hue: 140.0)), (name: "Functions", color: (hue: 20.0))],
+                blocks: [
+                    (id: "get", name: "Get", category: "Values", kind: Reporter("value"), spec: "{name:name}"),
+                    (
+                        id: "fn", name: "Fn", category: "Functions", kind: Reporter("value"),
+                        spec: "fn {params:name*} {body:value}",
+                        scope: (declares: ["params"], over: ["body"], reference: "get"),
+                    ),
+                ],
+            )"#,
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let mut function = program.instantiate(&language, "fn").unwrap();
+        let id = function.id;
+        function.lists.insert(
+            "params".into(),
+            vec![block_parse::Input {
+                literal: Some("x".into()),
+                block: None,
+            }],
+        );
+        program.stacks.push(block_parse::Stack {
+            pos: [40.0, 40.0],
+            blocks: vec![function],
+        });
+
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        let overlay = Overlay::default();
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let measure = EguiMeasure(&ctx);
+        let mut layout = Layout {
+            language: &language,
+            measure: &measure,
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+            declarers: Default::default(),
+        };
+        let scene = layout.program(&program);
+        let slot = |slot: &Slot| scene.slots().find(|placed| placed.slot == *slot).unwrap().clone();
+        let (param, body) = (slot(&Slot::item("params", 0)), slot(&Slot::input("body")));
+        assert!(slot(&Slot::item("params", 1)).grip.is_none(), "the empty slot declares nothing yet");
+        let handle = param.grip.expect("a declaring literal has a grip").handle.center();
+        // Dropped with the reference's left edge on the body slot's.
+        let lift = (REPORTER_HEIGHT - param.rect.height()) / 2.0;
+        let release = handle + (body.rect.min - (param.rect.min - vec2(0.0, lift)))
+            + vec2(0.0, (body.rect.height() - REPORTER_HEIGHT) / 2.0);
+        let screen = |point: Pos2| point + editor.view.pan;
+        let (handle, release) = (screen(handle), screen(release));
+
+        press_and_drag(&ctx, &mut editor, &language, &mut program, &overlay, handle);
+        assert!(editor.is_dragging());
+        let up = egui::Event::PointerButton {
+            pos: release,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![egui::Event::PointerMoved(release)]);
+        frame(&ctx, &mut editor, &language, &mut program, &overlay, vec![up]);
+
+        let function = program.find(id).unwrap();
+        assert_eq!(function.lists["params"][0].literal.as_deref(), Some("x"), "the declaration stays");
+        let reference = function.inputs["body"].block.as_deref().expect("the reference landed in the body");
+        assert_eq!(reference.refers.as_ref().map(|declaration| declaration.block), Some(id));
+        assert!(program.ast(&language).is_clean());
+
+        layout.declarers = Layout::declarers(&language, &program);
+        let scene = layout.program(&program);
+        let placed = scene.blocks.iter().find(|placed| placed.id == reference.id).unwrap();
+        assert!(placed.slots.is_empty(), "a reference's name is no field");
+        assert_eq!(placed.labels.iter().map(|label| label.text.as_str()).collect::<Vec<_>>(), ["x"]);
+        assert_eq!(placed.swatch, swatches.categories[1], "in its scope's color, not its own");
+
+        let reference = reference.id;
+        assert!(program.set_literal(id, &Slot::item("params", 0), String::new()));
+        let scene = layout.program(&program);
+        let placed = scene.blocks.iter().find(|placed| placed.id == reference).unwrap();
+        assert_eq!(placed.labels[0].text, "Unnamed params 1");
+    }
+
     /// A language of one switchable block, a program holding it at the canvas
     /// origin, a context with fonts, and the screen points of its switch and
     /// of its label, for an editor made by [`codon_editor`].
@@ -1260,6 +1339,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
         let placed = &scene.blocks[0];
@@ -1308,6 +1388,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         };
         // The lower field's left edge just inside the top block, whose own field is clear.
         let field = layout.program(&program).blocks[0].slots[0].rect;
@@ -1729,6 +1810,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
         let field = scene.slots().next().unwrap().rect.translate(editor.view.pan);
@@ -1776,6 +1858,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
         let empty = scene.slots().next().unwrap().rect.translate(editor.view.pan);
@@ -1876,6 +1959,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
         let field = scene.slots().next().unwrap().rect.translate(editor.view.pan);

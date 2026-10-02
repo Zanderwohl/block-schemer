@@ -1,8 +1,10 @@
 //! Programs to images, rendered offscreen with wgpu. Panics without a wgpu
 //! adapter.
 
+use std::collections::HashMap;
+
 use block_parse::host::Overlay;
-use block_parse::program::Program;
+use block_parse::program::{BlockId, Program};
 use block_parse::Language;
 use egui::{LayerId, Vec2};
 use egui_kittest::Harness;
@@ -31,13 +33,16 @@ pub fn program(
     theme: &Theme,
     scale: f32,
 ) -> Result<RgbaImage, String> {
-    render(language, overlay, theme, scale, |layout| layout.program(program))
+    let declarers = Layout::declarers(language, program);
+    render(language, overlay, theme, scale, declarers, |layout| layout.program(program))
 }
 
 /// Every block in the language, or only those with a tag in `tags`, laid
 /// out by [`Layout::grid`].
 pub fn grid(language: &Language, tags: Option<&[String]>, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
-    render(language, &Overlay::default(), theme, scale, |layout| layout.program(&layout.grid(tags)))
+    render(language, &Overlay::default(), theme, scale, Default::default(), |layout| {
+        layout.program(&layout.grid(tags))
+    })
 }
 
 /// Text is measured by the harness's own fonts, so the scene is laid out
@@ -47,6 +52,7 @@ fn render(
     overlay: &Overlay,
     theme: &Theme,
     scale: f32,
+    declarers: HashMap<BlockId, String>,
     scene: impl Fn(&Layout) -> Scene,
 ) -> Result<RgbaImage, String> {
     if !(scale > 0.0 && scale.is_finite()) {
@@ -64,6 +70,7 @@ fn render(
                 editing: None,
                 validate: true,
                 lifted: None,
+                declarers: declarers.clone(),
             });
             let painter = ctx.layer_painter(LayerId::background());
             let (frame, bubbles) = if scene.blocks.is_empty() {
@@ -129,6 +136,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         };
         let size = layout.program(&layout.grid(None)).bounds.size() + vec2(2.0, 2.0) * MARGIN;
         assert_eq!((image.width(), image.height()), (size.x.round() as u32, size.y.round() as u32));

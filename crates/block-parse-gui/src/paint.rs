@@ -300,7 +300,24 @@ fn paint_block(
         painter.text(t.pos(label.at), Align2::LEFT_CENTER, &label.text, font, ink);
     }
     for slot in &block.slots {
+        if let Some(grip) = slot.grip {
+            let chip = t.rect(grip.chip);
+            let points = reporter_outline(grip.shape, chip, chip.height(), t.zoom);
+            painter.add(egui::Shape::convex_polygon(points.clone(), body, Stroke::NONE));
+            bevel(&points);
+            painter.add(egui::Shape::closed_line(points, edge));
+            bars(painter, t.rect(grip.handle), Stroke::new(1.5 * t.zoom, swatch.ink.gamma_multiply(0.8)));
+        }
         paint_slot(painter, slot, t, theme, live);
+    }
+}
+
+fn bars(painter: &Painter, rect: Rect, stroke: Stroke) {
+    let half = rect.width() * 0.35;
+    let gap = rect.height() * 0.17;
+    for row in [-1.0, 0.0, 1.0] {
+        let y = rect.center().y + row * gap;
+        painter.line_segment([pos2(rect.center().x - half, y), pos2(rect.center().x + half, y)], stroke);
     }
 }
 

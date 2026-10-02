@@ -24,6 +24,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     index one past the last item appends. A block's `tags` are free text;
     `checked_tags` names those whose blocks the palette shows at first;
     without it the palette has no filter.
+    A block's `scope` `declares` inputs and lists whose literals are names,
+    usable `over` some of its parts, or anywhere for those it makes
+    `global`; a `reference` block dragged out of a declaring literal's grip
+    shows the name, uneditable, or "Unnamed {hint} {n}" while it is blank
+    (`documentation/06-scopes.md`). A declaring slot holding a block with no
+    `over` or `global` of its own takes that block's names, as `let` takes
+    its bindings'.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the
@@ -38,16 +45,22 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     `normalize` text when a field loses focus (never while typing).
   - `program`: the saved document. Stacks with canvas positions; blocks keyed
     by stable `BlockId`, inputs/branches by name. Block positions inside a
-    stack are derived, never stored. Loading is tolerant.
+    stack are derived, never stored. Loading is tolerant. A reference's
+    `refers` names its `Declaration` (block and slot); its input copies the
+    name, which `set_literal` and loading keep in step.
   - `edit`: tree operations by id (`detach`, `run_at`, `can_attach`,
-    `can_move`, `attach`). All connection rules live here so GUI and
+    `can_move`, `attach`, `reference`; `duplicate` points references inside
+    the copy at its own declarations). All connection rules live here so GUI and
     headless tools agree.
   - `ast` (built by `Program::ast`): always a whole tree. Faults become
     `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
     parsed in `recovered`. Only unreadable RON is fatal. A stack of one
     reporter is a loose expression, not a problem; warnings (unknown inputs
-    and branches) leave `is_clean` true. `Program::script_at` builds the same
-    for what running one block covers.
+    and branches) leave `is_clean` true. A reference outside its
+    declaration's scope, or to one that is gone, is an `OutOfScope` problem
+    with nothing recovered, as an empty slot; a blank declaring slot, and a
+    reference to one, are `Unnamed`. `Program::script_at` builds the
+    same for what running one block covers.
   - `history`: `History`, undo and redo as a line of program states (stacks
     only, so ids are never reissued) with a cursor; recording while undone
     drops the future, recording no change is a no-op, and unrecorded changes
@@ -77,7 +90,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   included; otherwise a block shows when any of its tags is checked
   (`palette_all`, `palette_tags`, `None` until the user ticks one, meaning
   the language's `checked_tags`). A run dropped over the side
-  panel goes back where it came from. The side panel shows the host's tabs in
+  panel goes back where it came from. A declaring literal sits in a raised
+  chip with a grip (≡) to its right; dragging the chip drags out a new
+  reference, as from the palette, drawn in the declaring block's color, and
+  leaves the declaration where it is. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
   to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
@@ -122,7 +138,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `codegen` turns its blocks into Scheme, refusing a script with problems,
   and escapes strings before Scheme sees them, and writes a procedure
   block with nothing filled in by name in a square `procedure` slot
-  (`call`'s operator, `fold`, `map`, `apply`); Inspect shows the same code
+  (`call`'s operator, `fold`, `map`, `apply`); `define`, `define …
+  _taking_`, `lambda` and `let` (through `binding`) are scopes whose
+  references are `variable` blocks, definitions' names global; Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
   behind the `Scheme` trait so a WASM Scheme can replace it; `prelude.scm`
   evens out where Steel differs from R7RS, and every port without one
@@ -233,6 +251,9 @@ call `block_parse_gui::snapshot::program`.
   clipped and cannot be reached until others close. A scrolling strip or a
   menu of hidden tabs would fix it.
 - Runtime-supplied dropdowns (variables, procedures).
+- Scopes: an internal `define`'s name is global like a top-level one's;
+  showing or enforcing a reference's scope while it is dragged; flagging a
+  name declared twice in one scope (`documentation/06-scopes.md`).
 - Keyboard navigation (arrows, Enter) and accessibility roles for choice
   menus; Escape closes one.
 - Ticking or choosing into a `Bool` or `Choice` list's empty slot to append;

@@ -90,8 +90,19 @@ pub struct PlacedSlot {
     /// The owning block's, for empty slots and edges.
     pub swatch: Swatch,
     pub content: SlotContent,
+    /// For a slot declaring a name.
+    pub grip: Option<Grip>,
     /// Under a later stack: drawn static, as a live widget would take that stack's clicks.
     pub covered: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grip {
+    pub handle: Rect,
+    /// Around field and handle.
+    pub chip: Rect,
+    /// The reference's.
+    pub shape: Shape,
 }
 
 impl PlacedSlot {
@@ -165,6 +176,15 @@ impl Scene {
     pub fn slot_at(&self, point: Pos2) -> Option<&PlacedSlot> {
         self.slots().filter(|slot| slot.rect.contains(point)).last()
     }
+
+    /// The slot whose chip, outside the field, is under `point`, unless a
+    /// later stack covers it.
+    pub fn grip_at(&self, point: Pos2) -> Option<&PlacedSlot> {
+        self.slots()
+            .filter(|slot| !slot.covered && !slot.rect.contains(point))
+            .filter(|slot| slot.grip.is_some_and(|grip| grip.chip.contains(point)))
+            .last()
+    }
 }
 
 /// Within a stack, children sit beside their parent's fields, never on them.
@@ -193,7 +213,11 @@ pub(super) fn mark_covered(scene: &mut Scene) {
         for index in range.clone() {
             let block = &scene.blocks[index];
             let switch = block.switch.is_some_and(|rect| covered(rect, stack));
-            let slots: Vec<bool> = block.slots.iter().map(|slot| covered(slot.rect, stack)).collect();
+            let slots: Vec<bool> = block
+                .slots
+                .iter()
+                .map(|slot| covered(slot.grip.map_or(slot.rect, |grip| grip.chip), stack))
+                .collect();
             marks.push((index, switch, slots));
         }
     }

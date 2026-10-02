@@ -62,6 +62,8 @@ Language(
             kind: Reporter("datum"),
             spec: "define {variable:symbol} {expression:datum}",
             layout: Body(1),
+            // Over everything, as a top-level definition is.
+            scope: (declares: ["variable"], global: ["variable"], reference: "variable"),
             tags: ["basics", "base"],
         ),
         (
@@ -70,8 +72,10 @@ Language(
             category: "Program structure",
             kind: Reporter("datum"),
             spec: "define {variable:symbol} _taking_ {formals:symbol*} {body:datum+}",
-            hints: {"formals": "variable", "body": "expression"},
+            hints: {"formals": "parameter", "body": "expression"},
             layout: Body(2),
+            // The name everywhere, as a top-level definition's; the formals in the body.
+            scope: (declares: ["variable", "formals"], over: ["body"], global: ["variable"], reference: "variable"),
             tags: ["basics", "base"],
         ),
 
@@ -95,8 +99,9 @@ Language(
             category: "Primitive expression types",
             kind: Reporter("datum"),
             spec: "lambda {formals:symbol*} {body:datum+}",
-            hints: {"formals": "variable", "body": "expression"},
+            hints: {"formals": "parameter", "body": "expression"},
             layout: Body(1),
+            scope: (declares: ["formals"], over: ["body"], reference: "variable"),
             tags: ["basics", "base"],
         ),
         (
@@ -118,6 +123,8 @@ Language(
             spec: "let {bindings:binding*} {body:datum+}",
             hints: {"bindings": "binding", "body": "expression"},
             layout: Body(1),
+            // Not over the bindings' inits: as in Scheme, they see the outside.
+            scope: (declares: ["bindings"], over: ["body"]),
             tags: ["basics", "base"],
         ),
         (
@@ -126,6 +133,8 @@ Language(
             category: "Derived expression types",
             kind: Reporter("binding"),
             spec: "{variable:symbol} _be_ {init:datum}",
+            // Into the body of the `let` holding it.
+            scope: (declares: ["variable"], reference: "variable"),
             tags: ["basics"],
         ),
         (
