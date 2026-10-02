@@ -390,6 +390,12 @@ impl eframe::App for App {
                             self.sync_tabs();
                         }
                     }
+                    EditorEvent::ConsoleEnd(tab) => {
+                        if let Some(runner) = &mut self.runner {
+                            runner.console_end(&tab);
+                            self.sync_tabs();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -703,18 +709,26 @@ impl App {
         self.editor.options.side_collapsed = false;
     }
 
-    /// The console the runner has just written to, if any.
+    /// The console the runner has just written to, if any. One that has
+    /// started waiting for input comes forward here, bubble or not, as a
+    /// program waiting where no one can see it looks hung.
     fn sync_tabs(&mut self) -> Option<TabId> {
         let fresh = self.runner.as_ref().map(|runner| runner.overlay().tabs).unwrap_or_default();
+        let old = |id: &TabId| self.overlay.tabs.iter().find(|old| old.id == *id);
         let written = fresh
             .iter()
-            .find(|tab| {
-                matches!(tab.content, TabContent::Console { .. })
-                    && self.overlay.tabs.iter().any(|old| old.id == tab.id && old != *tab)
-            })
+            .find(|tab| matches!(tab.content, TabContent::Console { .. }) && old(&tab.id).is_some_and(|old| old != *tab))
+            .map(|tab| tab.id.clone());
+        let waiting = |tab: &Tab| matches!(tab.content, TabContent::Console { waiting: true, .. });
+        let started = fresh
+            .iter()
+            .find(|tab| waiting(tab) && !old(&tab.id).is_some_and(waiting))
             .map(|tab| tab.id.clone());
         self.overlay.tabs = fresh;
         self.overlay.tabs.extend(self.inspections.iter().map(|(_, tab)| tab.clone()));
+        if let Some(started) = started {
+            self.show_tab(started);
+        }
         written
     }
 

@@ -186,7 +186,7 @@
 (define (force obj)
   (if (__promise? obj) (__promise-value obj) obj))
 
-;; Every port is in memory, so one is always ready.
+;; Every port but the console's is in memory, so it is always ready.
 
 (define __closed '())
 (define __binary '())
@@ -225,7 +225,8 @@
 (define (textual-port? obj)
   (and (port? obj) (not (memq obj __binary))))
 
-(define (char-ready? . port) #t)
+(define (char-ready? . port)
+  (not (eq? (if (null? port) (current-input-port) (car port)) __in)))
 (define (u8-ready? . port) #t)
 
 (define (read-string k . port)

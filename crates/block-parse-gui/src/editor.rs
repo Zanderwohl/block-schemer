@@ -135,6 +135,8 @@ pub enum EditorEvent {
     CloseTab(TabId),
     /// Enter pressed on a console tab's line, sent without its newline.
     ConsoleInput { tab: TabId, line: String },
+    /// Ctrl+D on a console tab's empty line: the end of input.
+    ConsoleEnd(TabId),
     /// A request to set a block's switch; the host's next `Overlay` has the
     /// answer. Sent in read-only mode too.
     Switched(BlockId, bool),
@@ -2043,7 +2045,10 @@ mod tests {
                 id: TabId::from("console"),
                 title: "Console".into(),
                 closable: false,
-                content: TabContent::Console { output: "hello\n".into() },
+                content: TabContent::Console {
+                    output: "hello\n".into(),
+                    waiting: false,
+                },
             }],
             ..Overlay::default()
         };
@@ -2067,6 +2072,42 @@ mod tests {
         );
         let line = egui::Id::new("block_editor").with(("console_line", TabId::from("console")));
         assert!(ctx.memory(|memory| memory.has_focus(line)), "the line keeps focus for the next");
+    }
+
+    #[test]
+    fn a_console_that_starts_waiting_takes_focus_and_ctrl_d_ends_its_input() {
+        let (language, mut program, ctx, _, _) = codon_on_canvas();
+        let mut editor = codon_editor();
+        editor.options.side_collapsed = false;
+        let console = |waiting| Overlay {
+            tabs: vec![Tab {
+                id: TabId::from("console"),
+                title: "Console".into(),
+                closable: false,
+                content: TabContent::Console {
+                    output: "Name? ".into(),
+                    waiting,
+                },
+            }],
+            ..Overlay::default()
+        };
+        let line = egui::Id::new("block_editor").with(("console_line", TabId::from("console")));
+        let focused = || ctx.memory(|memory| memory.has_focus(line));
+        sent(&ctx, &mut editor, &language, &mut program, &console(false), vec![vec![]]);
+        assert!(!focused());
+        sent(&ctx, &mut editor, &language, &mut program, &console(true), vec![vec![]]);
+        assert!(focused(), "focused once it starts waiting");
+
+        let ctrl_d = |pressed| egui::Event::Key {
+            key: Key::D,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Modifiers::CTRL,
+        };
+        let steps = vec![vec![ctrl_d(true), ctrl_d(false)]];
+        let events = sent(&ctx, &mut editor, &language, &mut program, &console(true), steps);
+        assert_eq!(events, vec![EditorEvent::ConsoleEnd(TabId::from("console"))]);
     }
 
     #[test]

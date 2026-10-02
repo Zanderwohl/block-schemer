@@ -1,18 +1,19 @@
 //! One worker thread that owns the session.
 
 use std::collections::VecDeque;
+use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
-use super::{Dispatch, Job, STOPPED, Ticket};
-use crate::scheme::{Answer, Interrupt, Scheme};
+use super::{Dispatch, Event, Job, STOPPED, Ticket};
+use crate::scheme::{Console, Interrupt, Scheme};
 
 /// What every unanswered ticket gets when the worker dies, as by a panic.
 const CRASHED: &str = "The interpreter stopped unexpectedly.";
 
-type Make<S> = Arc<dyn Fn() -> S + Send + Sync>;
+type Make<S> = Arc<dyn Fn(Arc<dyn Console>) -> S + Send + Sync>;
 
 pub struct Native<S> {
     make: Make<S>,
@@ -20,26 +21,94 @@ pub struct Native<S> {
     /// Bumped by `stop`. A job sent before the bump is skipped, or stopped
     /// if it is running.
     generation: Arc<AtomicU64>,
+    terminal: Arc<Terminal>,
     next: u64,
     unanswered: VecDeque<Ticket>,
 }
 
 struct Worker {
     jobs: Sender<(Ticket, u64, Job)>,
-    answers: Receiver<(Ticket, Result<Answer, String>)>,
+    answers: Receiver<(Ticket, Result<String, String>)>,
     interrupter: Arc<dyn Interrupt>,
+}
+
+/// The console as the worker sees it. Output is collected here rather than
+/// sent, so no sender outlives a dead worker inside its interpreter.
+#[derive(Default)]
+struct Terminal {
+    state: Mutex<TerminalState>,
+    entered: Condvar,
+}
+
+#[derive(Default)]
+struct TerminalState {
+    running: Option<Ticket>,
+    output: Vec<(Ticket, String)>,
+    /// Entered and not yet read; an empty one ends input.
+    input: VecDeque<String>,
+    waiting: bool,
+    stopped: bool,
+}
+
+impl Terminal {
+    fn state(&self) -> MutexGuard<'_, TerminalState> {
+        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn enter(&self, line: String) {
+        self.state().input.push_back(line);
+        self.entered.notify_all();
+    }
+
+    fn stop(&self) {
+        let mut state = self.state();
+        state.stopped = true;
+        state.input.clear();
+        self.entered.notify_all();
+    }
+}
+
+impl Console for Terminal {
+    fn write(&self, text: &str) {
+        let mut state = self.state();
+        let Some(ticket) = state.running else {
+            return;
+        };
+        match state.output.last_mut() {
+            Some((last, output)) if *last == ticket => output.push_str(text),
+            _ => state.output.push((ticket, text.to_owned())),
+        }
+    }
+
+    fn read_line(&self) -> io::Result<String> {
+        let mut state = self.state();
+        loop {
+            if state.stopped {
+                state.waiting = false;
+                return Err(io::Error::other(STOPPED));
+            }
+            if let Some(line) = state.input.pop_front() {
+                state.waiting = false;
+                return Ok(line);
+            }
+            state.waiting = true;
+            state = self.entered.wait(state).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
 }
 
 impl<S: Scheme + 'static> Native<S> {
     /// `make` runs on the worker, so a Scheme need not be `Send`, and again
     /// to replace a worker that died.
-    pub fn spawn(make: impl Fn() -> S + Send + Sync + 'static) -> Self {
+    pub fn spawn(make: impl Fn(Arc<dyn Console>) -> S + Send + Sync + 'static) -> Self {
         let make: Make<S> = Arc::new(make);
         let generation = Arc::new(AtomicU64::new(0));
+        let terminal = Arc::new(Terminal::default());
         Self {
-            worker: Worker::spawn(make.clone(), generation.clone()),
+            worker: Worker::spawn(make.clone(), generation.clone(), terminal.clone()),
             make,
             generation,
+            terminal,
             next: 0,
             unanswered: VecDeque::new(),
         }
@@ -47,14 +116,14 @@ impl<S: Scheme + 'static> Native<S> {
 }
 
 impl Worker {
-    fn spawn<S: Scheme + 'static>(make: Make<S>, generation: Arc<AtomicU64>) -> Self {
+    fn spawn<S: Scheme + 'static>(make: Make<S>, generation: Arc<AtomicU64>, terminal: Arc<Terminal>) -> Self {
         let (jobs, inbox) = mpsc::channel::<(Ticket, u64, Job)>();
         let (outbox, answers) = mpsc::channel();
         let (handover, interrupter) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("scheme".into())
             .spawn(move || {
-                let mut scheme = make();
+                let mut scheme = make(terminal.clone());
                 let interrupter = scheme.interrupter();
                 if handover.send(interrupter.clone()).is_err() {
                     return;
@@ -65,18 +134,25 @@ impl Worker {
                 let mut session = generation.load(Ordering::SeqCst);
                 for (ticket, sent, job) in inbox {
                     // Reset before clearing, and clear before the check, so a
-                    // stop from the check on interrupts the engine that runs.
+                    // stop from the check on interrupts the engine that runs
+                    // and any read it waits on.
                     if job.fresh || sent != session {
                         scheme.reset();
                         session = sent;
                     }
                     interrupter.clear();
+                    {
+                        let mut state = terminal.state();
+                        state.stopped = false;
+                        state.running = Some(ticket);
+                    }
                     let answer = if stopped(sent) {
                         Err(STOPPED.to_owned())
                     } else {
                         let answer = scheme.run(&job.source);
                         if stopped(sent) { Err(STOPPED.to_owned()) } else { answer }
                     };
+                    terminal.state().running = None;
                     if outbox.send((ticket, answer)).is_err() {
                         return;
                     }
@@ -103,32 +179,58 @@ impl<S: Scheme + 'static> Dispatch for Native<S> {
         ticket
     }
 
-    fn poll(&mut self) -> Vec<(Ticket, Result<Answer, String>)> {
+    /// Answers are taken before output, so all of a job's output is in hand
+    /// by the time its answer is.
+    fn poll(&mut self) -> Vec<Event> {
         let mut answers = Vec::new();
-        loop {
+        let crashed = loop {
             match self.worker.answers.try_recv() {
-                Ok(answer) => {
-                    self.unanswered.retain(|ticket| *ticket != answer.0);
-                    answers.push(answer);
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    answers.extend(self.unanswered.drain(..).map(|ticket| (ticket, Err(CRASHED.to_owned()))));
-                    self.worker = Worker::spawn(self.make.clone(), self.generation.clone());
-                    break;
-                }
+                Ok(answer) => answers.push(answer),
+                Err(TryRecvError::Empty) => break false,
+                Err(TryRecvError::Disconnected) => break true,
             }
+        };
+        let mut output = std::mem::take(&mut self.terminal.state().output);
+        if crashed {
+            answers.extend(self.unanswered.iter().map(|ticket| (*ticket, Err(CRASHED.to_owned()))));
+            *self.terminal.state() = TerminalState::default();
+            self.worker = Worker::spawn(self.make.clone(), self.generation.clone(), self.terminal.clone());
         }
-        answers
+        let mut events = Vec::new();
+        for (ticket, answer) in answers {
+            self.unanswered.retain(|unanswered| *unanswered != ticket);
+            let (mine, rest) = output.into_iter().partition(|(from, _)| *from == ticket);
+            output = rest;
+            events.extend(mine.into_iter().map(|(from, text)| Event::Output(from, text)));
+            events.push(Event::Done(ticket, answer));
+        }
+        events.extend(output.into_iter().map(|(from, text)| Event::Output(from, text)));
+        if self.unanswered.is_empty() {
+            self.terminal.state().input.clear();
+        }
+        events
     }
 
     fn busy(&self) -> bool {
         !self.unanswered.is_empty()
     }
 
+    fn waiting(&self) -> bool {
+        self.terminal.state().waiting
+    }
+
+    fn input(&mut self, line: &str) {
+        self.terminal.enter(line.to_owned());
+    }
+
+    fn end_input(&mut self) {
+        self.terminal.enter(String::new());
+    }
+
     fn stop(&mut self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.worker.interrupter.interrupt();
+        self.terminal.stop();
     }
 }
 
@@ -137,6 +239,7 @@ impl<S> Drop for Native<S> {
     fn drop(&mut self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.worker.interrupter.interrupt();
+        self.terminal.stop();
     }
 }
 
@@ -148,15 +251,35 @@ mod tests {
     use crate::Steel;
 
     /// Polls until every ticket is answered, or fails after a while.
-    fn settle(dispatch: &mut impl Dispatch) -> Vec<(Ticket, Result<Answer, String>)> {
+    fn settle(dispatch: &mut impl Dispatch) -> Vec<Event> {
         let start = Instant::now();
-        let mut answers = Vec::new();
+        let mut events = Vec::new();
         while dispatch.busy() {
             assert!(start.elapsed() < Duration::from_secs(20), "still busy");
-            answers.extend(dispatch.poll());
+            events.extend(dispatch.poll());
             thread::sleep(Duration::from_millis(5));
         }
-        answers
+        events
+    }
+
+    /// Polls once the dispatch waits for input, for what it said first.
+    fn wait_for_input(dispatch: &mut impl Dispatch) -> Vec<Event> {
+        let start = Instant::now();
+        while !dispatch.waiting() {
+            assert!(start.elapsed() < Duration::from_secs(20), "never waited");
+            thread::sleep(Duration::from_millis(5));
+        }
+        dispatch.poll()
+    }
+
+    fn done(events: Vec<Event>) -> Vec<(Ticket, Result<String, String>)> {
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Done(ticket, answer) => Some((ticket, answer)),
+                Event::Output(..) => None,
+            })
+            .collect()
     }
 
     fn job(source: &str, fresh: bool) -> Job {
@@ -166,8 +289,8 @@ mod tests {
         }
     }
 
-    fn value(answer: &Result<Answer, String>) -> &str {
-        &answer.as_ref().unwrap().value
+    fn all_stopped(answers: &[(Ticket, Result<String, String>)], why: &str) -> bool {
+        answers.iter().all(|(_, answer)| answer.as_ref().err().map(String::as_str) == Some(why))
     }
 
     #[test]
@@ -176,10 +299,65 @@ mod tests {
         let first = dispatch.send(job("(define x 2)", false));
         let second = dispatch.send(job("(* x 3)", false));
         let third = dispatch.send(job("x", true));
-        let answers = settle(&mut dispatch);
+        let answers = done(settle(&mut dispatch));
         assert_eq!(answers.iter().map(|(ticket, _)| *ticket).collect::<Vec<_>>(), [first, second, third]);
-        assert_eq!(value(&answers[1].1), "6");
+        assert_eq!(answers[1].1, Ok("6".into()));
         assert!(answers[2].1.as_ref().unwrap_err().contains("x"), "the fresh session forgot x");
+    }
+
+    #[test]
+    fn each_job_s_output_comes_before_its_answer() {
+        let mut dispatch = Native::spawn(Steel::new);
+        let first = dispatch.send(job("(display 1) (display 2) 'a", false));
+        let second = dispatch.send(job("(display 3) 'b", false));
+        assert_eq!(
+            settle(&mut dispatch),
+            [
+                Event::Output(first, "12".into()),
+                Event::Done(first, Ok("a".into())),
+                Event::Output(second, "3".into()),
+                Event::Done(second, Ok("b".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_read_waits_for_input_after_showing_what_came_before() {
+        let mut dispatch = Native::spawn(Steel::new);
+        let ticket = dispatch.send(job("(display \"Name? \") (string-append \"hi \" (read-line))", false));
+        assert_eq!(wait_for_input(&mut dispatch), [Event::Output(ticket, "Name? ".into())]);
+        assert!(dispatch.busy());
+        dispatch.input("Ada\n");
+        assert_eq!(settle(&mut dispatch), [Event::Done(ticket, Ok("\"hi Ada\"".into()))]);
+        assert!(!dispatch.waiting());
+    }
+
+    #[test]
+    fn input_entered_early_is_read_later_but_not_by_a_job_sent_after_all_answered() {
+        let mut dispatch = Native::spawn(Steel::new);
+        dispatch.send(job("(read-line)", false));
+        dispatch.input("early\n");
+        dispatch.input("unread\n");
+        assert_eq!(done(settle(&mut dispatch))[0].1, Ok("\"early\"".into()));
+
+        dispatch.send(job("(read-line)", false));
+        wait_for_input(&mut dispatch);
+        dispatch.end_input();
+        assert_eq!(done(settle(&mut dispatch))[0].1, Ok("(eof)".into()));
+    }
+
+    #[test]
+    fn stopping_ends_a_read_waiting_for_input() {
+        let mut dispatch = Native::spawn(Steel::new);
+        dispatch.send(job("(read-line)", false));
+        dispatch.send(job("(+ 1 1)", false));
+        wait_for_input(&mut dispatch);
+        dispatch.stop();
+        let answers = done(settle(&mut dispatch));
+        assert!(all_stopped(&answers, STOPPED), "{answers:?}");
+        assert!(!dispatch.waiting());
+        dispatch.send(job("(+ 1 1)", false));
+        assert_eq!(done(settle(&mut dispatch))[0].1, Ok("2".into()), "and the next one runs");
     }
 
     #[test]
@@ -189,7 +367,7 @@ mod tests {
         settle(&mut dispatch);
         dispatch.stop();
         dispatch.send(job("kept", false));
-        assert!(settle(&mut dispatch)[0].1.is_err(), "kept outlived the stop");
+        assert!(done(settle(&mut dispatch))[0].1.is_err(), "kept outlived the stop");
     }
 
     #[test]
@@ -204,15 +382,15 @@ mod tests {
         assert!(dispatch.poll().is_empty(), "the loop is still running");
 
         dispatch.stop();
-        let answers = settle(&mut dispatch);
+        let answers = done(settle(&mut dispatch));
         assert_eq!(answers.len(), 2);
-        assert!(answers.iter().all(|(_, answer)| answer.as_ref().err().map(String::as_str) == Some(STOPPED)), "{answers:?}");
+        assert!(all_stopped(&answers, STOPPED), "{answers:?}");
 
         dispatch.send(job("kept", false));
-        let answers = settle(&mut dispatch);
+        let answers = done(settle(&mut dispatch));
         assert!(answers[0].1.is_err(), "the session was lost: {answers:?}");
         dispatch.send(job("(+ 1 1)", false));
-        assert_eq!(value(&settle(&mut dispatch)[0].1), "2", "and the next one runs");
+        assert_eq!(done(settle(&mut dispatch))[0].1, Ok("2".into()), "and the next one runs");
     }
 
     struct Fragile;
@@ -225,9 +403,9 @@ mod tests {
     }
 
     impl Scheme for Fragile {
-        fn run(&mut self, source: &str) -> Result<Answer, String> {
+        fn run(&mut self, source: &str) -> Result<String, String> {
             assert_ne!(source, "boom", "the worker dies");
-            Ok(Answer::default())
+            Ok(String::new())
         }
         fn reset(&mut self) {}
         fn interrupter(&self) -> Arc<dyn Interrupt> {
@@ -237,12 +415,12 @@ mod tests {
 
     #[test]
     fn a_worker_that_dies_answers_for_its_queue_and_is_replaced() {
-        let mut dispatch = Native::spawn(|| Fragile);
+        let mut dispatch = Native::spawn(|_| Fragile);
         dispatch.send(job("boom", false));
         dispatch.send(job("queued", false));
-        let answers = settle(&mut dispatch);
-        assert!(answers.iter().all(|(_, answer)| answer.as_ref().err().map(String::as_str) == Some(CRASHED)), "{answers:?}");
+        let answers = done(settle(&mut dispatch));
+        assert!(all_stopped(&answers, CRASHED), "{answers:?}");
         dispatch.send(job("fine", false));
-        assert!(settle(&mut dispatch)[0].1.is_ok());
+        assert!(done(settle(&mut dispatch))[0].1.is_ok());
     }
 }

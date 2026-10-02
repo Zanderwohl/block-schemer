@@ -56,9 +56,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     back until its field lets go (`documentation/04-history.md`).
   - `host`: `Overlay` (breakpoints, highlights, annotations, muted blocks,
     switch states, speech bubbles, the side panel's `Tab`s: each `Text` or a
-    `Console`, closable or not), `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
+    `Console`, which the host may mark `waiting` for a line, closable or
+    not), `RunCommand`, `RunStatus`, `trait Runner`. In core so interpreters need not
     depend on egui. `Runner` needs only `overlay` and `run_block`; the
-    debugger methods and `console_input` default to doing nothing, and
+    debugger methods, `console_input` and `console_end` default to doing
+    nothing, and
     `inspect` (a block's script as the back end's text, shown in a side
     panel tab; it gets the program, as `run_block` does) to `None`. `start`
     and `run_block` also get the program's path, `None` until saved. A
@@ -80,7 +82,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   active one, dragging a tab reorders it, and a closed active tab hands over
   to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
   a `Console` tab is monospace output over a line whose Enter sends
-  `EditorEvent::ConsoleInput`, never a shell. Feature `app`
+  `EditorEvent::ConsoleInput`, never a shell, and whose Ctrl+D, on an empty
+  line, `EditorEvent::ConsoleEnd`; a console that starts `waiting` has its
+  line marked and focused. Feature `app`
   (off by default) adds eframe, rfd, and on macOS winit and muda, the window
   as a library (`app::run` with an `AppConfig`: name, language, program path,
   `Menus`, an optional `Runner` and an optional window icon). With a runner,
@@ -122,7 +126,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
   behind the `Scheme` trait so a WASM Scheme can replace it; `prelude.scm`
   evens out where Steel differs from R7RS, and every port without one
-  given is the console's. Every run goes
+  given is the console's: output shows as it is written, and a read waits
+  for a line entered in the console, which is only echoed while nothing
+  runs. Steel is `vendor/steel-core`, patched for a reader port
+  (`PATCH.md`). Every run goes
   through a `dispatch::Dispatch`, which spawns, tracks and kills the workers
   that run Scheme off the UI thread: `dispatch::native` is one thread owning
   the session, replaced if it dies; Stop interrupts the run, drops the queue
@@ -132,6 +139,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   Scratch-style typing), `strict_tiny.ron` (the same language with exact
   types and explicit conversions) and `scheme.ron` (an R7RS subset built on
   lists and `Body` layout).
+- `vendor/steel-core` — Steel 0.8.3 with a reader port from any `Read` and
+  peeks that never read past one character, for Block Schemer's console
+  (`PATCH.md`); outside the workspace, through `[patch.crates-io]`.
 
 ## Principles
 
@@ -158,7 +168,7 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   each `poll` that took in answers, repainting while the runner is not idle.
   A console a run or Play writes to as it is sent comes to the front,
   unless that run answered in a bubble; later answers never bring it
-  forward. Commands and events go out either as a polled list in `EditorOutput` or through a
+  forward, but a console that starts waiting for input always comes. Commands and events go out either as a polled list in `EditorOutput` or through a
   `Runner`. Breakpoints are requests; the host owns them and their
   persistence.
 - A run in hand stays in the program until dropped, so the program is always
@@ -231,13 +241,14 @@ call `block_parse_gui::snapshot::program`.
   (`documentation/03-variadic.md`).
 - Refreshing an inspection when its blocks change; it keeps what Inspect
   last gave back until the next Inspect of that block, New or Open.
-- Block Schemer's console: `read-line` fed from `ConsoleInput` to a worker
-  waiting on it; what Play does with several `program` blocks; a tab per
-  run, if runs become concurrent.
+- Block Schemer: what Play does with several `program` blocks; a tab per
+  run, if runs become concurrent; dropping `vendor/steel-core` once Steel
+  has its own way to make a reader port.
 - A test that the context menu's Inspect item sends `EditorEvent::Inspect`;
   driving an egui context menu headless needs the button's position.
 - Tests of `app::run`'s tab and run bookkeeping (which console was written
-  to, bringing it forward only without a bubble, `refresh_inspections`,
+  to, bringing it forward only without a bubble or once it waits for input,
+  `refresh_inspections`,
   `CloseTab` removing only inspections; an outline kept while a run is
   pending, a late bubble only for a block still outlined, an outline with
   no bubble dropped once the runner is idle); it lives in `App`, which

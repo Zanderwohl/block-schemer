@@ -1,11 +1,11 @@
 //! The side panel's tabs: the host's content, in the editor's order.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use block_parse::host::{Tab, TabContent, TabId};
 use egui::text::{LayoutJob, TextWrapping};
-use egui::{Align2, CursorIcon, FontId, Galley, Key, Rect, Sense, TextEdit, UiBuilder, pos2, vec2};
+use egui::{Align2, CursorIcon, FontId, Galley, Key, Modifiers, Rect, RichText, Sense, TextEdit, UiBuilder, pos2, vec2};
 
 use crate::editor::{EditorEvent, EditorOptions};
 use crate::theme::Theme;
@@ -23,6 +23,10 @@ pub(crate) struct TabState {
     /// Last frame's active tab, which new tabs open after.
     shown: Option<TabId>,
     typed: HashMap<TabId, String>,
+    /// Consoles waiting for a line last frame.
+    waiting: HashSet<TabId>,
+    /// A console that has started waiting, whose line takes focus once shown.
+    focus: Option<TabId>,
 }
 
 /// A closed active tab hands over to its right-hand neighbor, else its left.
@@ -56,6 +60,18 @@ pub(crate) fn arrange(options: &mut EditorOptions, state: &mut TabState, tabs: &
     }
     state.shown = options.active_tab.clone();
     state.typed.retain(|id, _| exists(id));
+    let waiting: HashSet<TabId> = tabs
+        .iter()
+        .filter(|tab| matches!(tab.content, TabContent::Console { waiting: true, .. }))
+        .map(|tab| tab.id.clone())
+        .collect();
+    if let Some(started) = waiting.difference(&state.waiting).next() {
+        state.focus = Some(started.clone());
+    }
+    if state.focus.as_ref().is_some_and(|id| !waiting.contains(id)) {
+        state.focus = None;
+    }
+    state.waiting = waiting;
 }
 
 /// Call after [`arrange`].
@@ -107,7 +123,7 @@ pub(crate) fn show(
                 .auto_shrink(false)
                 .show(&mut ui, |ui| read_only(ui, text, id.with(("tab_text", &tab.id))));
         }
-        TabContent::Console { output } => {
+        TabContent::Console { output, waiting } => {
             let input = Rect::from_min_max(pos2(body.min.x, body.max.y - INPUT_HEIGHT), body.max);
             let output_rect = Rect::from_min_max(body.min, pos2(body.max.x, input.min.y));
             let mut ui = panel.new_child(UiBuilder::new().max_rect(output_rect));
@@ -119,14 +135,23 @@ pub(crate) fn show(
             panel.painter().hline(body.x_range(), input.min.y, (1.0, theme.divider));
             let mut ui = panel.new_child(UiBuilder::new().max_rect(input.shrink2(vec2(4.0, 3.0))));
             ui.horizontal_centered(|ui| {
-                ui.monospace("›");
+                let prompt = RichText::new("›").monospace();
+                ui.label(if *waiting { prompt.color(theme.active) } else { prompt });
                 let line = state.typed.entry(tab.id.clone()).or_default();
                 let field = TextEdit::singleline(line)
                     .id(id.with(("console_line", &tab.id)))
                     .font(egui::TextStyle::Monospace)
                     .frame(egui::Frame::NONE)
+                    .hint_text(if *waiting { "waiting for input" } else { "" })
                     .desired_width(f32::INFINITY);
                 let response = ui.add(field);
+                if state.focus.as_ref() == Some(&tab.id) {
+                    state.focus = None;
+                    response.request_focus();
+                }
+                if response.has_focus() && line.is_empty() && ui.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::D)) {
+                    events.push(EditorEvent::ConsoleEnd(tab.id.clone()));
+                }
                 if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                     events.push(EditorEvent::ConsoleInput {
                         tab: tab.id.clone(),
