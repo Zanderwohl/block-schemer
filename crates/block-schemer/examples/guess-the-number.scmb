@@ -1,11 +1,11 @@
 #![enable(implicit_some)]
 Program(
     language: "Block Schemer",
-    version: 2,
+    version: 3,
     stacks: [
         (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "program",
             inputs: {"main": (block: (id: 2, opcode: "call",
-                inputs: {"operator": (literal: "play")},
+                inputs: {"operator": (block: (id: 101, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))},
                 lists: {"operands": [
                     (block: (id: 3, opcode: "+", lists: {"z": [
                         (literal: "1"),
@@ -29,44 +29,59 @@ Program(
                                 "init": (block: (id: 15, opcode: "read-line")),
                             }))],
                             "body": [(block: (id: 16, opcode: "if", inputs: {
-                                "test": (block: (id: 17, opcode: "eof-object?", inputs: {"obj": (literal: "line")})),
+                                "test": (block: (id: 17, opcode: "eof-object?", inputs: {"obj": (block: (id: 102, opcode: "variable", inputs: {"variable": (literal: "line")}, refers: (block: 14, slot: (input: "variable"))))})),
                                 "consequent": (block: (id: 18, opcode: "display", inputs: {"obj": (block: (id: 19, opcode: "string", inputs: {"text": (literal: "Bye.")}))})),
                                 "alternate": (block: (id: 20, opcode: "let",
                                     lists: {
                                         "bindings": [(block: (id: 21, opcode: "binding", inputs: {
                                             "variable": (literal: "guess"),
-                                            "init": (block: (id: 22, opcode: "string->number", inputs: {"string": (literal: "line")})),
+                                            "init": (block: (id: 22, opcode: "string->number", inputs: {"string": (block: (id: 103, opcode: "variable", inputs: {"variable": (literal: "line")}, refers: (block: 14, slot: (input: "variable"))))})),
                                         }))],
                                         "body": [(block: (id: 23, opcode: "if", inputs: {
-                                            "test": (block: (id: 24, opcode: "not", inputs: {"obj": (literal: "guess")})),
+                                            "test": (block: (id: 24, opcode: "not", inputs: {"obj": (block: (id: 104, opcode: "variable", inputs: {"variable": (literal: "guess")}, refers: (block: 21, slot: (input: "variable"))))})),
                                             "consequent": (block: (id: 25, opcode: "begin", lists: {"expressions": [
                                                 (block: (id: 26, opcode: "display", inputs: {"obj": (block: (id: 27, opcode: "string", inputs: {"text": (literal: "That's not a number.")}))})),
                                                 (block: (id: 28, opcode: "newline")),
-                                                (block: (id: 29, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [(literal: "secret"), (literal: "tries")]})),
+                                                (block: (id: 29, opcode: "call", inputs: {"operator": (block: (id: 105, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                    (block: (id: 106, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
+                                                    (block: (id: 107, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),
+                                                ]})),
                                             ]})),
                                             "alternate": (block: (id: 30, opcode: "if", inputs: {
-                                                "test": (block: (id: 31, opcode: "<", lists: {"x": [(literal: "guess"), (literal: "secret")]})),
+                                                "test": (block: (id: 31, opcode: "<", lists: {"x": [
+                                                    (block: (id: 108, opcode: "variable", inputs: {"variable": (literal: "guess")}, refers: (block: 21, slot: (input: "variable")))),
+                                                    (block: (id: 109, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
+                                                ]})),
                                                 "consequent": (block: (id: 32, opcode: "begin", lists: {"expressions": [
                                                     (block: (id: 33, opcode: "display", inputs: {"obj": (block: (id: 34, opcode: "string", inputs: {"text": (literal: "Higher!")}))})),
                                                     (block: (id: 35, opcode: "newline")),
-                                                    (block: (id: 36, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [
-                                                        (literal: "secret"),
-                                                        (block: (id: 37, opcode: "+", lists: {"z": [(literal: "tries"), (literal: "1")]})),
+                                                    (block: (id: 36, opcode: "call", inputs: {"operator": (block: (id: 110, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                        (block: (id: 111, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
+                                                        (block: (id: 37, opcode: "+", lists: {"z": [
+                                                            (block: (id: 112, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),
+                                                            (literal: "1"),
+                                                        ]})),
                                                     ]})),
                                                 ]})),
                                                 "alternate": (block: (id: 40, opcode: "if", inputs: {
-                                                    "test": (block: (id: 41, opcode: ">", lists: {"x": [(literal: "guess"), (literal: "secret")]})),
+                                                    "test": (block: (id: 41, opcode: ">", lists: {"x": [
+                                                        (block: (id: 113, opcode: "variable", inputs: {"variable": (literal: "guess")}, refers: (block: 21, slot: (input: "variable")))),
+                                                        (block: (id: 114, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
+                                                    ]})),
                                                     "consequent": (block: (id: 42, opcode: "begin", lists: {"expressions": [
                                                         (block: (id: 43, opcode: "display", inputs: {"obj": (block: (id: 44, opcode: "string", inputs: {"text": (literal: "Lower!")}))})),
                                                         (block: (id: 45, opcode: "newline")),
-                                                        (block: (id: 46, opcode: "call", inputs: {"operator": (literal: "play")}, lists: {"operands": [
-                                                            (literal: "secret"),
-                                                            (block: (id: 47, opcode: "+", lists: {"z": [(literal: "tries"), (literal: "1")]})),
+                                                        (block: (id: 46, opcode: "call", inputs: {"operator": (block: (id: 115, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                            (block: (id: 116, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
+                                                            (block: (id: 47, opcode: "+", lists: {"z": [
+                                                                (block: (id: 117, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),
+                                                                (literal: "1"),
+                                                            ]})),
                                                         ]})),
                                                     ]})),
                                                     "alternate": (block: (id: 50, opcode: "begin", lists: {"expressions": [
                                                         (block: (id: 51, opcode: "display", inputs: {"obj": (block: (id: 52, opcode: "string", inputs: {"text": (literal: "Got it! Guesses: ")}))})),
-                                                        (block: (id: 53, opcode: "display", inputs: {"obj": (literal: "tries")})),
+                                                        (block: (id: 53, opcode: "display", inputs: {"obj": (block: (id: 118, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1))))})),
                                                         (block: (id: 54, opcode: "newline")),
                                                     ]})),
                                                 })),
