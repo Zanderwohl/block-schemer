@@ -3,11 +3,20 @@
 //! else is a problem in the AST. Strings are escaped here; datum and symbol
 //! literals were checked by [`literals`](crate::literals) and go out as typed.
 
-use block_parse::ast::{Ast, Expr, Node, Script, Severity, Stmt};
+use block_parse::ast::{Expr, Node, ProblemCode, Script, Stmt};
 use block_parse::language::{BlockDef, Part};
 use block_parse::{Language, Value};
 
 use crate::form::Form;
+
+/// The slot type whose bare procedure blocks are passed by name.
+const PROCEDURE: &str = "procedure";
+
+/// Blocks that are syntax, not procedures, so never passed by name.
+const SYNTAX: [&str; 12] = [
+    "program", "define", "define_procedure", "variable", "quote", "string", "call", "lambda", "if", "let", "binding",
+    "begin",
+];
 
 /// Where `display` writes, so the runner can show it. Code generated for
 /// reading names it only when asked to show this harness.
@@ -34,20 +43,14 @@ pub fn flat(language: &Language, script: &Script, harness: bool) -> Result<Strin
     Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
 }
 
+/// Problems are refused as generation reaches them rather than up front, as
+/// a procedure passed by name is a problem to the AST (`-` with no operand).
 fn forms(language: &Language, script: &Script, holes: bool, harness: bool) -> Result<Vec<Form>, String> {
-    let ast = Ast {
-        scripts: vec![script.clone()],
-    };
-    if !holes
-        && let Some(problem) = ast.problems().into_iter().find(|problem| problem.severity == Severity::Error)
-    {
-        return Err(problem.message.clone());
-    }
     let mut forms = Vec::new();
     for statement in &script.body {
         let node = match statement {
             Stmt::Node(node) => node,
-            // Errors were refused above unless holes are allowed.
+            Stmt::Problem(problem) if !holes => return Err(problem.message.clone()),
             Stmt::Problem(problem) => match &problem.recovered {
                 Some(node) => node,
                 None => continue,
@@ -135,8 +138,17 @@ impl Generator<'_> {
 
     /// `name` is the input or list `expr` fills, for its hole.
     fn expr(&self, expr: &Expr, ty: Option<&str>, name: &str) -> Result<Form, String> {
+        let by_name = ty == Some(PROCEDURE);
         match expr {
             Expr::Literal(value) => literal(value, ty),
+            Expr::Node(node) if by_name && let Some(form) = self.reference(node) => Ok(form),
+            Expr::Problem(problem)
+                if by_name
+                    && problem.code == ProblemCode::TooFewItems
+                    && let Some(form) = problem.recovered.as_deref().and_then(|node| self.reference(node)) =>
+            {
+                Ok(form)
+            }
             Expr::Node(node) => self.node(node),
             Expr::Convert { value, .. } => self.expr(value, ty, name),
             Expr::Problem(problem) if self.holes => match &problem.recovered {
@@ -145,6 +157,19 @@ impl Generator<'_> {
             },
             Expr::Problem(problem) => Err(problem.message.clone()),
         }
+    }
+
+    /// The procedure's name, if `node` is a procedure block with every input
+    /// blank and every list empty.
+    fn reference(&self, node: &Node) -> Option<Form> {
+        let def = self.language.block(&node.opcode)?;
+        let blank = |expr: &Expr| {
+            matches!(expr, Expr::Problem(problem) if problem.block.is_none() && problem.recovered.is_none())
+        };
+        let bare = !SYNTAX.contains(&node.opcode.as_str())
+            && def.inputs().all(|input| node.arg(&input.name).is_none_or(blank))
+            && def.lists().all(|list| node.list(&list.name).is_none_or(<[Expr]>::is_empty));
+        bare.then(|| Form::atom(&node.opcode))
     }
 }
 
@@ -324,6 +349,49 @@ mod tests {
 
         let minus = b.block("-");
         assert!(b.code(minus).is_err(), "`-` needs an operand");
+    }
+
+    #[test]
+    fn bare_procedure_blocks_in_procedure_slots_are_passed_by_name() {
+        let mut b = Builder::new();
+        let mut items = b.block("list");
+        set(&mut items, item("obj"), text("1"));
+        set(&mut items, item("obj"), text("2"));
+        let mut fold = b.block("fold");
+        let add = b.block("+");
+        set(&mut fold, Slot::input("kons"), plug(add));
+        let empty = b.block("list");
+        set(&mut fold, Slot::input("knil"), plug(empty));
+        set(&mut fold, Slot::input("clist"), plug(items));
+        assert_eq!(b.code(fold), Ok("(fold + (list) (list 1 2))".into()), "only the procedure slot passes by name");
+
+        let mut map = b.block("map");
+        let car = b.block("car");
+        set(&mut map, Slot::input("proc"), plug(car));
+        set(&mut map, item("lists"), text("xs"));
+        assert_eq!(b.code(map), Ok("(map car xs)".into()), "a blank input counts as bare");
+
+        let mut call = b.block("call");
+        let minus = b.block("-");
+        set(&mut call, Slot::input("operator"), plug(minus));
+        set(&mut call, item("operands"), text("5"));
+        assert_eq!(b.code(call), Ok("(- 5)".into()), "too few items is no problem by name");
+    }
+
+    #[test]
+    fn filled_or_syntax_blocks_in_procedure_slots_are_still_generated() {
+        let mut b = Builder::new();
+        let mut adder = b.block("+");
+        set(&mut adder, item("z"), text("1"));
+        let mut call = b.block("call");
+        set(&mut call, Slot::input("operator"), plug(adder));
+        assert_eq!(b.code(call), Ok("((+ 1))".into()));
+
+        let mut apply = b.block("apply");
+        let lambda = b.block("lambda");
+        set(&mut apply, Slot::input("proc"), plug(lambda));
+        set(&mut apply, item("args"), text("xs"));
+        assert!(b.code(apply).is_err(), "an empty lambda is not a name");
     }
 
     #[test]

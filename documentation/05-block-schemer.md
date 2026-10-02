@@ -35,6 +35,11 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   a smaller language file for non-admins, limits what they can run. The text
   of a `string` block is escaped here; control characters other than
   newline, tab and return are refused.
+  A `procedure` slot (Call's operator, and `apply`, `map` and `fold`'s
+  procedure) takes a procedure block with nothing filled in by name: Add
+  there is `+`, not `(+)`, so one block serves both. Syntax blocks (`if`,
+  `lambda`, …) never pass by name. Too few items is no problem by name, so
+  problems are refused as generation reaches them rather than up front.
 - `form`: generated code as a tree of atoms and lists, printed on one line
   to run or laid out to read. Forms that fit stay on one line; `define`,
   `lambda`, `let` and the like keep their first argument on the head's line
