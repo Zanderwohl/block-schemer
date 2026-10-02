@@ -10,7 +10,7 @@ Steel is currently mostly r5rs-compliant, and is working toward r7rs compliance.
 
 ## Releases
 
-Builds are on the [Releases](https://github.com/Zanderwohl/block-parse/releases) page:
+Builds are on the [Releases](https://github.com/Zanderwohl/block-schemer/releases) page:
 
 - **macOS**: a `.dmg` to install the app for both Apple Silicon and Intel.
   - It is not notarized, so the first time,
