@@ -4,9 +4,9 @@ Program(
     version: 3,
     stacks: [
         (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "program",
-            inputs: {"main": (block: (id: 2, opcode: "call",
-                inputs: {"operator": (block: (id: 101, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))},
-                lists: {"operands": [
+            inputs: {"main": (block: (id: 2, opcode: "procedure_call",
+                inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable")),
+                lists: {"arguments": [
                     (block: (id: 3, opcode: "+", lists: {"z": [
                         (literal: "1"),
                         (block: (id: 4, opcode: "modulo", inputs: {
@@ -42,7 +42,7 @@ Program(
                                             "consequent": (block: (id: 25, opcode: "begin", lists: {"expressions": [
                                                 (block: (id: 26, opcode: "display", inputs: {"obj": (block: (id: 27, opcode: "string", inputs: {"text": (literal: "That's not a number.")}))})),
                                                 (block: (id: 28, opcode: "newline")),
-                                                (block: (id: 29, opcode: "call", inputs: {"operator": (block: (id: 105, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                (block: (id: 29, opcode: "procedure_call", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable")), lists: {"arguments": [
                                                     (block: (id: 106, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
                                                     (block: (id: 107, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),
                                                 ]})),
@@ -55,7 +55,7 @@ Program(
                                                 "consequent": (block: (id: 32, opcode: "begin", lists: {"expressions": [
                                                     (block: (id: 33, opcode: "display", inputs: {"obj": (block: (id: 34, opcode: "string", inputs: {"text": (literal: "Higher!")}))})),
                                                     (block: (id: 35, opcode: "newline")),
-                                                    (block: (id: 36, opcode: "call", inputs: {"operator": (block: (id: 110, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                    (block: (id: 36, opcode: "procedure_call", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable")), lists: {"arguments": [
                                                         (block: (id: 111, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
                                                         (block: (id: 37, opcode: "+", lists: {"z": [
                                                             (block: (id: 112, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),
@@ -71,7 +71,7 @@ Program(
                                                     "consequent": (block: (id: 42, opcode: "begin", lists: {"expressions": [
                                                         (block: (id: 43, opcode: "display", inputs: {"obj": (block: (id: 44, opcode: "string", inputs: {"text": (literal: "Lower!")}))})),
                                                         (block: (id: 45, opcode: "newline")),
-                                                        (block: (id: 46, opcode: "call", inputs: {"operator": (block: (id: 115, opcode: "variable", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable"))))}, lists: {"operands": [
+                                                        (block: (id: 46, opcode: "procedure_call", inputs: {"variable": (literal: "play")}, refers: (block: 10, slot: (input: "variable")), lists: {"arguments": [
                                                             (block: (id: 116, opcode: "variable", inputs: {"variable": (literal: "secret")}, refers: (block: 10, slot: (input: "formals", item: 0)))),
                                                             (block: (id: 47, opcode: "+", lists: {"z": [
                                                                 (block: (id: 117, opcode: "variable", inputs: {"variable": (literal: "tries")}, refers: (block: 10, slot: (input: "formals", item: 1)))),

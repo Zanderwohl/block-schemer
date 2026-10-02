@@ -9,7 +9,7 @@ Program(
                 "formals": [(literal: "xs")],
                 "body": [(block: (id: 2, opcode: "fold",
                     inputs: {
-                        "kons": (block: (id: 3, opcode: "+")),
+                        "kons": (block: (id: 3, opcode: "+", reach: Name)),
                         "knil": (literal: "0"),
                         "clist": (block: (id: 4, opcode: "map",
                             inputs: {"proc": (block: (id: 5, opcode: "lambda",
@@ -45,8 +45,6 @@ Program(
                 ],
             })]),
         (pos: (24.0, 470.0), blocks: [(id: 20, opcode: "program",
-            inputs: {"main": (block: (id: 21, opcode: "call", inputs: {
-                "operator": (block: (id: 22, opcode: "variable", inputs: {"variable": (literal: "sum-of-squares")}, refers: (block: 1, slot: (input: "variable")))),
-            }, lists: {"operands": [(block: (id: 23, opcode: "list", lists: {"obj": [(literal: "1"), (literal: "2"), (literal: "3")]}))]}))})]),
+            inputs: {"main": (block: (id: 21, opcode: "procedure_call", inputs: {"variable": (literal: "sum-of-squares")}, refers: (block: 1, slot: (input: "variable")), lists: {"arguments": [(block: (id: 23, opcode: "list", lists: {"obj": [(literal: "1"), (literal: "2"), (literal: "3")]}))]}))})]),
     ],
 )

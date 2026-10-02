@@ -8,6 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::literal::{self, Validators};
+use crate::program::{Block, Reach};
 use crate::spec::{self, Arity, SpecPart};
 use crate::value::Value;
 
@@ -35,6 +36,16 @@ pub struct LanguageConfig {
     /// `None` offers no filter: every block shows.
     #[serde(default)]
     pub checked_tags: Option<Vec<String>>,
+    /// Reporters whose spec starts with a label may be named instead of
+    /// called, or called with fewer of their parameters, unless they say
+    /// `callable: false`. See `documentation/07-calls.md`.
+    #[serde(default)]
+    pub callable: bool,
+    /// A call may give fewer arguments than its procedure has parameters,
+    /// or more, the rest going to the procedure it returns. Otherwise
+    /// either is an `Arity` problem.
+    #[serde(default)]
+    pub curried: bool,
 }
 
 /// The extension of this language's program files. Only a name for consumers
@@ -60,9 +71,10 @@ pub struct TypeConfig {
     /// values typed only at run time, such as a variable getter's.
     #[serde(default)]
     pub fits: TypeSet,
-    /// Reporters in this type's slots take its shape instead of their own.
+    /// A callable block dropped into this type's slots with nothing filled
+    /// in is left as its name.
     #[serde(default)]
-    pub reshape: bool,
+    pub by_name: bool,
 }
 
 /// One side of type compatibility. A reporter fits a slot when the types are
@@ -122,6 +134,9 @@ pub struct BlockConfig {
     /// `documentation/06-scopes.md`.
     #[serde(default)]
     pub scope: Option<ScopeConfig>,
+    /// Overrides the language's `callable` for this block.
+    #[serde(default)]
+    pub callable: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -144,6 +159,22 @@ pub struct ScopeConfig {
     /// editable.
     #[serde(default)]
     pub reference: Option<String>,
+    /// A declared name that is a procedure's, whose references show its
+    /// parameters.
+    #[serde(default)]
+    pub signature: Option<SignatureConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SignatureConfig {
+    /// Of `declares`, the single input holding the procedure's name.
+    pub name: String,
+    /// Of `declares`, the list holding its parameters' names.
+    pub parameters: String,
+    /// The reporter dragged out of the name, in place of the scope's
+    /// `reference`: one input, of the name's type, then one list, which
+    /// holds an argument per parameter.
+    pub reference: String,
 }
 
 const COLOR_RANGE: &str = "hue 0..360, chroma 0..=0.37, lightness 0..=1";
@@ -248,6 +279,7 @@ pub struct Language {
     by_opcode: HashMap<String, usize>,
     tags: Vec<String>,
     checked_tags: Option<Vec<String>>,
+    curried: bool,
     /// Every `Custom` literal is resolved here, or the language fails to compile.
     validators: Validators,
 }
@@ -265,7 +297,7 @@ pub struct TypeDef {
     pub literal: LiteralKind,
     pub accepts: TypeSet,
     pub fits: TypeSet,
-    pub reshape: bool,
+    pub by_name: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -295,6 +327,31 @@ pub struct BlockDef {
     pub color: Option<CategoryColor>,
     pub layout: BlockLayout,
     pub scope: Option<ScopeConfig>,
+    pub callable: Option<Callable>,
+}
+
+/// What a callable block's parameters are. See `documentation/07-calls.md`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Callable {
+    /// Its inputs and lists in spec order, one parameter each, after the
+    /// labels that name it.
+    Parts,
+    /// A procedure reference's: this list, an item per parameter its
+    /// declaration gives.
+    Arguments(String),
+}
+
+/// How a callable block shows: called with its first `shown` parameters,
+/// or named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Extent {
+    pub parameters: usize,
+    /// Through the last parameter holding something; the block cannot show
+    /// fewer.
+    pub filled: usize,
+    pub shown: usize,
+    /// Left as its name, not called; `shown` is then 0.
+    pub named: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -473,10 +530,106 @@ impl BlockDef {
 
     /// The opcode of the reference to a name declared in `name`.
     pub fn reference_for(&self, name: &str) -> Option<&str> {
+        if let Some(signature) = self.signature_for(name) {
+            return Some(&signature.reference);
+        }
         self.scope
             .as_ref()
             .filter(|_| self.declares(name))
             .and_then(|scope| scope.reference.as_deref())
+    }
+
+    /// The signature of the procedure whose name the input `name` declares.
+    pub fn signature_for(&self, name: &str) -> Option<&SignatureConfig> {
+        self.scope.as_ref()?.signature.as_ref().filter(|signature| signature.name == name)
+    }
+
+    /// What a callable block shows with its first `shown` parameters. Labels
+    /// before a hidden parameter go with it; those before the first name the
+    /// block and always show.
+    pub fn shown_parts(&self, shown: usize) -> &[Part] {
+        if self.callable != Some(Callable::Parts) {
+            return &self.parts;
+        }
+        let mut end = None;
+        let mut count = 0;
+        for (index, part) in self.parts.iter().enumerate() {
+            if matches!(part, Part::Input(_) | Part::List(_)) {
+                if count == shown {
+                    return &self.parts[..end.unwrap_or(index)];
+                }
+                count += 1;
+                end = Some(index + 1);
+            }
+        }
+        &self.parts
+    }
+
+    /// `None` unless callable. `arity` is how many parameters a procedure
+    /// reference's declaration gives.
+    pub fn extent(&self, block: &Block, arity: Option<usize>) -> Option<Extent> {
+        let (parameters, filled) = match self.callable.as_ref()? {
+            Callable::Parts => {
+                let (mut parameters, mut filled) = (0, 0);
+                for part in &self.parts {
+                    let holds = match part {
+                        Part::Input(input) => block.inputs.get(&input.name).is_some_and(|stored| {
+                            stored.block.is_some()
+                                || stored
+                                    .literal
+                                    .as_deref()
+                                    .is_some_and(|text| !is_blank(text) && Some(text) != input.default.as_deref())
+                        }),
+                        Part::List(list) => block
+                            .lists
+                            .get(&list.name)
+                            .is_some_and(|items| items.iter().any(|item| !item.is_hole())),
+                        Part::Label(_) | Part::Branch(_) => continue,
+                    };
+                    parameters += 1;
+                    if holds {
+                        filled = parameters;
+                    }
+                }
+                (parameters, filled)
+            }
+            // Trimmed, so it ends at the last item holding something.
+            Callable::Arguments(list) => {
+                let len = block.lists.get(list).map_or(0, Vec::len);
+                (arity.unwrap_or(0).max(len), len)
+            }
+        };
+        let (shown, named) = match block.reach {
+            None => (parameters, false),
+            Some(Reach::Name) if filled == 0 => (0, true),
+            Some(Reach::Name) => (filled, false),
+            Some(Reach::Call(n)) => (n.clamp(filled, parameters), false),
+        };
+        Some(Extent {
+            parameters,
+            filled,
+            shown,
+            named,
+        })
+    }
+}
+
+impl Extent {
+    /// Every reach the block may take, narrowest first. `None`, showing
+    /// every parameter, stands for `Call(parameters)`.
+    pub fn stops(&self) -> Vec<Option<Reach>> {
+        let name = (self.filled == 0).then_some(Some(Reach::Name));
+        let calls = (self.filled..self.parameters).map(|n| Some(Reach::Call(n)));
+        name.into_iter().chain(calls).chain([None]).collect()
+    }
+
+    /// The stop the block is at.
+    pub fn reach(&self) -> Option<Reach> {
+        match self.shown {
+            _ if self.named => Some(Reach::Name),
+            shown if shown == self.parameters => None,
+            shown => Some(Reach::Call(shown)),
+        }
     }
 }
 
@@ -527,6 +680,11 @@ impl Language {
 
     pub fn validators(&self) -> &Validators {
         &self.validators
+    }
+
+    /// A call may give more or fewer arguments than there are parameters.
+    pub fn curried(&self) -> bool {
+        self.curried
     }
 
     pub fn fit(&self, output: &str, slot: &str) -> Fit {
@@ -620,7 +778,7 @@ impl LanguageConfig {
                     literal: config.literal.clone(),
                     accepts: config.accepts.clone(),
                     fits: config.fits.clone(),
-                    reshape: config.reshape,
+                    by_name: config.by_name,
                 },
             );
         }
@@ -768,6 +926,21 @@ impl LanguageConfig {
                 }
             }
 
+            let names_it = matches!(parts.first(), Some(Part::Label(_)));
+            let callable = match (config.callable, config.kind.output()) {
+                (Some(true), None) => {
+                    problem(at, "only reporters are callable".into());
+                    None
+                }
+                (Some(true), Some(_)) if !names_it => {
+                    problem(at, "a callable block's spec starts with a label, its name".into());
+                    None
+                }
+                (Some(true), Some(_)) => Some(Callable::Parts),
+                (None, Some(_)) if self.callable && names_it => Some(Callable::Parts),
+                (Some(false) | None, _) => None,
+            };
+
             for name in config.hints.keys() {
                 if !parts.iter().any(|part| match part {
                     Part::Input(input) => &input.name == name,
@@ -791,17 +964,23 @@ impl LanguageConfig {
                 color: config.color,
                 layout: config.layout,
                 scope: config.scope,
+                callable,
             });
         }
 
+        let mut procedures = Vec::new();
         for def in &blocks {
             let at = Some(def.opcode.as_str());
             let Some(scope) = &def.scope else { continue };
-            let reference = scope.reference.as_ref().map(|opcode| {
-                let input = by_opcode
+            let reporter = |opcode: &str| {
+                by_opcode
                     .get(opcode)
                     .map(|&index| &blocks[index])
-                    .filter(|target| target.kind.output().is_some() && target.lists().next().is_none())
+                    .filter(|target| target.kind.output().is_some() && target.branches().next().is_none())
+            };
+            let reference = scope.reference.as_ref().map(|opcode| {
+                let input = reporter(opcode)
+                    .filter(|target| target.lists().next().is_none())
                     .and_then(|target| match target.inputs().collect::<Vec<_>>()[..] {
                         [only] => Some(only),
                         _ => None,
@@ -810,6 +989,28 @@ impl LanguageConfig {
                     problem(at, format!("reference `{opcode}` must be a reporter with one input and no list"));
                 }
                 input
+            });
+            let signature = scope.signature.as_ref().map(|signature| {
+                let opcode = &signature.reference;
+                let target =
+                    reporter(opcode).filter(|target| target.inputs().count() == 1 && target.lists().count() == 1);
+                match target {
+                    Some(target) => {
+                        let list = target.lists().next().expect("counted").name.clone();
+                        procedures.push((by_opcode[opcode], list));
+                    }
+                    None => problem(
+                        at,
+                        format!("signature reference `{opcode}` must be a reporter with one input and one list"),
+                    ),
+                }
+                if def.input(&signature.name).is_none() || !scope.declares.contains(&signature.name) {
+                    problem(at, format!("signature name `{}` is no declaring input", signature.name));
+                }
+                if def.list(&signature.parameters).is_none() || !scope.declares.contains(&signature.parameters) {
+                    problem(at, format!("signature parameters `{}` are no declaring list", signature.parameters));
+                }
+                target.and_then(|target| target.inputs().next())
             });
             for name in &scope.declares {
                 let ty = def
@@ -821,6 +1022,10 @@ impl LanguageConfig {
                     continue;
                 };
                 let named = types.get(ty).is_some_and(|ty| ty.literal != LiteralKind::None);
+                let reference = match &scope.signature {
+                    Some(procedure) if procedure.name == *name => signature,
+                    _ => reference,
+                };
                 match reference {
                     None if named => problem(at, format!("`{name}` declares names but the scope has no reference")),
                     Some(Some(input)) if named && input.ty != *ty => problem(
@@ -841,6 +1046,10 @@ impl LanguageConfig {
                     problem(at, format!("scope over `{name}`, which is no input, list or branch"));
                 }
             }
+        }
+
+        for (index, list) in procedures {
+            blocks[index].callable = Some(Callable::Arguments(list));
         }
 
         let mut tags: Vec<String> = Vec::new();
@@ -871,6 +1080,7 @@ impl LanguageConfig {
             by_opcode,
             tags,
             checked_tags: self.checked_tags,
+            curried: self.curried,
             validators: validators.clone(),
         })
     }

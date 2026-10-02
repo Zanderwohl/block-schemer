@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::edit::Location;
-use crate::language::{BlockDef, Language, Part, ron_options};
+use crate::language::{BlockDef, Language, Part, is_blank, ron_options};
 
 pub const FORMAT_VERSION: u32 = 3;
 
@@ -67,6 +67,17 @@ pub struct Block {
     /// declaration's literal and cannot be edited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refers: Option<Declaration>,
+    /// How much of a callable block shows; `None` is every parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach: Option<Reach>,
+}
+
+/// A callable block left as its name, or called with its first `n`
+/// parameters. See `documentation/07-calls.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Reach {
+    Name,
+    Call(usize),
 }
 
 /// A literal in a slot a scope `declares`: where a name is introduced.
@@ -246,6 +257,7 @@ impl Program {
             lists: BTreeMap::new(),
             branches: BTreeMap::new(),
             refers: None,
+            reach: None,
         };
         for part in &def.parts {
             match part {
@@ -344,6 +356,40 @@ impl Program {
         input.block.is_none().then_some(input.literal.as_deref()).flatten()
     }
 
+    /// The parameters of the procedure `declaration` names, if it names one,
+    /// a blank one as "Unnamed parameter 2".
+    pub fn parameters(&self, language: &Language, declaration: &Declaration) -> Option<Vec<String>> {
+        let owner = self.find(declaration.block)?;
+        let def = language.block(&owner.opcode)?;
+        def.signature_for(&declaration.slot.input)?;
+        owner.parameter_names(def)
+    }
+
+    /// How many arguments a reference to a procedure should give.
+    pub fn arity(&self, language: &Language, block: &Block) -> Option<usize> {
+        Some(self.parameters(language, block.refers.as_ref()?)?.len())
+    }
+
+    /// False unless `id` is callable and can take `reach`: never one hiding
+    /// a parameter that holds something. Showing every parameter is stored
+    /// as `None`, so a reference keeps up with its procedure's.
+    pub fn set_reach(&mut self, language: &Language, id: BlockId, reach: Option<Reach>) -> bool {
+        let Some(block) = self.find(id) else { return false };
+        let arity = self.arity(language, block);
+        let Some(extent) = language.block(&block.opcode).and_then(|def| def.extent(block, arity)) else {
+            return false;
+        };
+        let reach = match reach {
+            Some(Reach::Call(n)) if n == extent.parameters => None,
+            reach => reach,
+        };
+        if !extent.stops().contains(&reach) {
+            return false;
+        }
+        self.find_mut(id).expect("found above").reach = reach;
+        true
+    }
+
     fn rename(&mut self, declaration: &Declaration, name: &str) {
         for stack in &mut self.stacks {
             walk_mut(&mut stack.blocks, &mut |block| {
@@ -390,6 +436,19 @@ impl Block {
         for input in self.inputs.values_mut() {
             input.literal = Some(name.to_owned());
         }
+    }
+
+    /// The names in the list a scope's signature gives for its parameters.
+    pub fn parameter_names(&self, def: &BlockDef) -> Option<Vec<String>> {
+        let list = &def.scope.as_ref()?.signature.as_ref()?.parameters;
+        let items = self.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);
+        let named = |index: usize, item: &Input| {
+            item.literal
+                .clone()
+                .filter(|text| item.block.is_none() && !is_blank(text))
+                .unwrap_or_else(|| def.unnamed(&Slot::item(list.clone(), index)))
+        };
+        Some(items.iter().enumerate().map(|(index, item)| named(index, item)).collect())
     }
 
     /// The blocks whose local names this block's scope covers: itself, and

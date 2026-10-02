@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Arg, Ast, Branch, Expr, List, Node, Problem, ProblemCode, Script, Severity, Stmt};
-use crate::language::{BlockDef, BlockKind, Fit, Language, LiteralKind, is_blank};
+use crate::language::{BlockDef, BlockKind, Callable, Extent, Fit, Language, LiteralKind, Part, is_blank};
 use crate::program::{Block, BlockId, Declaration, Input, MAX_DEPTH, Program, Slot};
 use crate::value::Value;
 
@@ -158,8 +158,12 @@ impl<'a> Builder<'a> {
             return Err(problem(code, message, None));
         }
         let duplicate = !self.seen.insert(block.id);
-        let (node, def) = match self.language.block(&block.opcode) {
-            Some(def) => (self.node(block, def, depth), def),
+        let arity = self.program.arity(self.language, block);
+        let (node, def, extent) = match self.language.block(&block.opcode) {
+            Some(def) => {
+                let extent = def.extent(block, arity);
+                (self.node(block, def, extent, depth), def, extent)
+            }
             None => {
                 let raw = self.raw(block, depth);
                 return Err(problem(
@@ -176,7 +180,7 @@ impl<'a> Builder<'a> {
                 Some(node),
             ));
         }
-        for list in def.lists() {
+        for list in def.lists().filter(|list| node.list(&list.name).is_some()) {
             let count = block.lists.get(&list.name).map_or(0, Vec::len);
             if count < list.min {
                 return Err(problem(
@@ -186,10 +190,28 @@ impl<'a> Builder<'a> {
                 ));
             }
         }
+        if let Some(extent) = extent.filter(|extent| !extent.named && !self.language.curried())
+            && let Some(message) = arity_fault(block, def, &node, extent, arity)
+        {
+            return Err(problem(ProblemCode::Arity, message, Some(node)));
+        }
         Ok(node)
     }
 
-    fn node(&mut self, block: &Block, def: &BlockDef, depth: usize) -> Node {
+    fn node(&mut self, block: &Block, def: &BlockDef, extent: Option<Extent>, depth: usize) -> Node {
+        let named = extent.is_some_and(|extent| extent.named);
+        let shown = extent.map_or(&def.parts[..], |extent| def.shown_parts(extent.shown));
+        let shows = |name: &str| {
+            shown.iter().any(|part| match part {
+                Part::Input(input) => input.name == name,
+                Part::List(list) => list.name == name,
+                Part::Label(_) | Part::Branch(_) => false,
+            })
+        };
+        let arguments = match &def.callable {
+            Some(Callable::Arguments(list)) => extent.map(|extent| (list.as_str(), extent.shown)),
+            Some(Callable::Parts) | None => None,
+        };
         let scope_blocks = match &def.scope {
             Some(scope) if !scope.over.is_empty() => block.scope_blocks(self.language),
             _ => Vec::new(),
@@ -197,6 +219,7 @@ impl<'a> Builder<'a> {
         let scoped = |name: &str| if def.scopes_over(name) { scope_blocks.as_slice() } else { &[] };
         let mut args: Vec<Arg> = def
             .inputs()
+            .filter(|input| shows(&input.name))
             .map(|input| Arg {
                 name: input.name.clone(),
                 value: self.within(scoped(&input.name), |this| {
@@ -221,15 +244,18 @@ impl<'a> Builder<'a> {
 
         let mut lists: Vec<List> = def
             .lists()
+            .filter(|list| shows(&list.name) && !(named && arguments.is_some()))
             .map(|list| {
                 let stored = block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[]);
+                let count = match arguments {
+                    Some((name, shown)) if name == list.name => shown,
+                    _ => stored.len(),
+                };
                 let items = self.within(scoped(&list.name), |this| {
-                    stored
-                        .iter()
-                        .enumerate()
-                        .map(|(index, item)| {
+                    (0..count)
+                        .map(|index| {
                             let slot = Slot::item(list.name.clone(), index);
-                            this.value(block, def, slot, &list.ty, Some(item), None, depth)
+                            this.value(block, def, slot, &list.ty, stored.get(index), None, depth)
                         })
                         .collect()
                 });
@@ -289,6 +315,7 @@ impl<'a> Builder<'a> {
             lists,
             branches,
             refers: block.refers.clone(),
+            named,
         }
     }
 
@@ -474,6 +501,7 @@ impl<'a> Builder<'a> {
             lists,
             branches,
             refers: block.refers.clone(),
+            named: false,
         }
     }
 
@@ -493,6 +521,29 @@ impl<'a> Builder<'a> {
         self.language
             .block(&block.opcode)
             .map_or_else(|| block.opcode.clone(), |def| def.name.clone())
+    }
+}
+
+/// Why a call shows the wrong number of parameters, if it does. A hidden
+/// list that may be empty is no fault.
+fn arity_fault(block: &Block, def: &BlockDef, node: &Node, extent: Extent, arity: Option<usize>) -> Option<String> {
+    match def.callable.as_ref()? {
+        Callable::Parts => {
+            let input = def.inputs().find(|input| node.arg(&input.name).is_none()).map(|input| &input.name);
+            let list = def.lists().find(|list| list.min > 0 && node.list(&list.name).is_none()).map(|list| &list.name);
+            let missing = input.or(list)?;
+            Some(format!("`{}` is called without `{missing}`", def.name))
+        }
+        Callable::Arguments(_) => {
+            let arity = arity.filter(|&arity| arity != extent.shown)?;
+            let called = block.inputs.values().find_map(|input| input.literal.as_deref()).unwrap_or(&def.name);
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
+            Some(format!(
+                "`{called}` takes {arity} argument{}, but is given {}",
+                plural(arity),
+                extent.shown
+            ))
+        }
     }
 }
 
@@ -775,6 +826,7 @@ mod tests {
             lists: BTreeMap::new(),
             branches: BTreeMap::from([("then".to_owned(), vec![inner])]),
             refers: None,
+            reach: None,
         };
 
         let ast = one_stack(vec![mystery]).ast(&language);
@@ -836,5 +888,221 @@ mod tests {
             codes(&nested(&language, MAX_DEPTH).ast(&language)),
             [ProblemCode::TooDeep, ProblemCode::TooDeep]
         );
+    }
+
+    /// Calls, names and procedure references. See `documentation/07-calls.md`.
+    mod calls {
+        use super::*;
+        use crate::edit::{Fragment, Target};
+        use crate::language::{Callable, LanguageError};
+        use crate::program::Reach;
+
+        const CALLS: &str = r#"Language(
+            name: "c",
+            file: (extension: "c"),
+            callable: true,
+            types: {
+                "value": (literal: Text),
+                "name": (literal: Text),
+                "procedure": (shape: Square, literal: Text, accepts: Types(["value"]), by_name: true),
+            },
+            blocks: [
+                (id: "fold", name: "Fold", kind: Reporter("value"), spec: "fold {kons:procedure} {knil:value} {xs:value}"),
+                (id: "add", name: "Add", kind: Reporter("value"), spec: "add {zs:value+}"),
+                (id: "member", name: "Member", kind: Reporter("value"), spec: "member {x:value} {compare:procedure*}"),
+                (id: "quote", name: "Quote", kind: Reporter("value"), spec: "quote {x:value}", callable: false),
+                (id: "get", name: "Get", kind: Reporter("value"), spec: "{name:name}"),
+                (id: "call", name: "Call", kind: Reporter("value"), spec: "{name:name} {args:value*}"),
+                (
+                    id: "define", name: "Define", kind: Reporter("value"), callable: false,
+                    spec: "define {name:name} _taking_ {params:name*} {body:value}",
+                    hints: {"params": "parameter"},
+                    scope: (
+                        declares: ["name", "params"], over: ["body"], global: ["name"], reference: "get",
+                        signature: (name: "name", parameters: "params", reference: "call"),
+                    ),
+                ),
+            ],
+        )"#;
+
+        fn calls() -> Language {
+            Language::from_ron(CALLS, &Validators::new()).unwrap()
+        }
+
+        fn problems(text: &str) -> Vec<String> {
+            match Language::from_ron(text, &Validators::new()) {
+                Err(LanguageError::Invalid(problems)) => problems.into_iter().map(|p| p.message).collect(),
+                other => panic!("{other:?}"),
+            }
+        }
+
+        /// The one expression a lone reporter makes, problem or not.
+        fn expression(language: &Language, program: &Program, id: BlockId) -> Stmt {
+            program.script_at(language, id).unwrap().body.remove(0)
+        }
+
+        fn on_canvas(program: &mut Program, block: Block) -> BlockId {
+            let id = block.id;
+            program.stacks.push(Stack {
+                pos: [0.0, 0.0],
+                blocks: vec![block],
+            });
+            id
+        }
+
+        /// `define f taking x y`, and a fresh reference to `f`.
+        fn procedure(language: &Language, program: &mut Program) -> (BlockId, Block) {
+            let define = block(program, language, "define");
+            let id = on_canvas(program, define);
+            program.set_literal(id, &Slot::input("name"), "f".into());
+            program.set_literal(id, &Slot::item("params", 0), "x".into());
+            program.set_literal(id, &Slot::item("params", 1), "y".into());
+            let name = Declaration {
+                block: id,
+                slot: Slot::input("name"),
+            };
+            (id, program.reference(language, &name).unwrap())
+        }
+
+        #[test]
+        fn reporters_named_by_a_label_are_callable_unless_they_say_not() {
+            let language = calls();
+            let callable = |opcode: &str| language.block(opcode).unwrap().callable.clone();
+            assert_eq!(callable("fold"), Some(Callable::Parts));
+            assert_eq!(callable("quote"), None);
+            assert_eq!(callable("get"), None, "nothing names it");
+            assert_eq!(callable("call"), Some(Callable::Arguments("args".into())), "a signature's reference");
+
+            let go = r#"blocks: [(id: "go", name: "Go", spec: "go", callable: true),"#;
+            let statement = CALLS.replace("blocks: [", go);
+            assert_eq!(problems(&statement), ["only reporters are callable"]);
+            let unnamed = CALLS.replace(r#"spec: "{name:name}")"#, r#"spec: "{name:name}", callable: true)"#);
+            assert!(problems(&unnamed)[0].contains("starts with a label"));
+            let wrong = CALLS.replace(r#"reference: "call")"#, r#"reference: "get")"#);
+            assert!(problems(&wrong)[0].contains("one input and one list"), "{:?}", problems(&wrong));
+        }
+
+        #[test]
+        fn the_edge_stops_at_the_last_parameter_holding_something() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let fold = language.block("fold").unwrap();
+            let mut block = block(&mut program, &language, "fold");
+            let extent = fold.extent(&block, None).unwrap();
+            assert_eq!((extent.parameters, extent.filled, extent.shown, extent.named), (3, 0, 3, false));
+            let all = [Some(Reach::Name), Some(Reach::Call(0)), Some(Reach::Call(1)), Some(Reach::Call(2)), None];
+            assert_eq!(extent.stops(), all);
+
+            block.reach = Some(Reach::Call(1));
+            let labels = |parts: &[Part]| parts.iter().filter(|part| matches!(part, Part::Input(_))).count();
+            assert_eq!(labels(fold.shown_parts(fold.extent(&block, None).unwrap().shown)), 1);
+
+            block.inputs.get_mut("knil").unwrap().literal = Some("0".into());
+            let extent = fold.extent(&block, None).unwrap();
+            assert_eq!(extent.shown, 2, "a filled parameter shows whatever the reach says");
+            assert_eq!(extent.stops(), [Some(Reach::Call(2)), None]);
+        }
+
+        #[test]
+        fn a_named_block_has_no_arguments_and_a_partial_call_is_an_arity_problem() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let mut add = block(&mut program, &language, "add");
+            add.reach = Some(Reach::Name);
+            let id = on_canvas(&mut program, add);
+            let Stmt::Node(node) = expression(&language, &program, id) else { panic!("no TooFewItems by name") };
+            assert!(node.named && node.args.is_empty() && node.lists.is_empty(), "{node:#?}");
+
+            let mut fold = block(&mut program, &language, "fold");
+            fold.reach = Some(Reach::Call(1));
+            let id = on_canvas(&mut program, fold);
+            let Stmt::Problem(problem) = expression(&language, &program, id) else { panic!() };
+            assert_eq!(problem.code, ProblemCode::Arity);
+            assert!(problem.message.contains("`knil`"), "{}", problem.message);
+            let recovered = problem.recovered.unwrap();
+            assert_eq!(recovered.args.len(), 1, "the hidden parameters are left out");
+
+            let curried = CALLS.replace("callable: true,", "callable: true, curried: true,");
+            let curried = Language::from_ron(&curried, &Validators::new()).unwrap();
+            let called = expression(&curried, &program, id);
+            assert!(matches!(called, Stmt::Node(node) if !node.named && node.args.len() == 1));
+
+            let mut member = block(&mut program, &language, "member");
+            member.reach = Some(Reach::Call(1));
+            let id = on_canvas(&mut program, member);
+            assert!(matches!(expression(&language, &program, id), Stmt::Node(_)), "a list that may be empty can hide");
+        }
+
+        #[test]
+        fn a_procedure_reference_shows_an_argument_per_parameter() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let (define, mut call) = procedure(&language, &mut program);
+            assert_eq!(call.opcode, "call");
+            let name = call.refers.clone().unwrap();
+            assert_eq!(program.parameters(&language, &name), Some(vec!["x".into(), "y".into()]));
+            assert_eq!(program.arity(&language, &call), Some(2));
+
+            call.lists.insert("args".into(), vec![literal("1")]);
+            let id = call.id;
+            plug(program.find_mut(define).unwrap(), "body", call);
+            let Stmt::Node(define_node) = expression(&language, &program, define) else { panic!() };
+            let Some(Expr::Node(node)) = define_node.arg("body") else { panic!() };
+            let args = node.list("args").unwrap();
+            assert_eq!(args.len(), 2, "one per parameter");
+            assert!(matches!(&args[1], Expr::Problem(problem) if problem.code == ProblemCode::MissingInput));
+
+            assert!(!program.set_reach(&language, id, Some(Reach::Name)), "an argument is filled in");
+            assert!(program.set_reach(&language, id, Some(Reach::Call(1))));
+            let ast = program.ast(&language);
+            assert_eq!(codes(&ast), [ProblemCode::Arity]);
+            assert!(ast.problems()[0].message.contains("`f` takes 2 arguments, but is given 1"));
+
+            program.find_mut(id).unwrap().lists.clear();
+            assert!(program.set_reach(&language, id, Some(Reach::Name)));
+            let ast = program.ast(&language);
+            assert!(ast.is_clean(), "{:?}", ast.problems());
+            program.set_literal(define, &Slot::item("params", 2), "z".into());
+            assert!(program.set_reach(&language, id, Some(Reach::Call(3))));
+            assert_eq!(program.find(id).unwrap().reach, None, "showing every parameter follows the procedure");
+        }
+
+        #[test]
+        fn blank_parameters_are_unnamed() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let (define, call) = procedure(&language, &mut program);
+            program.set_literal(define, &Slot::item("params", 0), String::new());
+            let name = call.refers.unwrap();
+            assert_eq!(program.parameters(&language, &name), Some(vec!["Unnamed parameter 1".into(), "y".into()]));
+        }
+
+        #[test]
+        fn an_empty_callable_dropped_in_a_by_name_slot_becomes_its_name() {
+            let language = calls();
+            let mut program = Program::new(&language);
+            let fold = block(&mut program, &language, "fold");
+            let fold = on_canvas(&mut program, fold);
+            let drop_in = |program: &mut Program, block: Block, input: &str| {
+                let id = block.id;
+                let target = Target::Input {
+                    parent: fold,
+                    slot: Slot::input(input),
+                };
+                program.attach(&language, Fragment { blocks: vec![block] }, target).unwrap();
+                program.find(id).unwrap().reach
+            };
+            let add = block(&mut program, &language, "add");
+            let named = add.id;
+            assert_eq!(drop_in(&mut program, add, "kons"), Some(Reach::Name));
+            let saved = Program::from_ron(&program.to_ron()).unwrap();
+            assert_eq!(saved.find(named).unwrap().reach, Some(Reach::Name), "saved");
+
+            let mut filled = block(&mut program, &language, "add");
+            filled.lists.insert("zs".into(), vec![literal("1")]);
+            assert_eq!(drop_in(&mut program, filled, "kons"), None, "a call returning the procedure");
+            let add = block(&mut program, &language, "add");
+            assert_eq!(drop_in(&mut program, add, "knil"), None, "only by_name slots");
+        }
     }
 }

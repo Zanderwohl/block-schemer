@@ -17,8 +17,9 @@ Language(
         "string": (shape: Round, literal: Text),
         "symbol": (shape: Square, literal: Custom("symbol")),
         "binding": (shape: Square),
-        // A procedure block with nothing filled in goes out by name: `+`, not `(+)`.
-        "procedure": (shape: Square, literal: Custom("symbol"), accepts: Types(["datum"]), reshape: true),
+        // A procedure block dropped here with nothing filled in is its name:
+        // `+`, not `(+)`. A round block here is called for the procedure.
+        "procedure": (shape: Square, literal: Custom("symbol"), accepts: Types(["datum"]), by_name: true),
     },
 
     categories: [
@@ -44,6 +45,10 @@ Language(
 
     checked_tags: ["basics"],
 
+    // Procedures can be named or called with fewer of their parameters,
+    // which is an arity problem: Scheme does not curry. Syntax opts out.
+    callable: true,
+
     blocks: [
         // Program structure
         (
@@ -57,6 +62,7 @@ Language(
         ),
         (
             id: "define",
+            callable: false,
             name: "Define",
             category: "Program structure",
             kind: Reporter("datum"),
@@ -68,6 +74,7 @@ Language(
         ),
         (
             id: "define_procedure",
+            callable: false,
             name: "Define procedure",
             category: "Program structure",
             kind: Reporter("datum"),
@@ -75,14 +82,26 @@ Language(
             hints: {"formals": "parameter", "body": "expression"},
             layout: Body(2),
             // The name everywhere, as a top-level definition's; the formals in the body.
-            scope: (declares: ["variable", "formals"], over: ["body"], global: ["variable"], reference: "variable"),
+            scope: (
+                declares: ["variable", "formals"], over: ["body"], global: ["variable"], reference: "variable",
+                signature: (name: "variable", parameters: "formals", reference: "procedure_call"),
+            ),
             tags: ["basics", "base"],
         ),
 
         // Primitive expression types
         (id: "variable", name: "Variable", category: "Primitive expression types", kind: Reporter("datum"), spec: "{variable:symbol}", tags: ["basics"]),
-        (id: "quote", name: "Quote", category: "Primitive expression types", kind: Reporter("datum"), spec: "quote {datum:datum}", tags: ["basics", "base"]),
-        (id: "string", name: "String", category: "Primitive expression types", kind: Reporter("datum"), spec: "\"{text:string}\"", tags: ["basics"]),
+        (id: "quote", callable: false, name: "Quote", category: "Primitive expression types", kind: Reporter("datum"), spec: "quote {datum:datum}", tags: ["basics", "base"]),
+        (id: "string", callable: false, name: "String", category: "Primitive expression types", kind: Reporter("datum"), spec: "\"{text:string}\"", tags: ["basics"]),
+        (
+            id: "procedure_call",
+            name: "Procedure call",
+            category: "Primitive expression types",
+            kind: Reporter("datum"),
+            spec: "{variable:symbol} {arguments:datum*}",
+            hints: {"arguments": "argument"},
+            description: "Calls a procedure by name. Dragged out of a definition's name, it has an argument per parameter.",
+        ),
         (
             id: "call",
             name: "Call",
@@ -95,6 +114,7 @@ Language(
         ),
         (
             id: "lambda",
+            callable: false,
             name: "Lambda",
             category: "Primitive expression types",
             kind: Reporter("datum"),
@@ -106,6 +126,7 @@ Language(
         ),
         (
             id: "if",
+            callable: false,
             name: "If",
             category: "Primitive expression types",
             kind: Reporter("datum"),
@@ -117,6 +138,7 @@ Language(
         // Derived expression types
         (
             id: "let",
+            callable: false,
             name: "Let",
             category: "Derived expression types",
             kind: Reporter("datum"),
@@ -139,6 +161,7 @@ Language(
         ),
         (
             id: "begin",
+            callable: false,
             name: "Begin",
             category: "Derived expression types",
             kind: Reporter("datum"),

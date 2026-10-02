@@ -15,9 +15,9 @@ Program(
                     "consequent": (literal: "1"),
                     "alternate": (block: (id: 5, opcode: "*", lists: {"z": [
                         (block: (id: 6, opcode: "variable", inputs: {"variable": (literal: "n")}, refers: (block: 1, slot: (input: "formals", item: 0)))),
-                        (block: (id: 7, opcode: "call",
-                            inputs: {"operator": (block: (id: 8, opcode: "variable", inputs: {"variable": (literal: "factorial")}, refers: (block: 1, slot: (input: "variable"))))},
-                            lists: {"operands": [(block: (id: 9, opcode: "-", lists: {"z": [
+                        (block: (id: 7, opcode: "procedure_call",
+                            inputs: {"variable": (literal: "factorial")}, refers: (block: 1, slot: (input: "variable")),
+                            lists: {"arguments": [(block: (id: 9, opcode: "-", lists: {"z": [
                                 (block: (id: 10, opcode: "variable", inputs: {"variable": (literal: "n")}, refers: (block: 1, slot: (input: "formals", item: 0)))),
                                 (literal: "1"),
                             ]}))]})),
@@ -25,8 +25,8 @@ Program(
                 }))],
             })]),
         (pos: (24.0, 260.0), blocks: [(id: 20, opcode: "program",
-            inputs: {"main": (block: (id: 21, opcode: "call",
-                inputs: {"operator": (block: (id: 22, opcode: "variable", inputs: {"variable": (literal: "factorial")}, refers: (block: 1, slot: (input: "variable"))))},
-                lists: {"operands": [(literal: "10")]}))})]),
+            inputs: {"main": (block: (id: 21, opcode: "procedure_call",
+                inputs: {"variable": (literal: "factorial")}, refers: (block: 1, slot: (input: "variable")),
+                lists: {"arguments": [(literal: "10")]}))})]),
     ],
 )

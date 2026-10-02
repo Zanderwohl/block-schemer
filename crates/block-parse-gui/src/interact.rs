@@ -3,7 +3,7 @@
 use block_parse::Language;
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, Shape};
-use block_parse::program::{BlockId, Declaration, Program, Slot};
+use block_parse::program::{BlockId, Declaration, Program, Reach, Slot};
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
 use crate::layout::{Run, SNAP_RADIUS, Scene};
@@ -24,6 +24,36 @@ pub enum Gesture {
     /// Moving a panel's edge; `grab` is the pointer's x minus the edge's at
     /// the press, so the edge does not jump.
     Resizing { edge: Edge, grab: f32 },
+    /// Moving a callable block's right end, showing more or fewer of its
+    /// parameters.
+    Reaching(Reaching),
+}
+
+/// Canvas units at a callable reporter's right end that grab it.
+pub const REACH_GRIP: f32 = 6.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reaching {
+    pub block: BlockId,
+    /// The block's left edge, canvas units; it stays put.
+    pub left: f32,
+    /// Each reach the block may take and its width there, narrowest first.
+    pub stops: Vec<(Option<Reach>, f32)>,
+    /// The pointer's x minus the right end's at the press.
+    pub grab: f32,
+    /// Changed the program, so the gesture settles as one step.
+    pub moved: bool,
+}
+
+impl Reaching {
+    /// The stop whose right end is nearest `right`, if there is any.
+    pub fn nearest(&self, right: f32) -> Option<Option<Reach>> {
+        let distance = |width: f32| (self.left + width - right).abs();
+        self.stops
+            .iter()
+            .min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)))
+            .map(|(reach, _)| *reach)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

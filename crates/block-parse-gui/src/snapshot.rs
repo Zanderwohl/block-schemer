@@ -66,7 +66,7 @@ fn render(
     overlay: &Overlay,
     theme: &Theme,
     scale: f32,
-    declarers: HashMap<BlockId, String>,
+    declarers: HashMap<BlockId, crate::layout::Declarer>,
     scene: impl Fn(&Layout) -> Scene,
 ) -> Result<RgbaImage, String> {
     if !(scale > 0.0 && scale.is_finite()) {

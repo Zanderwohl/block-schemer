@@ -52,6 +52,11 @@ pub struct Node {
     /// For a reference, the declaration it names. Always in scope: one
     /// that is not is a problem instead.
     pub refers: Option<Declaration>,
+    /// A callable block left as its name, not called. It has no args or
+    /// lists but a procedure reference's name. A call leaves out the
+    /// parameters it hides.
+    #[serde(default)]
+    pub named: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +115,9 @@ pub enum ProblemCode {
     /// A declaring slot left blank, or a reference to one. No language
     /// takes an empty name.
     Unnamed,
+    /// A call showing fewer of its procedure's required parameters, or
+    /// more, than it has, in a language not `curried`. On the block.
+    Arity,
     /// Nested past `MAX_DEPTH`. Replaces the first block past the limit; nothing
     /// below it is parsed.
     TooDeep,

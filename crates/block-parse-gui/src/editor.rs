@@ -19,7 +19,8 @@ type SwatchKey = (
 use crate::dropdown::Menu;
 use crate::filter;
 use crate::interact::{
-    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, drop_run, find_snap,
+    DRAG_THRESHOLD, Drag, DragSource, Gesture, LiteralEdit, OpenChoice, Press, Pressed, REACH_GRIP, Reaching, drop_run,
+    find_snap,
     start_drag,
 };
 use crate::layout::{
@@ -320,6 +321,25 @@ impl BlockEditor {
             }
         }
 
+        // The right end of a callable block on the canvas, to show more or
+        // fewer of its parameters.
+        let reach_at = |at: Pos2| {
+            let point = t.canvas(at);
+            let hit = scene
+                .hit(point)
+                .filter(|hit| !read_only && canvas_rect.contains(at) && point.x >= hit.rect.max.x - REACH_GRIP)?;
+            let stops = layout.stops(program.find(hit.id)?);
+            (stops.len() > 1).then_some(Reaching {
+                block: hit.id,
+                left: hit.rect.min.x,
+                stops,
+                grab: point.x - hit.rect.max.x,
+                moved: false,
+            })
+        };
+        let on_reach = matches!(self.gesture, Gesture::Idle) && over.and_then(reach_at).is_some();
+        let mut settle = false;
+
         match std::mem::take(&mut self.gesture) {
             Gesture::Idle => {
                 if let Some((at, edge)) = over.zip(divider).filter(|_| input.pressed) {
@@ -327,7 +347,10 @@ impl BlockEditor {
                     self.gesture = Gesture::Resizing { edge, grab };
                     self.last_click = None;
                 } else if let Some(at) = over.filter(|_| input.pressed && !on_toggle) {
-                    self.gesture = self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay);
+                    self.gesture = match reach_at(at) {
+                        Some(reaching) => Gesture::Reaching(reaching),
+                        None => self.press(at, &scene, &palette, palette_rect, palette_t, t, overlay),
+                    };
                     // Only an uninterrupted pair of clicks on one block runs it.
                     let same = match &self.gesture {
                         Gesture::Pressed(Press {
@@ -369,6 +392,22 @@ impl BlockEditor {
                 }
                 if input.down {
                     self.gesture = Gesture::Resizing { edge, grab };
+                }
+            }
+            Gesture::Reaching(mut reaching) => {
+                let nearest = input.at.and_then(|at| reaching.nearest(t.canvas(at).x - reaching.grab));
+                if let Some(reach) = nearest
+                    && !read_only
+                    && program.find(reaching.block).is_some_and(|block| block.reach != reach)
+                    && program.set_reach(language, reaching.block, reach)
+                {
+                    output.changed = true;
+                    reaching.moved = true;
+                }
+                if input.down && !read_only {
+                    self.gesture = Gesture::Reaching(reaching);
+                } else {
+                    settle = reaching.moved;
                 }
             }
             Gesture::Dragging(mut drag) => {
@@ -470,7 +509,7 @@ impl BlockEditor {
             let run = layout.run(&drag.fragment.blocks, drag.head);
             paint::scene(&floating, &run.scene, t, &theme, false, &Overlay::default());
             ctx.set_cursor_icon(CursorIcon::Grabbing);
-        } else if hot.is_some() {
+        } else if hot.is_some() || on_reach || matches!(self.gesture, Gesture::Reaching(_)) {
             ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
         } else if on_toggle {
         } else if let Some(at) = over {
@@ -518,7 +557,8 @@ impl BlockEditor {
             }
         }
 
-        output.settled = self.edit.is_none() && (output.changed || was_editing);
+        let reaching = matches!(self.gesture, Gesture::Reaching(_));
+        output.settled = self.edit.is_none() && !reaching && (output.changed || was_editing || settle);
         output
     }
 
@@ -1991,6 +2031,69 @@ mod tests {
 
     fn code(program: &Program, id: BlockId) -> Option<String> {
         program.find(id).unwrap().inputs["code"].literal.clone()
+    }
+
+    #[test]
+    fn dragging_a_callables_end_hides_its_parameters_in_one_step() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "calls",
+                file: (extension: "c"),
+                callable: true,
+                types: { "value": (literal: Text) },
+                blocks: [(id: "fold", name: "Fold", kind: Reporter("value"), spec: "fold {kons:value} {knil:value}")],
+            )"#,
+            &block_parse::Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let fold = program.instantiate(&language, "fold").unwrap();
+        let id = fold.id;
+        program.stacks.push(block_parse::Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![fold],
+        });
+        let ctx = egui::Context::default();
+        let mut editor = codon_editor();
+        frame(&ctx, &mut editor, &language, &mut program, &Overlay::default(), vec![]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &EguiMeasure(&ctx),
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+            declarers: Default::default(),
+        }
+        .program(&program);
+        let rect = scene.blocks[0].rect.translate(editor.view.pan);
+        let end = pos2(rect.max.x - 2.0, rect.center().y);
+        let button = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let left = pos2(end.x - 40.0, end.y);
+        let steps = vec![
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, true)],
+            vec![egui::Event::PointerMoved(pos2(end.x - 20.0, end.y))],
+            vec![egui::Event::PointerMoved(left)],
+            vec![egui::Event::PointerMoved(pos2(-200.0, end.y))],
+            vec![button(pos2(-200.0, end.y), false)],
+        ];
+        let mut history = block_parse::History::new(&program);
+        let mut settled = Vec::new();
+        for events in steps {
+            settled.push(recorded(&ctx, &mut editor, &language, &mut program, &mut history, events).settled);
+        }
+        assert_eq!(program.find(id).unwrap().reach, Some(block_parse::Reach::Name), "narrowest is the name");
+        assert_eq!(program.stacks[0].pos, [0.0, 0.0], "the block stays where it was");
+        assert_eq!(settled, [false, false, false, false, false, true], "one step, once let go");
+        assert!(history.undo(&mut program));
+        assert_eq!(program.find(id).unwrap().reach, None);
     }
 
     #[test]

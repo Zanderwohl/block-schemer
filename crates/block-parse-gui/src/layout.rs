@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use block_parse::edit::Target;
-use block_parse::language::{BlockDef, BlockKind, BlockLayout, ListDef, LiteralKind, Part, Shape};
-use block_parse::program::{Block, BlockId, Input, Program, Slot, Stack};
+use block_parse::language::{BlockDef, BlockKind, BlockLayout, Callable, Extent, ListDef, LiteralKind, Part, Shape};
+use block_parse::program::{Block, BlockId, Input, Program, Reach, Slot, Stack};
 use block_parse::Language;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -113,21 +113,48 @@ pub struct Layout<'a> {
     /// as if already detached.
     pub lifted: Option<BlockId>,
     /// From [`declarers`](Self::declarers): a reference, in hand too, takes
-    /// its declaring block's color and blank-name text. Empty draws
-    /// references in their own color.
-    pub declarers: HashMap<BlockId, String>,
+    /// its declaring block's color, blank-name text and parameters. Empty
+    /// draws references in their own color.
+    pub declarers: HashMap<BlockId, Declarer>,
+}
+
+/// A block with a scope, as references to it are drawn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Declarer {
+    pub opcode: String,
+    /// Its signature's parameter names, for references to its procedure.
+    pub parameters: Option<Vec<String>>,
 }
 
 impl Layout<'_> {
-    /// The opcode of each block with a scope in `program`.
-    pub fn declarers(language: &Language, program: &Program) -> HashMap<BlockId, String> {
+    /// Each block with a scope in `program`.
+    pub fn declarers(language: &Language, program: &Program) -> HashMap<BlockId, Declarer> {
         let mut declarers = HashMap::new();
         program.each_block(|block| {
-            if language.block(&block.opcode).is_some_and(|def| def.scope.is_some()) {
-                declarers.insert(block.id, block.opcode.clone());
+            if let Some(def) = language.block(&block.opcode).filter(|def| def.scope.is_some()) {
+                let declarer = Declarer {
+                    opcode: block.opcode.clone(),
+                    parameters: block.parameter_names(def),
+                };
+                declarers.insert(block.id, declarer);
             }
         });
         declarers
+    }
+
+    /// The width of a callable `block` at each reach it may take, narrowest
+    /// first. Fewer than two leave nothing to drag.
+    pub fn stops(&self, block: &Block) -> Vec<(Option<Reach>, f32)> {
+        let Some(extent) = self.extent(block) else { return Vec::new() };
+        let mut at = block.clone();
+        extent
+            .stops()
+            .into_iter()
+            .map(|reach| {
+                at.reach = reach;
+                (reach, self.block(&at).size.x)
+            })
+            .collect()
     }
 
     pub fn program(&self, program: &Program) -> Scene {
@@ -273,17 +300,12 @@ impl Layout<'_> {
     }
 
     fn block(&self, block: &Block) -> Laid {
-        self.shaped(block, None)
-    }
-
-    /// `shape` overrides a reporter's own, as a `reshape` slot asks.
-    fn shaped(&self, block: &Block, shape: Option<Shape>) -> Laid {
         let Some(def) = self.language.block(&block.opcode) else {
             return self.unknown(block);
         };
         let swatch = self.swatch(self.declarer(block).unwrap_or(def));
         match &def.kind {
-            BlockKind::Reporter(_) => self.reporter(block, def, swatch, shape),
+            BlockKind::Reporter(_) => self.reporter(block, def, swatch),
             BlockKind::Hat | BlockKind::Statement | BlockKind::Cap | BlockKind::HatCap => {
                 self.stack_block(block, def, swatch)
             }
@@ -301,7 +323,20 @@ impl Layout<'_> {
 
     fn declarer(&self, block: &Block) -> Option<&BlockDef> {
         let declaration = block.refers.as_ref()?;
-        self.language.block(self.declarers.get(&declaration.block)?)
+        self.language.block(&self.declarers.get(&declaration.block)?.opcode)
+    }
+
+    /// The parameter names of the procedure a reference names.
+    fn parameters(&self, block: &Block) -> Option<&[String]> {
+        let declaration = block.refers.as_ref()?;
+        let declarer = self.declarers.get(&declaration.block)?;
+        self.language.block(&declarer.opcode)?.signature_for(&declaration.slot.input)?;
+        declarer.parameters.as_deref()
+    }
+
+    fn extent(&self, block: &Block) -> Option<Extent> {
+        let arity = self.parameters(block).map(<[String]>::len);
+        self.language.block(&block.opcode)?.extent(block, arity)
     }
 
     /// An opcode the language lacks: drawn so it can be seen and deleted
@@ -335,14 +370,18 @@ impl Layout<'_> {
         }
     }
 
-    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch, shape: Option<Shape>) -> Laid {
-        let shape = shape.unwrap_or_else(|| {
-            def.kind
+    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch) -> Laid {
+        let extent = self.extent(block);
+        let shape = match extent {
+            Some(extent) if extent.named => Shape::Square,
+            _ => def
+                .kind
                 .output()
                 .and_then(|ty| self.language.ty(ty))
-                .map_or(Shape::Round, |ty| ty.shape)
-        });
-        let rows = self.rows(block, def, &def.parts);
+                .map_or(Shape::Round, |ty| ty.shape),
+        };
+        let parts = extent.map_or(&def.parts[..], |extent| def.shown_parts(extent.shown));
+        let rows = self.rows(block, def, parts);
         let height_of = |row: &[Item]| {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
             (inner + 6.0).max(REPORTER_HEIGHT)
@@ -574,6 +613,12 @@ impl Layout<'_> {
     }
 
     fn list(&self, block: &Block, list: &ListDef) -> Vec<Item> {
+        if let Some(def) = self.language.block(&block.opcode)
+            && def.callable == Some(Callable::Arguments(list.name.clone()))
+            && let Some(extent) = self.extent(block)
+        {
+            return self.arguments(block, list, extent);
+        }
         // As the list will be once the run in hand is out of it.
         let len = block.list_len(&list.name, self.lifted);
         let stored = &block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[])[..len];
@@ -583,9 +628,35 @@ impl Layout<'_> {
             .enumerate()
             .map(|(index, input)| self.slot(block, names, Some(index), Some(input)))
             .collect();
+        items.push(self.append(list, len));
+        items
+    }
+
+    /// A procedure reference's arguments, hinted with its parameters' names.
+    /// Only one that is no reference can grow.
+    fn arguments(&self, block: &Block, list: &ListDef, extent: Extent) -> Vec<Item> {
+        if extent.named {
+            return Vec::new();
+        }
+        let stored = block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[]);
+        let hints = self.parameters(block).unwrap_or(&[]);
+        let mut items: Vec<Item> = (0..extent.shown)
+            .map(|index| {
+                let hint = hints.get(index).unwrap_or(&list.hint);
+                self.slot(block, (&list.name, &list.ty, hint), Some(index), stored.get(index))
+            })
+            .collect();
+        if block.refers.is_none() && extent.shown == extent.parameters {
+            items.push(self.append(list, stored.len()));
+        }
+        items
+    }
+
+    /// A list's empty slot, at `len`.
+    fn append(&self, list: &ListDef, len: usize) -> Item {
         let width = self.measure.text_width(&append_text(&list.hint), Font::Literal) + 16.0;
         let ty = self.language.ty(&list.ty);
-        items.push(Item::Slot {
+        Item::Slot {
             slot: Slot::item(list.name.clone(), len),
             ty: list.ty.clone(),
             hint: list.hint.clone(),
@@ -595,8 +666,7 @@ impl Layout<'_> {
                 kind: ty.map_or(LiteralKind::None, |ty| ty.literal.clone()),
             },
             grip: None,
-        });
-        items
+        }
     }
 
     /// `names` is the input's name, type and hint.
@@ -614,7 +684,7 @@ impl Layout<'_> {
             .and_then(|stored| stored.block.as_deref())
             .filter(|inner| Some(inner.id) != self.lifted);
         if let Some(inner) = plugged {
-            let laid = self.shaped(inner, ty.filter(|ty| ty.reshape).map(|ty| ty.shape));
+            let laid = self.block(inner);
             return Item::Slot {
                 slot,
                 ty: ty_name.to_owned(),
@@ -1212,39 +1282,113 @@ mod tests {
         assert!(scene.grip_at(handle).is_none());
     }
 
-    #[test]
-    fn a_reshaping_slot_gives_its_shape_to_the_reporter_in_it() {
-        let language = Language::from_ron(
+    fn callable() -> Language {
+        Language::from_ron(
             r#"Language(
-                name: "shapes",
-                file: (extension: "s"),
+                name: "calls",
+                file: (extension: "c"),
+                callable: true,
                 types: {
                     "value": (shape: Round, literal: Text),
-                    "procedure": (shape: Square, accepts: All, reshape: true),
-                    "loose": (shape: Square, accepts: All),
+                    "name": (shape: Square, literal: Text),
+                    "procedure": (shape: Square, accepts: All, by_name: true),
                 },
                 blocks: [
-                    (id: "one", name: "One", kind: Reporter("value"), spec: "one"),
-                    (id: "apply", name: "Apply", spec: "apply {f:procedure} {g:loose}"),
+                    (id: "fold", name: "Fold", kind: Reporter("value"), spec: "fold {kons:procedure} {knil:value} {xs:value}"),
+                    (id: "call", name: "Call", kind: Reporter("value"), spec: "{name:name} {args:value*}"),
+                    (id: "get", name: "Get", kind: Reporter("value"), spec: "{name:name}"),
+                    (
+                        id: "define", name: "Define", kind: Reporter("value"), callable: false,
+                        spec: "define {name:name} {params:name*} {body:value}",
+                        scope: (
+                            declares: ["name", "params"], over: ["body"], global: ["name"], reference: "get",
+                            signature: (name: "name", parameters: "params", reference: "call"),
+                        ),
+                    ),
                 ],
             )"#,
             &Validators::new(),
         )
-        .unwrap();
-        let (mut program, ids) = with_stack(&language, &["apply"]);
-        let (f, g) = (program.instantiate(&language, "one").unwrap(), program.instantiate(&language, "one").unwrap());
-        let (f_id, g_id) = (f.id, g.id);
-        let apply = program.find_mut(ids[0]).unwrap();
-        apply.inputs.entry("f".into()).or_default().block = Some(Box::new(f));
-        apply.inputs.entry("g".into()).or_default().block = Some(Box::new(g));
+        .unwrap()
+    }
 
-        let scene = scene_of(&language, &program);
-        let shape = |id| match placed(&scene, id).form {
+    fn shape(scene: &Scene, id: BlockId) -> Shape {
+        match placed(scene, id).form {
             Form::Reporter { shape, .. } => shape,
             Form::Stack(_) => panic!("a reporter"),
+        }
+    }
+
+    #[test]
+    fn a_named_block_is_square_and_shows_only_its_name() {
+        let language = callable();
+        let (mut program, ids) = with_stack(&language, &["fold"]);
+        let full = scene_of(&language, &program);
+        assert_eq!(shape(&full, ids[0]), Shape::Round);
+        assert_eq!(placed(&full, ids[0]).slots.len(), 3);
+
+        program.find_mut(ids[0]).unwrap().reach = Some(Reach::Call(1));
+        let partial = scene_of(&language, &program);
+        assert_eq!(placed(&partial, ids[0]).slots.len(), 1);
+        assert_eq!(shape(&partial, ids[0]), Shape::Round);
+
+        program.find_mut(ids[0]).unwrap().reach = Some(Reach::Name);
+        let named = scene_of(&language, &program);
+        let fold = placed(&named, ids[0]);
+        assert!(fold.slots.is_empty());
+        assert_eq!(fold.labels.iter().map(|label| label.text.as_str()).collect::<Vec<_>>(), ["fold"]);
+        assert_eq!(shape(&named, ids[0]), Shape::Square);
+    }
+
+    #[test]
+    fn each_stop_is_wider_than_the_last() {
+        let language = callable();
+        let (program, ids) = with_stack(&language, &["fold"]);
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let layout = Layout {
+            language: &language,
+            measure: &Fixed,
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+            declarers: Default::default(),
         };
-        assert_eq!(shape(f_id), Shape::Square);
-        assert_eq!(shape(g_id), Shape::Round, "its own shape unless the slot reshapes");
+        let stops = layout.stops(program.find(ids[0]).unwrap());
+        let reaches: Vec<_> = stops.iter().map(|(reach, _)| *reach).collect();
+        let calls = (0..3).map(|n| Some(Reach::Call(n)));
+        assert_eq!(reaches, [Some(Reach::Name)].into_iter().chain(calls).chain([None]).collect::<Vec<_>>());
+        assert!(stops.windows(2).skip(1).all(|pair| pair[0].1 < pair[1].1), "{stops:?}");
+    }
+
+    #[test]
+    fn a_procedure_reference_hints_each_argument_with_its_parameter() {
+        let language = callable();
+        let (mut program, ids) = with_stack(&language, &["define"]);
+        program.set_literal(ids[0], &Slot::input("name"), "f".into());
+        program.set_literal(ids[0], &Slot::item("params", 0), "x".into());
+        program.set_literal(ids[0], &Slot::item("params", 1), "y".into());
+        let name = block_parse::Declaration {
+            block: ids[0],
+            slot: Slot::input("name"),
+        };
+        let call = program.reference(&language, &name).unwrap();
+        let call_id = call.id;
+        program.find_mut(ids[0]).unwrap().inputs.get_mut("body").unwrap().block = Some(Box::new(call));
+
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let scene = Layout {
+            language: &language,
+            measure: &Fixed,
+            swatches: &swatches,
+            editing: None,
+            validate: true,
+            lifted: None,
+            declarers: Layout::declarers(&language, &program),
+        }
+        .program(&program);
+        let hints: Vec<_> = placed(&scene, call_id).slots.iter().map(|slot| slot.hint.as_str()).collect();
+        assert_eq!(hints, ["x", "y"], "no empty slot to grow it");
     }
 
     #[test]
