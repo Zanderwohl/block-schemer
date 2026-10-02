@@ -1,0 +1,2203 @@
+#![enable(implicit_some)]
+(
+    language: "Block Schemer",
+    version: 3,
+    stacks: [
+        (
+            pos: (24.0, 24.0),
+            blocks: [
+                (
+                    id: 1,
+                    opcode: "program",
+                    inputs: {
+                        "main": (
+                            block: (
+                                id: 2,
+                                opcode: "call",
+                                inputs: {
+                                    "operator": (
+                                        block: (
+                                            id: 3,
+                                            opcode: "variable",
+                                            inputs: {
+                                                "variable": (
+                                                    literal: "solve",
+                                                ),
+                                            },
+                                            refers: (
+                                                block: 10,
+                                                slot: (
+                                                    input: "variable",
+                                                    item: None,
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                },
+                                lists: {
+                                    "operands": [
+                                        (
+                                            literal: "5",
+                                        ),
+                                    ],
+                                },
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 110.0),
+            blocks: [
+                (
+                    id: 10,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "solve",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 11,
+                                    opcode: "let",
+                                    lists: {
+                                        "bindings": [
+                                            (
+                                                block: (
+                                                    id: 12,
+                                                    opcode: "binding",
+                                                    inputs: {
+                                                        "init": (
+                                                            block: (
+                                                                id: 13,
+                                                                opcode: "list",
+                                                                lists: {
+                                                                    "obj": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 14,
+                                                                                opcode: "call",
+                                                                                inputs: {
+                                                                                    "operator": (
+                                                                                        block: (
+                                                                                            id: 200,
+                                                                                            opcode: "variable",
+                                                                                            inputs: {
+                                                                                                "variable": (
+                                                                                                    literal: "tower",
+                                                                                                ),
+                                                                                            },
+                                                                                            refers: (
+                                                                                                block: 110,
+                                                                                                slot: (
+                                                                                                    input: "variable",
+                                                                                                    item: None,
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                },
+                                                                                lists: {
+                                                                                    "operands": [
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 201,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "n",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 10,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 0,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ],
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                        (
+                                                                            block: (
+                                                                                id: 15,
+                                                                                opcode: "list",
+                                                                            ),
+                                                                        ),
+                                                                        (
+                                                                            block: (
+                                                                                id: 16,
+                                                                                opcode: "list",
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        "variable": (
+                                                            literal: "start",
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                        "body": [
+                                            (
+                                                block: (
+                                                    id: 17,
+                                                    opcode: "call",
+                                                    inputs: {
+                                                        "operator": (
+                                                            block: (
+                                                                id: 202,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "show",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 70,
+                                                                    slot: (
+                                                                        input: "variable",
+                                                                        item: None,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    },
+                                                    lists: {
+                                                        "operands": [
+                                                            (
+                                                                block: (
+                                                                    id: 203,
+                                                                    opcode: "variable",
+                                                                    inputs: {
+                                                                        "variable": (
+                                                                            literal: "start",
+                                                                        ),
+                                                                    },
+                                                                    refers: (
+                                                                        block: 12,
+                                                                        slot: (
+                                                                            input: "variable",
+                                                                            item: None,
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 18,
+                                                    opcode: "call",
+                                                    inputs: {
+                                                        "operator": (
+                                                            block: (
+                                                                id: 204,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "hanoi",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 30,
+                                                                    slot: (
+                                                                        input: "variable",
+                                                                        item: None,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    },
+                                                    lists: {
+                                                        "operands": [
+                                                            (
+                                                                block: (
+                                                                    id: 205,
+                                                                    opcode: "variable",
+                                                                    inputs: {
+                                                                        "variable": (
+                                                                            literal: "n",
+                                                                        ),
+                                                                    },
+                                                                    refers: (
+                                                                        block: 10,
+                                                                        slot: (
+                                                                            input: "formals",
+                                                                            item: 0,
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                            (
+                                                                literal: "0",
+                                                            ),
+                                                            (
+                                                                literal: "2",
+                                                            ),
+                                                            (
+                                                                literal: "1",
+                                                            ),
+                                                            (
+                                                                block: (
+                                                                    id: 206,
+                                                                    opcode: "variable",
+                                                                    inputs: {
+                                                                        "variable": (
+                                                                            literal: "start",
+                                                                        ),
+                                                                    },
+                                                                    refers: (
+                                                                        block: 12,
+                                                                        slot: (
+                                                                            input: "variable",
+                                                                            item: None,
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 19,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 20,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: "Solved!",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 21,
+                                                    opcode: "newline",
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "n",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 420.0),
+            blocks: [
+                (
+                    id: 30,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "hanoi",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 31,
+                                    opcode: "if",
+                                    inputs: {
+                                        "alternate": (
+                                            block: (
+                                                id: 33,
+                                                opcode: "call",
+                                                inputs: {
+                                                    "operator": (
+                                                        block: (
+                                                            id: 212,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "hanoi",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 30,
+                                                                slot: (
+                                                                    input: "variable",
+                                                                    item: None,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                },
+                                                lists: {
+                                                    "operands": [
+                                                        (
+                                                            block: (
+                                                                id: 34,
+                                                                opcode: "-",
+                                                                lists: {
+                                                                    "z": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 213,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "n",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 30,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 0,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                        (
+                                                                            literal: "1",
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 214,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "via",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 30,
+                                                                    slot: (
+                                                                        input: "formals",
+                                                                        item: 3,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 215,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "to",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 30,
+                                                                    slot: (
+                                                                        input: "formals",
+                                                                        item: 2,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 216,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "from",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 30,
+                                                                    slot: (
+                                                                        input: "formals",
+                                                                        item: 1,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 35,
+                                                                opcode: "call",
+                                                                inputs: {
+                                                                    "operator": (
+                                                                        block: (
+                                                                            id: 217,
+                                                                            opcode: "variable",
+                                                                            inputs: {
+                                                                                "variable": (
+                                                                                    literal: "move",
+                                                                                ),
+                                                                            },
+                                                                            refers: (
+                                                                                block: 40,
+                                                                                slot: (
+                                                                                    input: "variable",
+                                                                                    item: None,
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                                lists: {
+                                                                    "operands": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 218,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "from",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 30,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 1,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                        (
+                                                                            block: (
+                                                                                id: 219,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "to",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 30,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 2,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                        (
+                                                                            block: (
+                                                                                id: 36,
+                                                                                opcode: "call",
+                                                                                inputs: {
+                                                                                    "operator": (
+                                                                                        block: (
+                                                                                            id: 220,
+                                                                                            opcode: "variable",
+                                                                                            inputs: {
+                                                                                                "variable": (
+                                                                                                    literal: "hanoi",
+                                                                                                ),
+                                                                                            },
+                                                                                            refers: (
+                                                                                                block: 30,
+                                                                                                slot: (
+                                                                                                    input: "variable",
+                                                                                                    item: None,
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                },
+                                                                                lists: {
+                                                                                    "operands": [
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 37,
+                                                                                                opcode: "-",
+                                                                                                lists: {
+                                                                                                    "z": [
+                                                                                                        (
+                                                                                                            block: (
+                                                                                                                id: 221,
+                                                                                                                opcode: "variable",
+                                                                                                                inputs: {
+                                                                                                                    "variable": (
+                                                                                                                        literal: "n",
+                                                                                                                    ),
+                                                                                                                },
+                                                                                                                refers: (
+                                                                                                                    block: 30,
+                                                                                                                    slot: (
+                                                                                                                        input: "formals",
+                                                                                                                        item: 0,
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        (
+                                                                                                            literal: "1",
+                                                                                                        ),
+                                                                                                    ],
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 222,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "from",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 30,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 1,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 223,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "via",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 30,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 3,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 224,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "to",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 30,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 2,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 225,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "pegs",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 30,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 4,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ],
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ),
+                                        "consequent": (
+                                            block: (
+                                                id: 211,
+                                                opcode: "variable",
+                                                inputs: {
+                                                    "variable": (
+                                                        literal: "pegs",
+                                                    ),
+                                                },
+                                                refers: (
+                                                    block: 30,
+                                                    slot: (
+                                                        input: "formals",
+                                                        item: 4,
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                        "test": (
+                                            block: (
+                                                id: 32,
+                                                opcode: "zero?",
+                                                inputs: {
+                                                    "z": (
+                                                        block: (
+                                                            id: 210,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "n",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 30,
+                                                                slot: (
+                                                                    input: "formals",
+                                                                    item: 0,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "n",
+                            ),
+                            (
+                                literal: "from",
+                            ),
+                            (
+                                literal: "to",
+                            ),
+                            (
+                                literal: "via",
+                            ),
+                            (
+                                literal: "pegs",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 640.0),
+            blocks: [
+                (
+                    id: 40,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "move",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 41,
+                                    opcode: "let",
+                                    lists: {
+                                        "bindings": [
+                                            (
+                                                block: (
+                                                    id: 42,
+                                                    opcode: "binding",
+                                                    inputs: {
+                                                        "init": (
+                                                            block: (
+                                                                id: 43,
+                                                                opcode: "car",
+                                                                inputs: {
+                                                                    "pair": (
+                                                                        block: (
+                                                                            id: 44,
+                                                                            opcode: "list-ref",
+                                                                            inputs: {
+                                                                                "k": (
+                                                                                    block: (
+                                                                                        id: 231,
+                                                                                        opcode: "variable",
+                                                                                        inputs: {
+                                                                                            "variable": (
+                                                                                                literal: "from",
+                                                                                            ),
+                                                                                        },
+                                                                                        refers: (
+                                                                                            block: 40,
+                                                                                            slot: (
+                                                                                                input: "formals",
+                                                                                                item: 0,
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                ),
+                                                                                "list": (
+                                                                                    block: (
+                                                                                        id: 230,
+                                                                                        opcode: "variable",
+                                                                                        inputs: {
+                                                                                            "variable": (
+                                                                                                literal: "pegs",
+                                                                                            ),
+                                                                                        },
+                                                                                        refers: (
+                                                                                            block: 40,
+                                                                                            slot: (
+                                                                                                input: "formals",
+                                                                                                item: 2,
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                        "variable": (
+                                                            literal: "disk",
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                        "body": [
+                                            (
+                                                block: (
+                                                    id: 45,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 46,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: "Move disk ",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 47,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 232,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "disk",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 42,
+                                                                    slot: (
+                                                                        input: "variable",
+                                                                        item: None,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 48,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 49,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: " from ",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 50,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 51,
+                                                                opcode: "call",
+                                                                inputs: {
+                                                                    "operator": (
+                                                                        block: (
+                                                                            id: 233,
+                                                                            opcode: "variable",
+                                                                            inputs: {
+                                                                                "variable": (
+                                                                                    literal: "peg-name",
+                                                                                ),
+                                                                            },
+                                                                            refers: (
+                                                                                block: 90,
+                                                                                slot: (
+                                                                                    input: "variable",
+                                                                                    item: None,
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                                lists: {
+                                                                    "operands": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 234,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "from",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 40,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 0,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 52,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 53,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: " to ",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 54,
+                                                    opcode: "display",
+                                                    inputs: {
+                                                        "obj": (
+                                                            block: (
+                                                                id: 55,
+                                                                opcode: "call",
+                                                                inputs: {
+                                                                    "operator": (
+                                                                        block: (
+                                                                            id: 235,
+                                                                            opcode: "variable",
+                                                                            inputs: {
+                                                                                "variable": (
+                                                                                    literal: "peg-name",
+                                                                                ),
+                                                                            },
+                                                                            refers: (
+                                                                                block: 90,
+                                                                                slot: (
+                                                                                    input: "variable",
+                                                                                    item: None,
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                                lists: {
+                                                                    "operands": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 236,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "to",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 40,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 1,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                    },
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 56,
+                                                    opcode: "newline",
+                                                ),
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 57,
+                                                    opcode: "let",
+                                                    lists: {
+                                                        "bindings": [
+                                                            (
+                                                                block: (
+                                                                    id: 58,
+                                                                    opcode: "binding",
+                                                                    inputs: {
+                                                                        "init": (
+                                                                            block: (
+                                                                                id: 59,
+                                                                                opcode: "call",
+                                                                                inputs: {
+                                                                                    "operator": (
+                                                                                        block: (
+                                                                                            id: 237,
+                                                                                            opcode: "variable",
+                                                                                            inputs: {
+                                                                                                "variable": (
+                                                                                                    literal: "replace",
+                                                                                                ),
+                                                                                            },
+                                                                                            refers: (
+                                                                                                block: 100,
+                                                                                                slot: (
+                                                                                                    input: "variable",
+                                                                                                    item: None,
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                },
+                                                                                lists: {
+                                                                                    "operands": [
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 60,
+                                                                                                opcode: "call",
+                                                                                                inputs: {
+                                                                                                    "operator": (
+                                                                                                        block: (
+                                                                                                            id: 238,
+                                                                                                            opcode: "variable",
+                                                                                                            inputs: {
+                                                                                                                "variable": (
+                                                                                                                    literal: "replace",
+                                                                                                                ),
+                                                                                                            },
+                                                                                                            refers: (
+                                                                                                                block: 100,
+                                                                                                                slot: (
+                                                                                                                    input: "variable",
+                                                                                                                    item: None,
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                },
+                                                                                                lists: {
+                                                                                                    "operands": [
+                                                                                                        (
+                                                                                                            block: (
+                                                                                                                id: 239,
+                                                                                                                opcode: "variable",
+                                                                                                                inputs: {
+                                                                                                                    "variable": (
+                                                                                                                        literal: "pegs",
+                                                                                                                    ),
+                                                                                                                },
+                                                                                                                refers: (
+                                                                                                                    block: 40,
+                                                                                                                    slot: (
+                                                                                                                        input: "formals",
+                                                                                                                        item: 2,
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        (
+                                                                                                            block: (
+                                                                                                                id: 240,
+                                                                                                                opcode: "variable",
+                                                                                                                inputs: {
+                                                                                                                    "variable": (
+                                                                                                                        literal: "from",
+                                                                                                                    ),
+                                                                                                                },
+                                                                                                                refers: (
+                                                                                                                    block: 40,
+                                                                                                                    slot: (
+                                                                                                                        input: "formals",
+                                                                                                                        item: 0,
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        (
+                                                                                                            block: (
+                                                                                                                id: 61,
+                                                                                                                opcode: "cdr",
+                                                                                                                inputs: {
+                                                                                                                    "pair": (
+                                                                                                                        block: (
+                                                                                                                            id: 62,
+                                                                                                                            opcode: "list-ref",
+                                                                                                                            inputs: {
+                                                                                                                                "k": (
+                                                                                                                                    block: (
+                                                                                                                                        id: 242,
+                                                                                                                                        opcode: "variable",
+                                                                                                                                        inputs: {
+                                                                                                                                            "variable": (
+                                                                                                                                                literal: "from",
+                                                                                                                                            ),
+                                                                                                                                        },
+                                                                                                                                        refers: (
+                                                                                                                                            block: 40,
+                                                                                                                                            slot: (
+                                                                                                                                                input: "formals",
+                                                                                                                                                item: 0,
+                                                                                                                                            ),
+                                                                                                                                        ),
+                                                                                                                                    ),
+                                                                                                                                ),
+                                                                                                                                "list": (
+                                                                                                                                    block: (
+                                                                                                                                        id: 241,
+                                                                                                                                        opcode: "variable",
+                                                                                                                                        inputs: {
+                                                                                                                                            "variable": (
+                                                                                                                                                literal: "pegs",
+                                                                                                                                            ),
+                                                                                                                                        },
+                                                                                                                                        refers: (
+                                                                                                                                            block: 40,
+                                                                                                                                            slot: (
+                                                                                                                                                input: "formals",
+                                                                                                                                                item: 2,
+                                                                                                                                            ),
+                                                                                                                                        ),
+                                                                                                                                    ),
+                                                                                                                                ),
+                                                                                                                            },
+                                                                                                                        ),
+                                                                                                                    ),
+                                                                                                                },
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    ],
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 243,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "to",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 40,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 1,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 63,
+                                                                                                opcode: "cons",
+                                                                                                inputs: {
+                                                                                                    "car": (
+                                                                                                        block: (
+                                                                                                            id: 244,
+                                                                                                            opcode: "variable",
+                                                                                                            inputs: {
+                                                                                                                "variable": (
+                                                                                                                    literal: "disk",
+                                                                                                                ),
+                                                                                                            },
+                                                                                                            refers: (
+                                                                                                                block: 42,
+                                                                                                                slot: (
+                                                                                                                    input: "variable",
+                                                                                                                    item: None,
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                    "cdr": (
+                                                                                                        block: (
+                                                                                                            id: 64,
+                                                                                                            opcode: "list-ref",
+                                                                                                            inputs: {
+                                                                                                                "k": (
+                                                                                                                    block: (
+                                                                                                                        id: 246,
+                                                                                                                        opcode: "variable",
+                                                                                                                        inputs: {
+                                                                                                                            "variable": (
+                                                                                                                                literal: "to",
+                                                                                                                            ),
+                                                                                                                        },
+                                                                                                                        refers: (
+                                                                                                                            block: 40,
+                                                                                                                            slot: (
+                                                                                                                                input: "formals",
+                                                                                                                                item: 1,
+                                                                                                                            ),
+                                                                                                                        ),
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                                "list": (
+                                                                                                                    block: (
+                                                                                                                        id: 245,
+                                                                                                                        opcode: "variable",
+                                                                                                                        inputs: {
+                                                                                                                            "variable": (
+                                                                                                                                literal: "pegs",
+                                                                                                                            ),
+                                                                                                                        },
+                                                                                                                        refers: (
+                                                                                                                            block: 40,
+                                                                                                                            slot: (
+                                                                                                                                input: "formals",
+                                                                                                                                item: 2,
+                                                                                                                            ),
+                                                                                                                        ),
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            },
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                    ],
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                        "variable": (
+                                                                            literal: "moved",
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ),
+                                                        ],
+                                                        "body": [
+                                                            (
+                                                                block: (
+                                                                    id: 65,
+                                                                    opcode: "call",
+                                                                    inputs: {
+                                                                        "operator": (
+                                                                            block: (
+                                                                                id: 247,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "show",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 70,
+                                                                                    slot: (
+                                                                                        input: "variable",
+                                                                                        item: None,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                    lists: {
+                                                                        "operands": [
+                                                                            (
+                                                                                block: (
+                                                                                    id: 248,
+                                                                                    opcode: "variable",
+                                                                                    inputs: {
+                                                                                        "variable": (
+                                                                                            literal: "moved",
+                                                                                        ),
+                                                                                    },
+                                                                                    refers: (
+                                                                                        block: 58,
+                                                                                        slot: (
+                                                                                            input: "variable",
+                                                                                            item: None,
+                                                                                        ),
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            (
+                                                                block: (
+                                                                    id: 249,
+                                                                    opcode: "variable",
+                                                                    inputs: {
+                                                                        "variable": (
+                                                                            literal: "moved",
+                                                                        ),
+                                                                    },
+                                                                    refers: (
+                                                                        block: 58,
+                                                                        slot: (
+                                                                            input: "variable",
+                                                                            item: None,
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ],
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "from",
+                            ),
+                            (
+                                literal: "to",
+                            ),
+                            (
+                                literal: "pegs",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 1280.0),
+            blocks: [
+                (
+                    id: 70,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "show",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 71,
+                                    opcode: "call",
+                                    inputs: {
+                                        "operator": (
+                                            block: (
+                                                id: 250,
+                                                opcode: "variable",
+                                                inputs: {
+                                                    "variable": (
+                                                        literal: "show-peg",
+                                                    ),
+                                                },
+                                                refers: (
+                                                    block: 80,
+                                                    slot: (
+                                                        input: "variable",
+                                                        item: None,
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    },
+                                    lists: {
+                                        "operands": [
+                                            (
+                                                literal: "0",
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 251,
+                                                    opcode: "variable",
+                                                    inputs: {
+                                                        "variable": (
+                                                            literal: "pegs",
+                                                        ),
+                                                    },
+                                                    refers: (
+                                                        block: 70,
+                                                        slot: (
+                                                            input: "formals",
+                                                            item: 0,
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 72,
+                                    opcode: "call",
+                                    inputs: {
+                                        "operator": (
+                                            block: (
+                                                id: 252,
+                                                opcode: "variable",
+                                                inputs: {
+                                                    "variable": (
+                                                        literal: "show-peg",
+                                                    ),
+                                                },
+                                                refers: (
+                                                    block: 80,
+                                                    slot: (
+                                                        input: "variable",
+                                                        item: None,
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    },
+                                    lists: {
+                                        "operands": [
+                                            (
+                                                literal: "1",
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 253,
+                                                    opcode: "variable",
+                                                    inputs: {
+                                                        "variable": (
+                                                            literal: "pegs",
+                                                        ),
+                                                    },
+                                                    refers: (
+                                                        block: 70,
+                                                        slot: (
+                                                            input: "formals",
+                                                            item: 0,
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 73,
+                                    opcode: "call",
+                                    inputs: {
+                                        "operator": (
+                                            block: (
+                                                id: 254,
+                                                opcode: "variable",
+                                                inputs: {
+                                                    "variable": (
+                                                        literal: "show-peg",
+                                                    ),
+                                                },
+                                                refers: (
+                                                    block: 80,
+                                                    slot: (
+                                                        input: "variable",
+                                                        item: None,
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    },
+                                    lists: {
+                                        "operands": [
+                                            (
+                                                literal: "2",
+                                            ),
+                                            (
+                                                block: (
+                                                    id: 255,
+                                                    opcode: "variable",
+                                                    inputs: {
+                                                        "variable": (
+                                                            literal: "pegs",
+                                                        ),
+                                                    },
+                                                    refers: (
+                                                        block: 70,
+                                                        slot: (
+                                                            input: "formals",
+                                                            item: 0,
+                                                        ),
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 74,
+                                    opcode: "newline",
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "pegs",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 1540.0),
+            blocks: [
+                (
+                    id: 80,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "show-peg",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 81,
+                                    opcode: "display",
+                                    inputs: {
+                                        "obj": (
+                                            block: (
+                                                id: 82,
+                                                opcode: "call",
+                                                inputs: {
+                                                    "operator": (
+                                                        block: (
+                                                            id: 260,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "peg-name",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 90,
+                                                                slot: (
+                                                                    input: "variable",
+                                                                    item: None,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                },
+                                                lists: {
+                                                    "operands": [
+                                                        (
+                                                            block: (
+                                                                id: 261,
+                                                                opcode: "variable",
+                                                                inputs: {
+                                                                    "variable": (
+                                                                        literal: "i",
+                                                                    ),
+                                                                },
+                                                                refers: (
+                                                                    block: 80,
+                                                                    slot: (
+                                                                        input: "formals",
+                                                                        item: 0,
+                                                                    ),
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 83,
+                                    opcode: "display",
+                                    inputs: {
+                                        "obj": (
+                                            block: (
+                                                id: 84,
+                                                opcode: "string",
+                                                inputs: {
+                                                    "text": (
+                                                        literal: ": ",
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 85,
+                                    opcode: "display",
+                                    inputs: {
+                                        "obj": (
+                                            block: (
+                                                id: 86,
+                                                opcode: "reverse",
+                                                inputs: {
+                                                    "list": (
+                                                        block: (
+                                                            id: 87,
+                                                            opcode: "list-ref",
+                                                            inputs: {
+                                                                "k": (
+                                                                    block: (
+                                                                        id: 263,
+                                                                        opcode: "variable",
+                                                                        inputs: {
+                                                                            "variable": (
+                                                                                literal: "i",
+                                                                            ),
+                                                                        },
+                                                                        refers: (
+                                                                            block: 80,
+                                                                            slot: (
+                                                                                input: "formals",
+                                                                                item: 0,
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                                "list": (
+                                                                    block: (
+                                                                        id: 262,
+                                                                        opcode: "variable",
+                                                                        inputs: {
+                                                                            "variable": (
+                                                                                literal: "pegs",
+                                                                            ),
+                                                                        },
+                                                                        refers: (
+                                                                            block: 80,
+                                                                            slot: (
+                                                                                input: "formals",
+                                                                                item: 1,
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            },
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            (
+                                block: (
+                                    id: 88,
+                                    opcode: "newline",
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "i",
+                            ),
+                            (
+                                literal: "pegs",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 1800.0),
+            blocks: [
+                (
+                    id: 90,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "peg-name",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 91,
+                                    opcode: "list-ref",
+                                    inputs: {
+                                        "k": (
+                                            block: (
+                                                id: 270,
+                                                opcode: "variable",
+                                                inputs: {
+                                                    "variable": (
+                                                        literal: "i",
+                                                    ),
+                                                },
+                                                refers: (
+                                                    block: 90,
+                                                    slot: (
+                                                        input: "formals",
+                                                        item: 0,
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                        "list": (
+                                            block: (
+                                                id: 92,
+                                                opcode: "list",
+                                                lists: {
+                                                    "obj": [
+                                                        (
+                                                            block: (
+                                                                id: 93,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: "A",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 94,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: "B",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 95,
+                                                                opcode: "string",
+                                                                inputs: {
+                                                                    "text": (
+                                                                        literal: "C",
+                                                                    ),
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "i",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 1930.0),
+            blocks: [
+                (
+                    id: 100,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "replace",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 101,
+                                    opcode: "if",
+                                    inputs: {
+                                        "alternate": (
+                                            block: (
+                                                id: 105,
+                                                opcode: "cons",
+                                                inputs: {
+                                                    "car": (
+                                                        block: (
+                                                            id: 106,
+                                                            opcode: "car",
+                                                            inputs: {
+                                                                "pair": (
+                                                                    block: (
+                                                                        id: 283,
+                                                                        opcode: "variable",
+                                                                        inputs: {
+                                                                            "variable": (
+                                                                                literal: "pegs",
+                                                                            ),
+                                                                        },
+                                                                        refers: (
+                                                                            block: 100,
+                                                                            slot: (
+                                                                                input: "formals",
+                                                                                item: 0,
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            },
+                                                        ),
+                                                    ),
+                                                    "cdr": (
+                                                        block: (
+                                                            id: 107,
+                                                            opcode: "call",
+                                                            inputs: {
+                                                                "operator": (
+                                                                    block: (
+                                                                        id: 284,
+                                                                        opcode: "variable",
+                                                                        inputs: {
+                                                                            "variable": (
+                                                                                literal: "replace",
+                                                                            ),
+                                                                        },
+                                                                        refers: (
+                                                                            block: 100,
+                                                                            slot: (
+                                                                                input: "variable",
+                                                                                item: None,
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            },
+                                                            lists: {
+                                                                "operands": [
+                                                                    (
+                                                                        block: (
+                                                                            id: 108,
+                                                                            opcode: "cdr",
+                                                                            inputs: {
+                                                                                "pair": (
+                                                                                    block: (
+                                                                                        id: 285,
+                                                                                        opcode: "variable",
+                                                                                        inputs: {
+                                                                                            "variable": (
+                                                                                                literal: "pegs",
+                                                                                            ),
+                                                                                        },
+                                                                                        refers: (
+                                                                                            block: 100,
+                                                                                            slot: (
+                                                                                                input: "formals",
+                                                                                                item: 0,
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                    (
+                                                                        block: (
+                                                                            id: 109,
+                                                                            opcode: "-",
+                                                                            lists: {
+                                                                                "z": [
+                                                                                    (
+                                                                                        block: (
+                                                                                            id: 286,
+                                                                                            opcode: "variable",
+                                                                                            inputs: {
+                                                                                                "variable": (
+                                                                                                    literal: "i",
+                                                                                                ),
+                                                                                            },
+                                                                                            refers: (
+                                                                                                block: 100,
+                                                                                                slot: (
+                                                                                                    input: "formals",
+                                                                                                    item: 1,
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                    (
+                                                                                        literal: "1",
+                                                                                    ),
+                                                                                ],
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                    (
+                                                                        block: (
+                                                                            id: 287,
+                                                                            opcode: "variable",
+                                                                            inputs: {
+                                                                                "variable": (
+                                                                                    literal: "peg",
+                                                                                ),
+                                                                            },
+                                                                            refers: (
+                                                                                block: 100,
+                                                                                slot: (
+                                                                                    input: "formals",
+                                                                                    item: 2,
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ],
+                                                            },
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                        "consequent": (
+                                            block: (
+                                                id: 103,
+                                                opcode: "cons",
+                                                inputs: {
+                                                    "car": (
+                                                        block: (
+                                                            id: 281,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "peg",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 100,
+                                                                slot: (
+                                                                    input: "formals",
+                                                                    item: 2,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                    "cdr": (
+                                                        block: (
+                                                            id: 104,
+                                                            opcode: "cdr",
+                                                            inputs: {
+                                                                "pair": (
+                                                                    block: (
+                                                                        id: 282,
+                                                                        opcode: "variable",
+                                                                        inputs: {
+                                                                            "variable": (
+                                                                                literal: "pegs",
+                                                                            ),
+                                                                        },
+                                                                        refers: (
+                                                                            block: 100,
+                                                                            slot: (
+                                                                                input: "formals",
+                                                                                item: 0,
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            },
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                        "test": (
+                                            block: (
+                                                id: 102,
+                                                opcode: "zero?",
+                                                inputs: {
+                                                    "z": (
+                                                        block: (
+                                                            id: 280,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "i",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 100,
+                                                                slot: (
+                                                                    input: "formals",
+                                                                    item: 1,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "pegs",
+                            ),
+                            (
+                                literal: "i",
+                            ),
+                            (
+                                literal: "peg",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+        (
+            pos: (24.0, 2160.0),
+            blocks: [
+                (
+                    id: 110,
+                    opcode: "define_procedure",
+                    inputs: {
+                        "variable": (
+                            literal: "tower",
+                        ),
+                    },
+                    lists: {
+                        "body": [
+                            (
+                                block: (
+                                    id: 111,
+                                    opcode: "if",
+                                    inputs: {
+                                        "alternate": (
+                                            block: (
+                                                id: 114,
+                                                opcode: "append",
+                                                lists: {
+                                                    "list": [
+                                                        (
+                                                            block: (
+                                                                id: 115,
+                                                                opcode: "call",
+                                                                inputs: {
+                                                                    "operator": (
+                                                                        block: (
+                                                                            id: 291,
+                                                                            opcode: "variable",
+                                                                            inputs: {
+                                                                                "variable": (
+                                                                                    literal: "tower",
+                                                                                ),
+                                                                            },
+                                                                            refers: (
+                                                                                block: 110,
+                                                                                slot: (
+                                                                                    input: "variable",
+                                                                                    item: None,
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                                lists: {
+                                                                    "operands": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 116,
+                                                                                opcode: "-",
+                                                                                lists: {
+                                                                                    "z": [
+                                                                                        (
+                                                                                            block: (
+                                                                                                id: 292,
+                                                                                                opcode: "variable",
+                                                                                                inputs: {
+                                                                                                    "variable": (
+                                                                                                        literal: "n",
+                                                                                                    ),
+                                                                                                },
+                                                                                                refers: (
+                                                                                                    block: 110,
+                                                                                                    slot: (
+                                                                                                        input: "formals",
+                                                                                                        item: 0,
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                        (
+                                                                                            literal: "1",
+                                                                                        ),
+                                                                                    ],
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        (
+                                                            block: (
+                                                                id: 117,
+                                                                opcode: "list",
+                                                                lists: {
+                                                                    "obj": [
+                                                                        (
+                                                                            block: (
+                                                                                id: 293,
+                                                                                opcode: "variable",
+                                                                                inputs: {
+                                                                                    "variable": (
+                                                                                        literal: "n",
+                                                                                    ),
+                                                                                },
+                                                                                refers: (
+                                                                                    block: 110,
+                                                                                    slot: (
+                                                                                        input: "formals",
+                                                                                        item: 0,
+                                                                                    ),
+                                                                                ),
+                                                                            ),
+                                                                        ),
+                                                                    ],
+                                                                },
+                                                            ),
+                                                        ),
+                                                    ],
+                                                },
+                                            ),
+                                        ),
+                                        "consequent": (
+                                            block: (
+                                                id: 113,
+                                                opcode: "list",
+                                            ),
+                                        ),
+                                        "test": (
+                                            block: (
+                                                id: 112,
+                                                opcode: "zero?",
+                                                inputs: {
+                                                    "z": (
+                                                        block: (
+                                                            id: 290,
+                                                            opcode: "variable",
+                                                            inputs: {
+                                                                "variable": (
+                                                                    literal: "n",
+                                                                ),
+                                                            },
+                                                            refers: (
+                                                                block: 110,
+                                                                slot: (
+                                                                    input: "formals",
+                                                                    item: 0,
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    ),
+                                                },
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                        ],
+                        "formals": [
+                            (
+                                literal: "n",
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        ),
+    ],
+)

@@ -466,6 +466,17 @@ mod tests {
     }
 
     #[test]
+    fn the_towers_of_hanoi_example_plays() {
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/towers-of-hanoi.scmb")).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let console = play(&mut runner(&language), &language, &program);
+        assert!(console.starts_with("> block-schemer untitled.scmb\nA: (3 2 1)\nB: ()\nC: ()\n\nMove disk 1 from A to C\n"), "{console}");
+        assert_eq!(console.matches("Move disk").count(), 7);
+        assert!(console.ends_with("A: ()\nB: ()\nC: (3 2 1)\n\nSolved!\n"), "{console}");
+    }
+
+    #[test]
     fn definitions_go_in_reading_order() {
         let (language, mut program, mut runner) = example();
         let define = |program: &mut Program, name: &str, value: &str, pos: [f32; 2]| {
