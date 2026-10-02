@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "block-parse"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "ron",
  "serde",
@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "block-parse-gui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "block-parse",
  "clap",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "block-schemer"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "block-parse",
  "block-parse-gui",
