@@ -3,18 +3,11 @@
 //! else is a problem in the AST. Strings are escaped here; datum and symbol
 //! literals were checked by [`literals`](crate::literals) and go out as typed.
 
-use block_parse::ast::{Expr, Node, ProblemCode, Script, Stmt};
+use block_parse::ast::{Expr, Node, Script, Stmt};
 use block_parse::language::{BlockDef, Part};
 use block_parse::{Language, Value};
 
 use crate::form::Form;
-
-const PROCEDURE: &str = "procedure";
-
-pub(crate) const SYNTAX: [&str; 12] = [
-    "program", "define", "define_procedure", "variable", "quote", "string", "call", "lambda", "if", "let", "binding",
-    "begin",
-];
 
 /// Blocks whose opcode is taken by another, by the Scheme name they call.
 const RENAMED: [(&str, &str); 1] = [("string_chars", "string")];
@@ -44,7 +37,6 @@ pub fn flat(language: &Language, script: &Script, harness: bool) -> Result<Strin
     Ok(forms.iter().map(Form::to_string).collect::<Vec<_>>().join("\n"))
 }
 
-/// Problems are refused where reached, not up front: `-` passed by name has too few items.
 fn forms(language: &Language, script: &Script, holes: bool, harness: bool) -> Result<Vec<Form>, String> {
     let mut forms = Vec::new();
     for statement in &script.body {
@@ -78,11 +70,18 @@ impl Generator<'_> {
         let many = |name: &str| self.list(def, node, name);
         let wrap = Form::List;
         let atom = Form::atom;
+        if node.named {
+            return match node.opcode.as_str() {
+                "procedure_call" => one("variable"),
+                opcode => Ok(atom(scheme_name(opcode))),
+            };
+        }
         Ok(match node.opcode.as_str() {
             "program" => one("main")?,
             "string" => Form::Atom(self.text(node, "text")?),
             "variable" => one("variable")?,
             "call" => wrap([vec![one("operator")?], many("operands")?].concat()),
+            "procedure_call" => wrap([vec![one("variable")?], many("arguments")?].concat()),
             "binding" => wrap(vec![one("variable")?, one("init")?]),
             "define_procedure" => {
                 let head = wrap([vec![one("variable")?], many("formals")?].concat());
@@ -95,11 +94,12 @@ impl Generator<'_> {
             }
             opcode => {
                 let mut parts = vec![atom(scheme_name(opcode))];
+                // What the call hides is not in the node.
                 for part in &def.parts {
                     match part {
-                        Part::Input(input) => parts.push(one(&input.name)?),
-                        Part::List(list) => parts.extend(many(&list.name)?),
-                        Part::Label(_) | Part::Branch(_) => {}
+                        Part::Input(input) if node.arg(&input.name).is_some() => parts.push(one(&input.name)?),
+                        Part::List(list) if node.list(&list.name).is_some() => parts.extend(many(&list.name)?),
+                        Part::Input(_) | Part::List(_) | Part::Label(_) | Part::Branch(_) => {}
                     }
                 }
                 wrap(parts)
@@ -139,17 +139,8 @@ impl Generator<'_> {
 
     /// `name` is the input or list `expr` fills, for its hole.
     fn expr(&self, expr: &Expr, ty: Option<&str>, name: &str) -> Result<Form, String> {
-        let by_name = ty == Some(PROCEDURE);
         match expr {
             Expr::Literal(value) => literal(value, ty),
-            Expr::Node(node) if by_name && let Some(form) = self.reference(node) => Ok(form),
-            Expr::Problem(problem)
-                if by_name
-                    && problem.code == ProblemCode::TooFewItems
-                    && let Some(form) = problem.recovered.as_deref().and_then(|node| self.reference(node)) =>
-            {
-                Ok(form)
-            }
             Expr::Node(node) => self.node(node),
             Expr::Convert { value, .. } => self.expr(value, ty, name),
             Expr::Problem(problem) if self.holes => match &problem.recovered {
@@ -160,17 +151,6 @@ impl Generator<'_> {
         }
     }
 
-    /// The name of a procedure block with nothing filled in.
-    fn reference(&self, node: &Node) -> Option<Form> {
-        let def = self.language.block(&node.opcode)?;
-        let blank = |expr: &Expr| {
-            matches!(expr, Expr::Problem(problem) if problem.block.is_none() && problem.recovered.is_none())
-        };
-        let bare = !SYNTAX.contains(&node.opcode.as_str())
-            && def.inputs().all(|input| node.arg(&input.name).is_none_or(blank))
-            && def.lists().all(|list| node.list(&list.name).is_none_or(<[Expr]>::is_empty));
-        bare.then(|| Form::atom(scheme_name(&node.opcode)))
-    }
 }
 
 pub(crate) fn scheme_name(opcode: &str) -> &str {
@@ -216,7 +196,7 @@ pub fn string(text: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use block_parse::program::{Input, Program, Slot, Stack};
+    use block_parse::program::{Input, Program, Reach, Slot, Stack};
     use block_parse::Block;
 
     struct Builder {
@@ -378,7 +358,7 @@ mod tests {
         assert_eq!(b.code(chars), Ok("(string #\\a)".into()));
 
         let mut map = b.block("string-map");
-        let by_name = b.block("string_chars");
+        let by_name = named(b.block("string_chars"));
         set(&mut map, Slot::input("proc"), plug(by_name));
         set(&mut map, item("strings"), text("s"));
         assert_eq!(b.code(map), Ok("(string-map string s)".into()));
@@ -414,35 +394,61 @@ mod tests {
         assert!(b.code(minus).is_err(), "`-` needs an operand");
     }
 
+    fn named(mut block: Block) -> Block {
+        block.reach = Some(Reach::Name);
+        block
+    }
+
     #[test]
-    fn bare_procedure_blocks_in_procedure_slots_are_passed_by_name() {
+    fn named_blocks_go_out_by_name() {
         let mut b = Builder::new();
         let mut items = b.block("list");
         set(&mut items, item("obj"), text("1"));
         set(&mut items, item("obj"), text("2"));
         let mut fold = b.block("fold");
-        let add = b.block("+");
+        let add = named(b.block("+"));
         set(&mut fold, Slot::input("kons"), plug(add));
         let empty = b.block("list");
         set(&mut fold, Slot::input("knil"), plug(empty));
         set(&mut fold, Slot::input("clist"), plug(items));
-        assert_eq!(b.code(fold), Ok("(fold + (list) (list 1 2))".into()), "only the procedure slot passes by name");
-
-        let mut map = b.block("map");
-        let car = b.block("car");
-        set(&mut map, Slot::input("proc"), plug(car));
-        set(&mut map, item("lists"), text("xs"));
-        assert_eq!(b.code(map), Ok("(map car xs)".into()), "a blank input counts as bare");
+        assert_eq!(b.code(fold), Ok("(fold + (list) (list 1 2))".into()), "a round block is called");
 
         let mut call = b.block("call");
-        let minus = b.block("-");
+        let minus = named(b.block("-"));
         set(&mut call, Slot::input("operator"), plug(minus));
         set(&mut call, item("operands"), text("5"));
-        assert_eq!(b.code(call), Ok("(- 5)".into()), "too few items is no problem by name");
+        assert_eq!(b.code(call), Ok("(- 5)".into()), "a name needs no items");
+
+        let mut items = b.block("list");
+        let car = named(b.block("car"));
+        set(&mut items, item("obj"), plug(car));
+        assert_eq!(b.code(items), Ok("(list car)".into()), "in any slot");
     }
 
     #[test]
-    fn filled_or_syntax_blocks_in_procedure_slots_are_still_generated() {
+    fn an_empty_procedure_dropped_in_a_procedure_slot_is_named() {
+        use block_parse::edit::{Fragment, Target};
+
+        let mut b = Builder::new();
+        let map = b.block("map");
+        let map_id = map.id;
+        b.program.stacks.push(Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![map],
+        });
+        let car = b.block("car");
+        let target = Target::Input {
+            parent: map_id,
+            slot: Slot::input("proc"),
+        };
+        b.program.attach(&b.language, Fragment { blocks: vec![car] }, target).unwrap();
+        b.program.set_literal(map_id, &item("lists"), "xs".into());
+        let run = b.program.script_at(&b.language, map_id).unwrap();
+        assert_eq!(script(&b.language, &run), Ok("(map car xs)".into()));
+    }
+
+    #[test]
+    fn a_round_block_in_a_procedure_slot_is_called_for_its_procedure() {
         let mut b = Builder::new();
         let mut adder = b.block("+");
         set(&mut adder, item("z"), text("1"));
@@ -454,7 +460,49 @@ mod tests {
         let lambda = b.block("lambda");
         set(&mut apply, Slot::input("proc"), plug(lambda));
         set(&mut apply, item("args"), text("xs"));
-        assert!(b.code(apply).is_err(), "an empty lambda is not a name");
+        assert!(b.code(apply).is_err(), "an empty lambda is no name");
+    }
+
+    #[test]
+    fn a_call_hiding_a_parameter_is_refused_but_inspected() {
+        let mut b = Builder::new();
+        let mut fold = b.block("fold");
+        set(&mut fold, Slot::input("kons"), text("+"));
+        fold.reach = Some(Reach::Call(1));
+        let refused = b.code(fold.clone()).unwrap_err();
+        assert!(refused.contains("without `knil`"), "{refused}");
+        assert_eq!(b.pretty(fold), Ok("(fold +)".into()));
+    }
+
+    #[test]
+    fn a_procedure_reference_calls_its_procedure_with_an_argument_per_parameter() {
+        let mut b = Builder::new();
+        let mut define = b.block("define_procedure");
+        set(&mut define, Slot::input("variable"), text("square"));
+        set(&mut define, item("formals"), text("x"));
+        set(&mut define, item("body"), text("x"));
+        let define_id = define.id;
+        b.program.stacks.push(Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![define],
+        });
+        let name = block_parse::Declaration {
+            block: define_id,
+            slot: Slot::input("variable"),
+        };
+        let mut square = |reach: Option<Reach>, argument: Option<&str>| {
+            let mut square = b.program.reference(&b.language, &name).unwrap();
+            assert_eq!(square.opcode, "procedure_call");
+            square.reach = reach;
+            if let Some(argument) = argument {
+                set(&mut square, item("arguments"), text(argument));
+            }
+            b.pretty(square)
+        };
+        assert_eq!(square(None, Some("3")), Ok("(square 3)".into()));
+        assert_eq!(square(None, None), Ok("(square <arguments>)".into()), "an argument per parameter");
+        assert_eq!(square(Some(Reach::Call(0)), None), Ok("(square)".into()), "refused when run, as Scheme would");
+        assert_eq!(square(Some(Reach::Name), None), Ok("square".into()));
     }
 
     #[test]

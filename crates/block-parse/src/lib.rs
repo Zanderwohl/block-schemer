@@ -9,6 +9,7 @@
 //! No geometry here: only stack positions are stored.
 
 pub mod ast;
+mod calls;
 mod build;
 pub mod edit;
 pub mod history;
@@ -26,7 +27,7 @@ pub use host::{
 };
 pub use edit::{Fragment, Location, Target};
 pub use history::History;
-pub use language::{BlockDef, BlockKind, CategoryColor, Fit, Language, ScopeConfig};
+pub use language::{BlockDef, BlockKind, Callable, CategoryColor, Extent, Fit, Language, ScopeConfig, SignatureConfig};
 pub use literal::{LiteralValidator, Validators};
-pub use program::{Block, BlockId, Declaration, Input, Program, Slot, Stack};
+pub use program::{Block, BlockId, Declaration, Input, Program, Reach, Slot, Stack};
 pub use value::Value;

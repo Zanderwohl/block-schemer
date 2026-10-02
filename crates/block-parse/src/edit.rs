@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::language::{BlockKind, Fit, Language, is_blank};
-use crate::program::{Block, BlockId, Declaration, MAX_DEPTH, Program, Slot, Stack, find_in};
+use crate::language::{BlockKind, Callable, Fit, Language, is_blank};
+use crate::program::{Block, BlockId, Declaration, MAX_DEPTH, Program, Reach, Slot, Stack, find_in};
 
 /// Blocks out of the program: a statement and everything below it, or one
 /// reporter.
@@ -150,7 +150,10 @@ impl Program {
                     None => owner_def.and_then(|def| def.input(&slot.input)).map(|input| &input.ty),
                     Some(index) => owner_def
                         .and_then(|def| def.list(&slot.input))
-                        .filter(|_| index <= owner.list_len(&slot.input, lifted))
+                        .filter(|_| match self.arguments_shown(language, owner, &slot.input) {
+                            Some(shown) => index < shown,
+                            None => index <= owner.list_len(&slot.input, lifted),
+                        })
                         .map(|list| &list.ty),
                 };
                 let ty = ty.ok_or_else(|| AttachError::NoSuchInput {
@@ -240,15 +243,27 @@ impl Program {
     }
 
     /// Returns any reporter pushed out of an occupied slot, for the caller to
-    /// drop somewhere. On failure the fragment is handed back untouched.
+    /// drop somewhere. On failure the fragment is handed back untouched. A
+    /// callable block with nothing filled in goes into a `by_name` slot as
+    /// its name.
     pub fn attach(
         &mut self,
         language: &Language,
-        fragment: Fragment,
+        mut fragment: Fragment,
         target: Target,
     ) -> Result<Option<Fragment>, (AttachError, Fragment)> {
         if let Err(error) = self.can_attach(language, &fragment, &target) {
             return Err((error, fragment));
+        }
+        if let Target::Input { parent, slot } = &target
+            && self.names(language, *parent, slot)
+            && let Some(head) = fragment.blocks.first_mut()
+        {
+            let arity = self.arity(language, head);
+            let extent = language.block(&head.opcode).and_then(|def| def.extent(head, arity));
+            if extent.is_some_and(|extent| extent.filled == 0) {
+                head.reach = Some(Reach::Name);
+            }
         }
         self.reserve_ids(&fragment.blocks);
         let blocks = fragment.blocks;
@@ -275,7 +290,7 @@ impl Program {
             Target::Input { parent, slot } => {
                 let owner = self.find_mut(parent).expect("checked by can_attach");
                 let reporter = blocks.into_iter().next().expect("checked by can_attach");
-                let slot = owner.slot_entry(&slot).expect("checked by can_attach");
+                let slot = owner.slot_entry(&slot);
                 let ejected = slot.block.replace(Box::new(reporter));
                 return Ok(ejected.map(|block| Fragment {
                     blocks: vec![*block],
@@ -283,6 +298,22 @@ impl Program {
             }
         }
         Ok(None)
+    }
+
+    /// How many argument slots a procedure reference shows in `list`, stored
+    /// or not; it has no empty slot to grow it.
+    fn arguments_shown(&self, language: &Language, owner: &Block, list: &str) -> Option<usize> {
+        let def = language.block(&owner.opcode).filter(|_| owner.refers.is_some())?;
+        let arguments = matches!(&def.callable, Some(Callable::Arguments(name)) if name == list);
+        Some(def.extent(owner, self.arity(language, owner)).filter(|_| arguments)?.shown)
+    }
+
+    /// The slot's type leaves callable blocks there as their names.
+    fn names(&self, language: &Language, parent: BlockId, slot: &Slot) -> bool {
+        self.find(parent)
+            .and_then(|owner| language.block(&owner.opcode)?.slot_type(slot))
+            .and_then(|ty| language.ty(ty))
+            .is_some_and(|ty| ty.by_name)
     }
 
     /// A copy of a block and, for a statement, everything below it, with
@@ -345,7 +376,7 @@ impl Program {
         let removed = match self.locate(id)? {
             Location::Input { parent, slot } => {
                 let owner = self.find_mut(parent)?;
-                let removed = owner.slot_entry(&slot)?.block.take()?;
+                let removed = owner.slot_entry(&slot).block.take()?;
                 owner.trim_lists();
                 *removed
             }

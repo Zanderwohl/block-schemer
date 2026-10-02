@@ -36,8 +36,15 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     built in. A reporter fits a slot on an exact type match, or when the
     slot's type `accepts` it or the reporter's type `fits` the slot; the last
     two appear in the AST as `Expr::Convert`, and converting is the consumer's
-    job. A reporter keeps its own shape in a slot, unless the slot's type
-    has `reshape`, which draws it in the slot's.
+    job. A reporter keeps its own shape in a slot. A `callable` reporter
+    (by default, with the language's `callable`, every one whose spec
+    starts with a label) can be left as its name, square, or called with
+    its first `n` parameters; a call short of them is an `Arity` problem
+    unless the language is `curried`; its `shows` sets how many a fresh
+    one shows. One dropped empty into a slot whose
+    type is `by_name` becomes its name. A scope's `signature` makes its
+    name's references a procedure call with an argument slot per parameter,
+    hinted with the parameters' names (`documentation/07-calls.md`).
   - `literal`: literals are stored as typed and parsed when the AST is built,
     so invalid text stays in the program and shows as a problem. Built-in
     kinds (Float with e-notation, Integer, Number as an i64|f64 union,
@@ -48,10 +55,13 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     by stable `BlockId`, inputs/branches by name. Block positions inside a
     stack are derived, never stored. Loading is tolerant. A reference's
     `refers` names its `Declaration` (block and slot); its input copies the
-    name, which `set_literal` and loading keep in step.
+    name, which `set_literal` and loading keep in step. A callable block's
+    `reach` is `Name`, `Call(n)`, or `None` for every parameter; `load`
+    names a pre-version-4 file's empty procedures in by-name slots.
   - `edit`: tree operations by id (`detach`, `run_at`, `can_attach`,
-    `can_move`, `attach`, `reference`; `duplicate` points references inside
-    the copy at its own declarations). All connection rules live here so GUI and
+    `can_move`, `attach`, `reference`, `set_reach`, which never hides a
+    filled parameter; `duplicate` points references inside the copy at its
+    own declarations). All connection rules live here so GUI and
     headless tools agree.
   - `ast` (built by `Program::ast`): always a whole tree. Faults become
     `Problem` nodes in place (in `Stmt` or `Expr`), keeping what could be
@@ -60,7 +70,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     and branches) leave `is_clean` true. A reference outside its
     declaration's scope, or to one that is gone, is an `OutOfScope` problem
     with nothing recovered, as an empty slot; a blank declaring slot, and a
-    reference to one, are `Unnamed`. `Program::script_at` builds the
+    reference to one, are `Unnamed`. A named block's node is `named`, and a
+    call leaves out the parameters it hides. `Program::script_at` builds the
     same for what running one block covers.
   - `history`: `History`, undo and redo as a line of program states (stacks
     only, so ids are never reissued) with a cursor; recording while undone
@@ -94,7 +105,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   panel goes back where it came from. A declaring literal sits in a raised
   chip with a grip (≡) to its right; dragging the chip drags out a new
   reference, as from the palette, drawn in the declaring block's color, and
-  leaves the declaration where it is. The side panel shows the host's tabs in
+  leaves the declaration where it is. A callable block ends its first row
+  with a marker of the ways it can go (`⏴|⏵`, `⏴|`, `|⏵`); it or the
+  block's right end, shown by a ↔ cursor, is taken once the pointer moves
+  (a click there is the block's) and snaps through its stops, its left edge
+  fixed, settling as one step when let go. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
   to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
@@ -139,12 +154,14 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `snapshot` adds `--snapshot <program.scmb> <out.png> [--scale <n>]`
   (`cargo schemer-snapshot`), as the editor's, with its own validators. Its language is embedded; its
   `codegen` turns its blocks into Scheme, refusing a script with problems,
-  and escapes strings before Scheme sees them, and writes a procedure
-  block with nothing filled in by name in a square `procedure` slot
-  (`call`'s operator, `fold`, `map`, `apply`), which squares whatever is
-  plugged into it; `define`, `define …
-  _taking_`, `lambda` and `let` (through `binding`) are scopes whose
-  references are `variable` blocks, definitions' names global; Inspect shows the same code
+  and escapes strings before Scheme sees them, and writes a named block by
+  name; a procedure dropped empty into a `procedure` slot (`call`'s
+  operator, `fold`, `map`, `apply`) is named, and a round one there is
+  called for its procedure. Every procedure block is callable and syntax
+  opts out; Scheme does not curry. `define`, `define … _taking_`, `lambda`
+  and `let` (through `binding`) are scopes whose references are `variable`
+  blocks, definitions' names global, but a `define … _taking_`'s name
+  drags out a `procedure_call` with an argument per parameter; Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
   behind the `Scheme` trait so a WASM Scheme can replace it; `prelude.scm`
   evens out where Steel differs from R7RS, and every port without one
@@ -258,6 +275,8 @@ come from these.
   clipped and cannot be reached until others close. A scrolling strip or a
   menu of hidden tabs would fix it.
 - Runtime-supplied dropdowns (variables, procedures).
+- Calls: signatures for a `define` of a `lambda`; rest parameters; parameter
+  names for Inspect's missing arguments (`documentation/07-calls.md`).
 - Scopes: an internal `define`'s name is global like a top-level one's;
   showing or enforcing a reference's scope while it is dragged; flagging a
   name declared twice in one scope (`documentation/06-scopes.md`).

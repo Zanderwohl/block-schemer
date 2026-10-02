@@ -4,9 +4,13 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::edit::Location;
-use crate::language::{BlockDef, Language, Part, ron_options};
+use crate::language::{BlockDef, Language, Part, is_blank, ron_options};
 
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
+
+/// Before it, a procedure block with nothing filled in, in a `by_name` slot,
+/// was passed by name without saying so.
+const NAMES_REACH: u32 = 4;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
@@ -67,6 +71,17 @@ pub struct Block {
     /// declaration's literal and cannot be edited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refers: Option<Declaration>,
+    /// How much of a callable block shows; `None` is every parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach: Option<Reach>,
+}
+
+/// A callable block left as its name, or called with its first `n`
+/// parameters. See `documentation/07-calls.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Reach {
+    Name,
+    Call(usize),
 }
 
 /// A literal in a slot a scope `declares`: where a name is introduced.
@@ -186,7 +201,11 @@ impl Program {
     ) -> Result<(Self, Vec<LoadWarning>), ProgramError> {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path).map_err(ProgramError::Io)?;
-        let program = Self::from_ron(&text)?;
+        let mut program = Self::from_ron(&text)?;
+        if program.version < NAMES_REACH {
+            program.name_bare_procedures(language);
+            program.version = FORMAT_VERSION;
+        }
 
         let mut warnings = Vec::new();
         let found = path.extension().map(|ext| ext.to_string_lossy().into_owned());
@@ -208,6 +227,33 @@ impl Program {
             });
         }
         Ok((program, warnings))
+    }
+
+    /// What a file older than [`NAMES_REACH`] meant.
+    fn name_bare_procedures(&mut self, language: &Language) {
+        let mut bare = Vec::new();
+        self.each_block(|block| {
+            let Some(def) = language.block(&block.opcode) else { return };
+            let singles = block.inputs.iter().map(|(name, input)| (Slot::input(name.clone()), input));
+            let items = block.lists.iter().flat_map(|(name, items)| {
+                items.iter().enumerate().map(|(index, input)| (Slot::item(name.clone(), index), input))
+            });
+            for (slot, input) in singles.chain(items) {
+                let by_name = def.slot_type(&slot).and_then(|ty| language.ty(ty)).is_some_and(|ty| ty.by_name);
+                let Some(inner) = input.block.as_deref().filter(|inner| by_name && inner.reach.is_none()) else {
+                    continue;
+                };
+                let extent = language.block(&inner.opcode).and_then(|def| def.extent(inner, self.arity(language, inner)));
+                if extent.is_some_and(|extent| extent.filled == 0) {
+                    bare.push(inner.id);
+                }
+            }
+        });
+        for id in bare {
+            if let Some(block) = self.find_mut(id) {
+                block.reach = Some(Reach::Name);
+            }
+        }
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -246,6 +292,7 @@ impl Program {
             lists: BTreeMap::new(),
             branches: BTreeMap::new(),
             refers: None,
+            reach: def.shows.map(Reach::Call),
         };
         for part in &def.parts {
             match part {
@@ -303,16 +350,16 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// False if the block is gone, is a reference, or the slot is past a
-    /// list's empty slot. Emptying an item's text makes it a hole, so a field
-    /// keeps one address as its item comes and goes. References to the slot
-    /// follow the new text.
+    /// False if the block is gone, the slot is a reference's name, or the
+    /// slot is past a list's empty slot, which a procedure reference's
+    /// arguments do not have. Emptying an item's text makes it a hole, so a field keeps one address
+    /// as its item comes and goes. References to the slot follow the new text.
     pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let declaration = Declaration {
             block,
             slot: slot.clone(),
         };
-        let Some(block) = self.find_mut(block).filter(|block| block.refers.is_none()) else {
+        let Some(block) = self.find_mut(block).filter(|block| block.refers.is_none() || slot.item.is_some()) else {
             return false;
         };
         let Some(index) = slot.item else {
@@ -321,15 +368,15 @@ impl Program {
             return true;
         };
         let len = block.lists.get(&slot.input).map_or(0, Vec::len);
-        if index > len {
+        if index > len && block.refers.is_none() {
             return false;
         }
-        if index == len && text.is_empty() {
+        if index >= len && text.is_empty() {
             return true;
         }
         let items = block.lists.entry(slot.input.clone()).or_default();
-        if index == len {
-            items.push(Input::default());
+        if index >= len {
+            items.resize(index + 1, Input::default());
         }
         items[index].literal = (!text.is_empty()).then(|| text.clone());
         block.trim_lists();
@@ -342,6 +389,39 @@ impl Program {
     pub fn declared_name(&self, declaration: &Declaration) -> Option<&str> {
         let input = self.find(declaration.block)?.slot(&declaration.slot)?;
         input.block.is_none().then_some(input.literal.as_deref()).flatten()
+    }
+
+    /// The parameters of the procedure `declaration` names, if it names one,
+    /// a blank one as "Unnamed parameter 2".
+    pub fn parameters(&self, language: &Language, declaration: &Declaration) -> Option<Vec<String>> {
+        let owner = self.find(declaration.block)?;
+        let def = language.block(&owner.opcode)?;
+        def.signature_for(&declaration.slot.input)?;
+        owner.parameter_names(def)
+    }
+
+    pub fn arity(&self, language: &Language, block: &Block) -> Option<usize> {
+        Some(self.parameters(language, block.refers.as_ref()?)?.len())
+    }
+
+    /// False unless `id` is callable and can take `reach`: never one hiding
+    /// a parameter that holds something. Showing every parameter is stored
+    /// as `None`, so a reference keeps up with its procedure's.
+    pub fn set_reach(&mut self, language: &Language, id: BlockId, reach: Option<Reach>) -> bool {
+        let Some(block) = self.find(id) else { return false };
+        let arity = self.arity(language, block);
+        let Some(extent) = language.block(&block.opcode).and_then(|def| def.extent(block, arity)) else {
+            return false;
+        };
+        let reach = match reach {
+            Some(Reach::Call(n)) if n == extent.parameters => None,
+            reach => reach,
+        };
+        if !extent.stops().contains(&reach) {
+            return false;
+        }
+        self.find_mut(id).expect("found above").reach = reach;
+        true
     }
 
     fn rename(&mut self, declaration: &Declaration, name: &str) {
@@ -392,6 +472,18 @@ impl Block {
         }
     }
 
+    pub fn parameter_names(&self, def: &BlockDef) -> Option<Vec<String>> {
+        let list = &def.scope.as_ref()?.signature.as_ref()?.parameters;
+        let items = self.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);
+        let named = |index: usize, item: &Input| {
+            item.literal
+                .clone()
+                .filter(|text| item.block.is_none() && !is_blank(text))
+                .unwrap_or_else(|| def.unnamed(&Slot::item(list.clone(), index)))
+        };
+        Some(items.iter().enumerate().map(|(index, item)| named(index, item)).collect())
+    }
+
     /// The blocks whose local names this block's scope covers: itself, and
     /// those plugged into its declaring slots that hand their names on.
     pub fn scope_blocks(&self, language: &Language) -> Vec<BlockId> {
@@ -421,19 +513,17 @@ impl Block {
         }
     }
 
-    /// An item past a list's end is created at the empty slot, never beyond.
-    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> Option<&mut Input> {
+    /// An item past a list's end is created, after holes; callers check
+    /// that the slot is one the block shows.
+    pub(crate) fn slot_entry(&mut self, slot: &Slot) -> &mut Input {
         match slot.item {
-            None => Some(self.inputs.entry(slot.input.clone()).or_default()),
+            None => self.inputs.entry(slot.input.clone()).or_default(),
             Some(index) => {
-                if index > self.lists.get(&slot.input).map_or(0, Vec::len) {
-                    return None;
-                }
                 let items = self.lists.entry(slot.input.clone()).or_default();
-                if index == items.len() {
-                    items.push(Input::default());
+                if index >= items.len() {
+                    items.resize(index + 1, Input::default());
                 }
-                items.get_mut(index)
+                &mut items[index]
             }
         }
     }

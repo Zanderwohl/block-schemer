@@ -3,10 +3,10 @@
 use block_parse::Language;
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, Shape};
-use block_parse::program::{BlockId, Declaration, Program, Slot};
+use block_parse::program::{BlockId, Declaration, Program, Reach, Slot};
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
-use crate::layout::{Run, SNAP_RADIUS, Scene};
+use crate::layout::{Layout, Run, SNAP_RADIUS, Scene};
 use crate::paint::Transform;
 
 /// Screen pixels the pointer must travel before a press becomes a drag, so a
@@ -24,6 +24,55 @@ pub enum Gesture {
     /// Moving a panel's edge; `grab` is the pointer's x minus the edge's at
     /// the press, so the edge does not jump.
     Resizing { edge: Edge, grab: f32 },
+    /// Moving a callable block's right end.
+    Reaching(Reaching),
+}
+
+/// Canvas units at a callable reporter's right end that grab it.
+pub const REACH_GRIP: f32 = 6.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reaching {
+    pub block: BlockId,
+    /// The block's left edge, canvas units; it stays put.
+    pub left: f32,
+    /// Narrowest first.
+    pub stops: Vec<(Option<Reach>, f32)>,
+    /// The pointer's x minus the right end's at the press.
+    pub grab: f32,
+    /// Changed the program, so the gesture settles as one step.
+    pub moved: bool,
+}
+
+impl Reaching {
+    /// True if the program changed.
+    pub fn follow(&mut self, language: &Language, program: &mut Program, x: f32) -> bool {
+        let distance = |width: f32| (self.left + width - (x - self.grab)).abs();
+        let nearest = self.stops.iter().min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)));
+        let changed = nearest.is_some_and(|&(reach, _)| {
+            program.find(self.block).is_some_and(|block| block.reach != reach)
+                && program.set_reach(language, self.block, reach)
+        });
+        self.moved |= changed;
+        changed
+    }
+}
+
+/// The right end or ⏴|⏵ of a callable block at `point`, canvas units, if
+/// it has more than one stop.
+pub fn reach_at(layout: &Layout, scene: &Scene, program: &Program, point: Pos2) -> Option<Reaching> {
+    let on_marker = |rect: Rect| rect.expand(REACH_GRIP / 2.0).contains(point);
+    let hit = scene
+        .hit(point)
+        .filter(|hit| point.x >= hit.rect.max.x - REACH_GRIP || hit.reach.is_some_and(on_marker))?;
+    let stops = layout.stops(program.find(hit.id)?);
+    (stops.len() > 1).then_some(Reaching {
+        block: hit.id,
+        left: hit.rect.min.x,
+        stops,
+        grab: point.x - hit.rect.max.x,
+        moved: false,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +100,20 @@ pub enum Pressed {
     /// A declaring slot's grip. `top_left` in canvas units, where the
     /// reference starts.
     Handle { declaration: Declaration, top_left: Pos2 },
+    /// A callable block's right end: moving takes the edge, and not moving
+    /// is a click on the block.
+    Reach(Reaching),
+}
+
+impl Pressed {
+    /// The block a release without moving clicks.
+    pub fn clicked(&self) -> Option<BlockId> {
+        match self {
+            Self::Block { id, .. } => Some(*id),
+            Self::Reach(reaching) => Some(reaching.block),
+            Self::Palette { .. } | Self::Handle { .. } => None,
+        }
+    }
 }
 
 /// A canvas run stays in the program until dropped, so the program is always
@@ -177,6 +240,7 @@ pub fn find_snap(
 /// threshold.
 pub fn start_drag(press: Press, language: &Language, program: &mut Program, t: Transform, read_only: bool) -> Gesture {
     match press.on {
+        Pressed::Reach(reaching) => Gesture::Reaching(reaching),
         Pressed::Palette { opcode, top_left } => {
             let Some(block) = program.instantiate(language, &opcode) else {
                 return Gesture::Idle;

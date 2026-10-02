@@ -42,11 +42,15 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   far as it parsed, and leaves out a statement with nothing to recover. The text
   of a `string` block is escaped here; control characters other than
   newline, tab and return are refused.
-  A `procedure` slot (Call's operator, and `apply`, `map` and `fold`'s
-  procedure) takes a procedure block with nothing filled in by name: Add
-  there is `+`, not `(+)`, so one block serves both. Syntax blocks (`if`,
-  `lambda`, …) never pass by name. Too few items is no problem by name, so
-  problems are refused as generation reaches them rather than up front.
+  A named block goes out as its name: a square Add is `+`, a round one
+  `(+)`. A procedure dropped with nothing filled in into a `procedure` slot
+  (Call's operator, and `apply`, `map` and `fold`'s procedure) is named
+  there; a round block in one is called, and its result is the procedure.
+  Syntax blocks (`if`, `lambda`, …) are not callable. A `define … taking`'s
+  name drags out a `procedure_call`, an argument slot per parameter; a call
+  showing fewer is an arity problem, as Scheme does not curry
+  (`documentation/07-calls.md`). Input and output procedures start with
+  their optional `port` hidden (`shows`).
 - `form`: generated code as a tree of atoms and lists, printed on one line
   to run or laid out to read. Forms that fit stay on one line; `define`,
   `lambda`, `let` and the like keep their first argument on the head's line

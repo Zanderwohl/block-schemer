@@ -352,8 +352,9 @@ mod tests {
         let missing: Vec<&str> = language
             .blocks()
             .iter()
+            .filter(|block| block.callable == Some(block_parse::Callable::Parts))
             .map(|block| block.opcode.as_str())
-            .filter(|opcode| !crate::codegen::SYNTAX.contains(opcode) && !PARAMETERS.contains(opcode))
+            .filter(|opcode| !PARAMETERS.contains(opcode))
             .map(crate::codegen::scheme_name)
             .filter(|name| !is_true(&mut steel, &format!("(procedure? {name})")))
             .collect();

@@ -39,6 +39,8 @@ pub struct PlacedBlock {
     pub switch: Option<Rect>,
     /// A later stack lies over the switch, so it is drawn but not live.
     pub switch_covered: bool,
+    /// A callable block's ⏴|⏵, which grabs its right end.
+    pub reach: Option<Rect>,
     pub depth: u16,
 }
 

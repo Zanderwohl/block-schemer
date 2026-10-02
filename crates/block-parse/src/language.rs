@@ -7,6 +7,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::calls;
+pub use crate::calls::{Callable, Extent};
 use crate::literal::{self, Validators};
 use crate::spec::{self, Arity, SpecPart};
 use crate::value::Value;
@@ -35,6 +37,15 @@ pub struct LanguageConfig {
     /// `None` offers no filter: every block shows.
     #[serde(default)]
     pub checked_tags: Option<Vec<String>>,
+    /// Every reporter whose spec starts with a label is callable unless it
+    /// says `callable: false` (`documentation/07-calls.md`).
+    #[serde(default)]
+    pub callable: bool,
+    /// A call may give fewer arguments than its procedure has parameters,
+    /// or more, the rest going to the procedure it returns. Otherwise
+    /// either is an `Arity` problem.
+    #[serde(default)]
+    pub curried: bool,
 }
 
 /// The extension of this language's program files. Only a name for consumers
@@ -60,9 +71,10 @@ pub struct TypeConfig {
     /// values typed only at run time, such as a variable getter's.
     #[serde(default)]
     pub fits: TypeSet,
-    /// Reporters in this type's slots take its shape instead of their own.
+    /// A callable block dropped into this type's slots with nothing filled
+    /// in is left as its name.
     #[serde(default)]
-    pub reshape: bool,
+    pub by_name: bool,
 }
 
 /// One side of type compatibility. A reporter fits a slot when the types are
@@ -122,6 +134,13 @@ pub struct BlockConfig {
     /// `documentation/06-scopes.md`.
     #[serde(default)]
     pub scope: Option<ScopeConfig>,
+    /// Overrides the language's `callable` for this block.
+    #[serde(default)]
+    pub callable: Option<bool>,
+    /// How many of a callable block's parameters a fresh one shows; all of
+    /// them otherwise.
+    #[serde(default)]
+    pub shows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -144,6 +163,22 @@ pub struct ScopeConfig {
     /// editable.
     #[serde(default)]
     pub reference: Option<String>,
+    /// A declared name that is a procedure's, whose references show its
+    /// parameters.
+    #[serde(default)]
+    pub signature: Option<SignatureConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SignatureConfig {
+    /// Of `declares`, the single input holding the procedure's name.
+    pub name: String,
+    /// Of `declares`, the list holding its parameters' names.
+    pub parameters: String,
+    /// The reporter dragged out of the name, in place of the scope's
+    /// `reference`: one input, of the name's type, then one list, which
+    /// holds an argument per parameter.
+    pub reference: String,
 }
 
 const COLOR_RANGE: &str = "hue 0..360, chroma 0..=0.37, lightness 0..=1";
@@ -248,6 +283,7 @@ pub struct Language {
     by_opcode: HashMap<String, usize>,
     tags: Vec<String>,
     checked_tags: Option<Vec<String>>,
+    curried: bool,
     /// Every `Custom` literal is resolved here, or the language fails to compile.
     validators: Validators,
 }
@@ -265,7 +301,7 @@ pub struct TypeDef {
     pub literal: LiteralKind,
     pub accepts: TypeSet,
     pub fits: TypeSet,
-    pub reshape: bool,
+    pub by_name: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -295,7 +331,11 @@ pub struct BlockDef {
     pub color: Option<CategoryColor>,
     pub layout: BlockLayout,
     pub scope: Option<ScopeConfig>,
+    pub callable: Option<Callable>,
+    /// Fewer parameters than it has, which a fresh block shows.
+    pub shows: Option<usize>,
 }
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Part {
@@ -473,11 +513,19 @@ impl BlockDef {
 
     /// The opcode of the reference to a name declared in `name`.
     pub fn reference_for(&self, name: &str) -> Option<&str> {
+        if let Some(signature) = self.signature_for(name) {
+            return Some(&signature.reference);
+        }
         self.scope
             .as_ref()
             .filter(|_| self.declares(name))
             .and_then(|scope| scope.reference.as_deref())
     }
+
+    pub fn signature_for(&self, name: &str) -> Option<&SignatureConfig> {
+        self.scope.as_ref()?.signature.as_ref().filter(|signature| signature.name == name)
+    }
+
 }
 
 impl Language {
@@ -527,6 +575,10 @@ impl Language {
 
     pub fn validators(&self) -> &Validators {
         &self.validators
+    }
+
+    pub fn curried(&self) -> bool {
+        self.curried
     }
 
     pub fn fit(&self, output: &str, slot: &str) -> Fit {
@@ -620,7 +672,7 @@ impl LanguageConfig {
                     literal: config.literal.clone(),
                     accepts: config.accepts.clone(),
                     fits: config.fits.clone(),
-                    reshape: config.reshape,
+                    by_name: config.by_name,
                 },
             );
         }
@@ -650,6 +702,7 @@ impl LanguageConfig {
 
         let mut blocks = Vec::new();
         let mut by_opcode = HashMap::new();
+        let mut refused = Vec::new();
         for config in self.blocks {
             let opcode = config.id.as_str();
             let at = Some(opcode);
@@ -768,6 +821,18 @@ impl LanguageConfig {
                 }
             }
 
+            // Judged once signatures are known, as a procedure reference is callable anyway.
+            let callable = calls::resolve(config.callable, &config.kind, &parts, self.callable)
+                .unwrap_or_else(|message| {
+                    refused.push((blocks.len(), message));
+                    None
+                });
+
+            let shows = calls::shows(config.shows, callable.as_ref(), &parts).unwrap_or_else(|message| {
+                problem(at, message);
+                None
+            });
+
             for name in config.hints.keys() {
                 if !parts.iter().any(|part| match part {
                     Part::Input(input) => &input.name == name,
@@ -791,17 +856,24 @@ impl LanguageConfig {
                 color: config.color,
                 layout: config.layout,
                 scope: config.scope,
+                callable,
+                shows,
             });
         }
 
+        let mut procedures = Vec::new();
         for def in &blocks {
             let at = Some(def.opcode.as_str());
             let Some(scope) = &def.scope else { continue };
-            let reference = scope.reference.as_ref().map(|opcode| {
-                let input = by_opcode
+            let reporter = |opcode: &str| {
+                by_opcode
                     .get(opcode)
                     .map(|&index| &blocks[index])
-                    .filter(|target| target.kind.output().is_some() && target.lists().next().is_none())
+                    .filter(|target| target.kind.output().is_some() && target.branches().next().is_none())
+            };
+            let reference = scope.reference.as_ref().map(|opcode| {
+                let input = reporter(opcode)
+                    .filter(|target| target.lists().next().is_none())
                     .and_then(|target| match target.inputs().collect::<Vec<_>>()[..] {
                         [only] => Some(only),
                         _ => None,
@@ -809,6 +881,14 @@ impl LanguageConfig {
                 if input.is_none() {
                     problem(at, format!("reference `{opcode}` must be a reporter with one input and no list"));
                 }
+                input
+            });
+            let signature = scope.signature.as_ref().map(|signature| {
+                let target = reporter(&signature.reference);
+                let (list, input) = calls::check_signature(def, scope, signature, target, &mut |message| {
+                    problem(at, message)
+                });
+                procedures.extend(list.map(|list| (by_opcode[&signature.reference], list)));
                 input
             });
             for name in &scope.declares {
@@ -821,6 +901,10 @@ impl LanguageConfig {
                     continue;
                 };
                 let named = types.get(ty).is_some_and(|ty| ty.literal != LiteralKind::None);
+                let reference = match &scope.signature {
+                    Some(procedure) if procedure.name == *name => signature,
+                    _ => reference,
+                };
                 match reference {
                     None if named => problem(at, format!("`{name}` declares names but the scope has no reference")),
                     Some(Some(input)) if named && input.ty != *ty => problem(
@@ -841,6 +925,15 @@ impl LanguageConfig {
                     problem(at, format!("scope over `{name}`, which is no input, list or branch"));
                 }
             }
+        }
+
+        for (index, message) in refused {
+            if !procedures.iter().any(|(procedure, _)| *procedure == index) {
+                problem(Some(&blocks[index].opcode), message.into());
+            }
+        }
+        for (index, list) in procedures {
+            blocks[index].callable = Some(Callable::Arguments(list));
         }
 
         let mut tags: Vec<String> = Vec::new();
@@ -871,6 +964,7 @@ impl LanguageConfig {
             by_opcode,
             tags,
             checked_tags: self.checked_tags,
+            curried: self.curried,
             validators: validators.clone(),
         })
     }
