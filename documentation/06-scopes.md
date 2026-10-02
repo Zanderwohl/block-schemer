@@ -25,7 +25,8 @@ it.
 - `declares`: inputs and lists whose literals are names. Each literal item of
   a list is a name of its own.
 - `over`: inputs, lists and branches where the names may be used, at any
-  depth. A declaring slot is never in its own scope.
+  depth. A declaring slot may be among them, which matters only for blocks
+  in it: a `letrec`'s bindings see each other's names, and their own.
 - `global`: of `declares`, those whose names may be used anywhere in the
   program, as a top-level definition's. Block Schemer's `define` and the
   procedure name of `define … _taking_` are global; the formals are not.
@@ -36,7 +37,8 @@ it.
 A declaring slot may also hold a block. If that block's scope has neither
 `over` nor `global`, its names are handed to the block it is plugged into.
 That is how a `let` gets names from its `binding`s, and why a binding's
-`init` cannot see them:
+`init` cannot see them unless, as in `letrec`, the scope is over
+`bindings` too:
 
 ```ron
 (id: "let", spec: "let {bindings:binding*} {body:datum+}",

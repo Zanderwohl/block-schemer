@@ -1,6 +1,20 @@
 ;; Where Steel differs from R7RS. A Steel original this redefines is kept as
 ;; `__steel-<name>` by `scheme.rs`, run before this.
 
+;; Steel's `cond` gives nothing for a clause that is only a test, not the
+;; test's value. R7RS's own definition, but with `when` for a one-armed `if`.
+(define-syntax cond
+  (syntax-rules (else =>)
+    [(cond [else e1 e2 ...]) (begin e1 e2 ...)]
+    [(cond [test => receiver]) (let ([__cond-value test]) (when __cond-value (receiver __cond-value)))]
+    [(cond [test => receiver] clause1 clause2 ...)
+     (let ([__cond-value test]) (if __cond-value (receiver __cond-value) (cond clause1 clause2 ...)))]
+    [(cond [test]) test]
+    [(cond [test] clause1 clause2 ...)
+     (let ([__cond-value test]) (if __cond-value __cond-value (cond clause1 clause2 ...)))]
+    [(cond [test e1 e2 ...]) (when test e1 e2 ...)]
+    [(cond [test e1 e2 ...] clause1 clause2 ...) (if test (begin e1 e2 ...) (cond clause1 clause2 ...))]))
+
 ;; Steel's own `=` takes exactly two arguments.
 (define (= first . rest)
   (let loop ((a first) (rest rest))

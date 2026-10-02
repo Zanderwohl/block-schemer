@@ -71,7 +71,7 @@ impl Form {
         let Self::List(items) = self else { return None };
         match items.first() {
             Some(Self::Atom(head)) => match head.as_str() {
-                "define" | "lambda" | "let" | "let*" | "letrec" | "when" | "unless" => Some(1),
+                "define" | "lambda" | "let" | "let*" | "letrec" | "letrec*" | "when" | "unless" => Some(1),
                 "begin" => Some(0),
                 _ => None,
             },

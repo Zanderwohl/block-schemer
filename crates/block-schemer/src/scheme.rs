@@ -269,6 +269,19 @@ mod tests {
     }
 
     #[test]
+    fn letrec_and_cond_are_steels_too() {
+        let (mut steel, _) = steel();
+        let parity = "(letrec ((ev? (lambda (n) (if (zero? n) #t (od? (- n 1))))) \
+                              (od? (lambda (n) (if (zero? n) #f (ev? (- n 1)))))) \
+                       (list (ev? 10) (od? 7)))";
+        assert_eq!(steel.run(parity).unwrap(), "(#true #true)");
+        assert_eq!(steel.run("(letrec* ((a 1) (b (+ a 1))) (list a b))").unwrap(), "(1 2)");
+        let sign = "(map (lambda (x) (cond ((negative? x) 'minus) ((assv x '((0 . zero))) => cdr) (else 'plus))) '(-1 0 1))";
+        assert_eq!(steel.run(sign).unwrap(), "(minus zero plus)");
+        assert_eq!(steel.run("(list (cond (#f 1) (7)) (cond ((memv 2 '(1 2)))))").unwrap(), "(7 (2))", "a test alone gives its value");
+    }
+
+    #[test]
     fn reading_without_a_port_reads_the_console() {
         let (mut steel, console) = steel();
         for line in ["hello there", "(1 2", "3)", " é"] {

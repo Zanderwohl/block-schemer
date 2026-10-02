@@ -471,9 +471,9 @@ mod tests {
         let program = Program::from_ron(include_str!("../examples/towers-of-hanoi.scmb")).unwrap();
         assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
         let console = play(&mut runner(&language), &language, &program);
-        assert!(console.starts_with("> block-schemer untitled.scmb\nA: (3 2 1)\nB: ()\nC: ()\n\nMove disk 1 from A to C\n"), "{console}");
-        assert_eq!(console.matches("Move disk").count(), 7);
-        assert!(console.ends_with("A: ()\nB: ()\nC: (3 2 1)\n\nSolved!\n"), "{console}");
+        assert!(console.starts_with("> block-schemer untitled.scmb\nA: (5 4 3 2 1)\nB: ()\nC: ()\n\nMove disk 1 from A to C\n"), "{console}");
+        assert_eq!(console.matches("Move disk").count(), 31);
+        assert!(console.ends_with("A: ()\nB: ()\nC: (5 4 3 2 1)\n\nSolved!\n"), "{console}");
     }
 
     #[test]
