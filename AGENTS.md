@@ -93,8 +93,10 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   through egui_kittest's wgpu renderer; with it, `--command snapshot` (`cargo
   snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
   column per category, instead of opening the window.
-- `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
-  blocks run in Steel when double-clicked. Play, or double-clicking the one
+- `crates/block-schemer` — Block Schemer, a consumer: R7RS's standard
+  procedures (short of files, process, eval and mutating pairs and strings)
+  and a few of its forms, whose blocks run in Steel when double-clicked;
+  tagged `basics` for the most used and with their R7RS library. Play, or double-clicking the one
   `program` block, runs the canvas as one file in a fresh session: every
   `define` stack in reading order, then the program, into a Console tab
   after `> block-schemer <file>` (`untitled.scmb` until saved), the command
@@ -105,12 +107,14 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `__out` port that carries `display` to the console (`cargo schemer
   [program.scmb]`,
   `documentation/05-block-schemer.md`). Its language is embedded; its
-  `codegen` is the layer that refuses anything the language does not offer
+  `codegen` turns its blocks into Scheme, refusing a script with problems,
   and escapes strings before Scheme sees them, and writes a procedure
   block with nothing filled in by name in a square `procedure` slot
   (`call`'s operator, `fold`, `map`, `apply`); Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
-  behind the `Scheme` trait so a WASM Scheme can replace it. Every run goes
+  behind the `Scheme` trait so a WASM Scheme can replace it; `prelude.scm`
+  evens out where Steel differs from R7RS, and every port without one
+  given is the console's. Every run goes
   through a `dispatch::Dispatch`, which spawns, tracks and kills the workers
   that run Scheme off the UI thread: `dispatch::native` is one thread owning
   the session, replaced if it dies; Stop interrupts the run, drops the queue
@@ -228,6 +232,8 @@ call `block_parse_gui::snapshot::program`.
 - `dispatch::native` replaces a dead worker inside `poll`, on the UI
   thread: building Steel's prelude blocks a frame, and a `make` that panics
   takes the UI down with it.
+- Block Schemer: the rest of R7RS's syntax (`cond`, `and`, `let*`, `do`,
+  `guard`, …), and a maximum for a list of optional arguments.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a web build
   once a WASM Scheme replaces Steel, with a Web Worker `Dispatch`. A native
   run stuck outside Steel's safepoints cannot be interrupted; its worker
