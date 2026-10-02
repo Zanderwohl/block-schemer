@@ -1,7 +1,8 @@
 # steel-core 0.8.3, patched
 
 The crates.io release of `steel-core` 0.8.3 (MIT OR Apache-2.0,
-<https://github.com/mattwparas/steel>), without its tests and benches, with
+<https://github.com/mattwparas/steel>), without its `tests/` and `benches/`
+directories and their entries in `Cargo.toml` (`src/tests/` stays), with
 these changes, all for Block Schemer's console, whose input port waits for
 lines entered while a program runs:
 
@@ -13,7 +14,8 @@ lines entered while a program runs:
   interactive reader waits for input beyond the character peeked.
 - Reading a line, or the rest of a port, starts with the bytes a peek took
   out of the reader, which were lost; a peeked newline ends the line
-  without reading on.
+  without reading on. A part of a character `peek-u8` took is replaced by
+  U+FFFD, and the rest of it then fails the read as invalid UTF-8.
 - `#![allow(warnings)]` in `src/lib.rs`, since a path dependency's warnings
   are not capped as a registry one's are.
 
