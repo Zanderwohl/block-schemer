@@ -44,8 +44,9 @@ struct Terminal {
 struct TerminalState {
     running: Option<Ticket>,
     output: Vec<(Ticket, String)>,
-    /// Entered and not yet read; an empty one ends input.
-    input: VecDeque<String>,
+    /// Entered and not yet read, each with how many jobs had been sent, as
+    /// a line is only for those; an empty one ends input.
+    input: VecDeque<(u64, String)>,
     waiting: bool,
     stopped: bool,
 }
@@ -55,8 +56,8 @@ impl Terminal {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn enter(&self, line: String) {
-        self.state().input.push_back(line);
+    fn enter(&self, sent: u64, line: String) {
+        self.state().input.push_back((sent, line));
         self.entered.notify_all();
     }
 
@@ -87,7 +88,11 @@ impl Console for Terminal {
                 state.waiting = false;
                 return Err(io::Error::other(STOPPED));
             }
-            if let Some(line) = state.input.pop_front() {
+            let running = state.running.map_or(0, |ticket| ticket.0);
+            while state.input.front().is_some_and(|(sent, _)| *sent <= running) {
+                state.input.pop_front();
+            }
+            if let Some((_, line)) = state.input.pop_front() {
                 state.waiting = false;
                 return Ok(line);
             }
@@ -192,7 +197,13 @@ impl<S: Scheme + 'static> Dispatch for Native<S> {
         };
         let mut output = std::mem::take(&mut self.terminal.state().output);
         if crashed {
-            answers.extend(self.unanswered.iter().map(|ticket| (*ticket, Err(CRASHED.to_owned()))));
+            let crashed: Vec<Ticket> = self
+                .unanswered
+                .iter()
+                .filter(|ticket| !answers.iter().any(|(answered, _)| answered == *ticket))
+                .copied()
+                .collect();
+            answers.extend(crashed.into_iter().map(|ticket| (ticket, Err(CRASHED.to_owned()))));
             *self.terminal.state() = TerminalState::default();
             self.worker = Worker::spawn(self.make.clone(), self.generation.clone(), self.terminal.clone());
         }
@@ -205,9 +216,6 @@ impl<S: Scheme + 'static> Dispatch for Native<S> {
             events.push(Event::Done(ticket, answer));
         }
         events.extend(output.into_iter().map(|(from, text)| Event::Output(from, text)));
-        if self.unanswered.is_empty() {
-            self.terminal.state().input.clear();
-        }
         events
     }
 
@@ -220,11 +228,11 @@ impl<S: Scheme + 'static> Dispatch for Native<S> {
     }
 
     fn input(&mut self, line: &str) {
-        self.terminal.enter(line.to_owned());
+        self.terminal.enter(self.next, line.to_owned());
     }
 
     fn end_input(&mut self) {
-        self.terminal.enter(String::new());
+        self.terminal.enter(self.next, String::new());
     }
 
     fn stop(&mut self) {
@@ -347,6 +355,17 @@ mod tests {
     }
 
     #[test]
+    fn a_line_is_never_read_by_a_job_sent_after_it() {
+        let mut dispatch = Native::spawn(Steel::new);
+        dispatch.send(job("1", false));
+        dispatch.input("for the first\n");
+        dispatch.send(job("(read-line)", false));
+        wait_for_input(&mut dispatch);
+        dispatch.end_input();
+        assert_eq!(done(settle(&mut dispatch)).last().unwrap().1, Ok("(eof)".into()));
+    }
+
+    #[test]
     fn stopping_ends_a_read_waiting_for_input() {
         let mut dispatch = Native::spawn(Steel::new);
         dispatch.send(job("(read-line)", false));
@@ -411,6 +430,16 @@ mod tests {
         fn interrupter(&self) -> Arc<dyn Interrupt> {
             Arc::new(Unstoppable)
         }
+    }
+
+    #[test]
+    fn a_crash_after_an_answer_leaves_that_answer_alone() {
+        let mut dispatch = Native::spawn(|_| Fragile);
+        let fine = dispatch.send(job("fine", false));
+        let boom = dispatch.send(job("boom", false));
+        // Both in one poll: the answer, then the worker gone.
+        thread::sleep(Duration::from_millis(500));
+        assert_eq!(done(dispatch.poll()), [(fine, Ok(String::new())), (boom, Err(CRASHED.to_owned()))]);
     }
 
     #[test]

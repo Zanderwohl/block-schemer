@@ -45,8 +45,7 @@ pub trait Dispatch {
     fn waiting(&self) -> bool;
 
     /// A line entered on the console, newline included, for reads by the
-    /// jobs sent so far. Lines still unread when they are all answered are
-    /// dropped.
+    /// jobs sent so far; a job sent later never reads it.
     fn input(&mut self, line: &str);
 
     /// Ends input, so the next read that would wait sees end of file.
