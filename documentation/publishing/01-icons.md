@@ -91,8 +91,10 @@ about 10% margin, follow each `-resize` in the loop with
 - **The Windows executable:** `build.rs` embeds `block-schemer.ico` with
   `winresource` when building on Windows for Windows, so Explorer and
   shortcuts show it. Cross-compiling from another OS skips it.
-- **The macOS app:** `cargo install cargo-bundle`, then
-  `cargo bundle -p block-schemer --release` makes `Block Schemer.app` from
-  `[package.metadata.bundle]` in the crate's `Cargo.toml`, with the iconset
-  as its icon.
+- **The macOS app:** `cargo install cargo-bundle`, then, from
+  `crates/block-schemer`, `cargo bundle --release` makes `Block Schemer.app`
+  from `[package.metadata.bundle]` in the crate's `Cargo.toml`, with the
+  iconset as its icon. cargo-bundle matches the icon globs against the working
+  directory, so run from the workspace root it silently bundles no icon and the
+  Dock shows the generic one whenever the app is not running.
 - **The web version:** the favicon files, once there is one.
