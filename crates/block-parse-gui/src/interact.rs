@@ -24,8 +24,7 @@ pub enum Gesture {
     /// Moving a panel's edge; `grab` is the pointer's x minus the edge's at
     /// the press, so the edge does not jump.
     Resizing { edge: Edge, grab: f32 },
-    /// Moving a callable block's right end, showing more or fewer of its
-    /// parameters.
+    /// Moving a callable block's right end.
     Reaching(Reaching),
 }
 
@@ -37,7 +36,7 @@ pub struct Reaching {
     pub block: BlockId,
     /// The block's left edge, canvas units; it stays put.
     pub left: f32,
-    /// Each reach the block may take and its width there, narrowest first.
+    /// Narrowest first.
     pub stops: Vec<(Option<Reach>, f32)>,
     /// The pointer's x minus the right end's at the press.
     pub grab: f32,
@@ -46,8 +45,7 @@ pub struct Reaching {
 }
 
 impl Reaching {
-    /// Moves the block to the stop nearest the pointer's canvas `x`. True
-    /// if the program changed.
+    /// True if the program changed.
     pub fn follow(&mut self, language: &Language, program: &mut Program, x: f32) -> bool {
         let distance = |width: f32| (self.left + width - (x - self.grab)).abs();
         let nearest = self.stops.iter().min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)));
@@ -60,10 +58,13 @@ impl Reaching {
     }
 }
 
-/// The right end of a callable block at `point`, canvas units, if it has
-/// more than one stop.
+/// The right end or ⏴|⏵ of a callable block at `point`, canvas units, if
+/// it has more than one stop.
 pub fn reach_at(layout: &Layout, scene: &Scene, program: &Program, point: Pos2) -> Option<Reaching> {
-    let hit = scene.hit(point).filter(|hit| point.x >= hit.rect.max.x - REACH_GRIP)?;
+    let on_marker = |rect: Rect| rect.expand(REACH_GRIP / 2.0).contains(point);
+    let hit = scene
+        .hit(point)
+        .filter(|hit| point.x >= hit.rect.max.x - REACH_GRIP || hit.reach.is_some_and(on_marker))?;
     let stops = layout.stops(program.find(hit.id)?);
     (stops.len() > 1).then_some(Reaching {
         block: hit.id,

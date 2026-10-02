@@ -229,8 +229,7 @@ impl Program {
         Ok((program, warnings))
     }
 
-    /// What a file older than [`NAMES_REACH`] meant: every callable block
-    /// with nothing filled in, in a `by_name` slot, is named.
+    /// What a file older than [`NAMES_REACH`] meant.
     fn name_bare_procedures(&mut self, language: &Language) {
         let mut bare = Vec::new();
         self.each_block(|block| {
@@ -293,7 +292,7 @@ impl Program {
             lists: BTreeMap::new(),
             branches: BTreeMap::new(),
             refers: None,
-            reach: None,
+            reach: def.shows.map(Reach::Call),
         };
         for part in &def.parts {
             match part {
@@ -352,9 +351,8 @@ impl Program {
     }
 
     /// False if the block is gone, the slot is a reference's name, or the
-    /// slot is past a list's empty slot, except in a procedure reference's
-    /// arguments, which show one per parameter however many are stored.
-    /// Emptying an item's text makes it a hole, so a field keeps one address
+    /// slot is past a list's empty slot, which a procedure reference's
+    /// arguments do not have. Emptying an item's text makes it a hole, so a field keeps one address
     /// as its item comes and goes. References to the slot follow the new text.
     pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
         let declaration = Declaration {
@@ -402,7 +400,6 @@ impl Program {
         owner.parameter_names(def)
     }
 
-    /// How many arguments a reference to a procedure should give.
     pub fn arity(&self, language: &Language, block: &Block) -> Option<usize> {
         Some(self.parameters(language, block.refers.as_ref()?)?.len())
     }
@@ -475,7 +472,6 @@ impl Block {
         }
     }
 
-    /// The names in the list a scope's signature gives for its parameters.
     pub fn parameter_names(&self, def: &BlockDef) -> Option<Vec<String>> {
         let list = &def.scope.as_ref()?.signature.as_ref()?.parameters;
         let items = self.lists.get(list).map(Vec::as_slice).unwrap_or(&[]);

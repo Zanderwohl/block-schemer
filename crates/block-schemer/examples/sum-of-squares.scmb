@@ -31,7 +31,7 @@ Program(
                     (block: (id: 12, opcode: "binding", inputs: {"variable": (literal: "b"), "init": (literal: "4")})),
                 ],
                 "body": [
-                    (block: (id: 13, opcode: "display", inputs: {"obj": (block: (id: 14, opcode: "string", inputs: {"text": (literal: "hypotenuse squared:")}))})),
+                    (block: (id: 13, opcode: "display", reach: Call(1), inputs: {"obj": (block: (id: 14, opcode: "string", inputs: {"text": (literal: "hypotenuse squared:")}))})),
                     (block: (id: 15, opcode: "+", lists: {"z": [
                         (block: (id: 16, opcode: "*", lists: {"z": [
                             (block: (id: 103, opcode: "variable", inputs: {"variable": (literal: "a")}, refers: (block: 11, slot: (input: "variable")))),

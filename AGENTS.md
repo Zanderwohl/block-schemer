@@ -40,7 +40,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     (by default, with the language's `callable`, every one whose spec
     starts with a label) can be left as its name, square, or called with
     its first `n` parameters; a call short of them is an `Arity` problem
-    unless the language is `curried`. One dropped empty into a slot whose
+    unless the language is `curried`; its `shows` sets how many a fresh
+    one shows. One dropped empty into a slot whose
     type is `by_name` becomes its name. A scope's `signature` makes its
     name's references a procedure call with an argument slot per parameter,
     hinted with the parameters' names (`documentation/07-calls.md`).
@@ -104,10 +105,11 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   panel goes back where it came from. A declaring literal sits in a raised
   chip with a grip (≡) to its right; dragging the chip drags out a new
   reference, as from the palette, drawn in the declaring block's color, and
-  leaves the declaration where it is. A callable block's right end, shown
-  by a ↔ cursor, is taken once the pointer moves (a click there is the
-  block's) and snaps through its stops, its left edge fixed, settling as
-  one step when let go. The side panel shows the host's tabs in
+  leaves the declaration where it is. A callable block ends its first row
+  with a marker of the ways it can go (`⏴|⏵`, `⏴|`, `|⏵`); it or the
+  block's right end, shown by a ↔ cursor, is taken once the pointer moves
+  (a click there is the block's) and snaps through its stops, its left edge
+  fixed, settling as one step when let go. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
   to its right-hand neighbor. Closing is a request (`EditorEvent::CloseTab`);
@@ -273,8 +275,7 @@ come from these.
   clipped and cannot be reached until others close. A scrolling strip or a
   menu of hidden tabs would fix it.
 - Runtime-supplied dropdowns (variables, procedures).
-- Calls: a mark on a callable block's draggable end before it is hovered;
-  signatures for a `define` of a `lambda`; rest parameters; parameter
+- Calls: signatures for a `define` of a `lambda`; rest parameters; parameter
   names for Inspect's missing arguments (`documentation/07-calls.md`).
 - Scopes: an internal `define`'s name is global like a top-level one's;
   showing or enforcing a reference's scope while it is dragged; flagging a

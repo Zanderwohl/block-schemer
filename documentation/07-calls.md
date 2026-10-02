@@ -1,10 +1,13 @@
 # Calls
 
 A callable block is a procedure the user can call with all of its
-parameters, some of them, or none, or leave uncalled as its name. Dragging
-its right end (the cursor turns ↔) moves it through those stops, and the
-block's left edge stays put. The edge is taken once the pointer moves; a
-click there is a click on the block, and a second one runs it:
+parameters, some of them, or none, or leave uncalled as its name. A marker
+at the end of its first row says which ways it can go: ⏴ where it can show
+fewer parameters, ⏵ where more, as `⏴|⏵`, `⏴|` or `|⏵`. A block with one
+stop has none. Dragging the marker or the block's right end (the cursor
+turns ↔) moves it through those stops, and the block's left edge stays
+put. The edge is taken once the pointer moves; a click there is a click on
+the block, and a second one runs it:
 
 - **Name**: square, just the labels that name it. The procedure itself, not
   called: `+`.
@@ -25,6 +28,7 @@ types: {
 },
 blocks: [
     (id: "if", …, callable: false),
+    (id: "display", spec: "display {obj:datum} {port:datum*}", shows: 1),
 ],
 ```
 
@@ -38,6 +42,10 @@ blocks: [
   a message naming the missing parameter rather than leaving it to Scheme.
   A hidden list that may be empty (`*`) is no fault; that is how optional
   arguments are left off.
+- `shows` on a block: how many parameters a fresh one shows, from the
+  palette or anywhere else it is made; all of them otherwise. Only a
+  callable block takes it. Block Schemer hides the optional `port` of
+  every input and output procedure this way.
 - `by_name` on a type: a callable block dropped into its slots with nothing
   filled in becomes its name. One with something filled in stays a call,
   whose result is the procedure, so `((make-adder 1) 2)` is a round
@@ -100,8 +108,6 @@ that one is refused before it runs.
 
 ## Not yet
 
-- The edge shows only as a cursor; nothing marks a callable block's end
-  until it is hovered.
 - A `define` whose expression is a `lambda` has no signature, so its
   references are plain variables.
 - Rest parameters (`(define (f a . rest) …)`), which would let a reference

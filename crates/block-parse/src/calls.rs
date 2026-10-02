@@ -4,19 +4,15 @@
 use crate::language::{BlockDef, BlockKind, InputDef, Part, ScopeConfig, SignatureConfig, is_blank};
 use crate::program::{Block, Reach};
 
-/// What a callable block's parameters are. See `documentation/07-calls.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Callable {
-    /// Its inputs and lists in spec order, one parameter each, after the
-    /// labels that name it.
+    /// Its inputs and lists, one parameter each.
     Parts,
     /// A procedure reference's: this list, an item per parameter its
     /// declaration gives.
     Arguments(String),
 }
 
-/// How a callable block shows: called with its first `shown` parameters,
-/// or named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Extent {
     pub parameters: usize,
@@ -24,14 +20,13 @@ pub struct Extent {
     /// fewer.
     pub filled: usize,
     pub shown: usize,
-    /// Left as its name, not called; `shown` is then 0.
+    /// `shown` is then 0.
     pub named: bool,
 }
 
 impl BlockDef {
-    /// What a callable block shows with its first `shown` parameters. Labels
-    /// before a hidden parameter go with it; those before the first name the
-    /// block and always show.
+    /// Labels before a hidden parameter go with it; those before the first
+    /// name the block and always show.
     pub fn shown_parts(&self, shown: usize) -> &[Part] {
         if self.callable != Some(Callable::Parts) {
             return &self.parts;
@@ -108,7 +103,6 @@ impl Extent {
         name.into_iter().chain(calls).chain([None]).collect()
     }
 
-    /// The stop the block is at.
     pub fn reach(&self) -> Option<Reach> {
         match self.shown {
             _ if self.named => Some(Reach::Name),
@@ -136,7 +130,16 @@ pub(crate) fn resolve(
     }
 }
 
-/// Checks a scope's signature against `target`, its reference reporter.
+/// How many parameters a fresh block shows, when fewer than all.
+pub(crate) fn shows(shows: Option<usize>, callable: Option<&Callable>, parts: &[Part]) -> Result<Option<usize>, String> {
+    let parameters = parts.iter().filter(|part| matches!(part, Part::Input(_) | Part::List(_))).count();
+    match shows {
+        Some(_) if callable != Some(&Callable::Parts) => Err("only a callable block shows fewer parameters".into()),
+        Some(shows) if shows > parameters => Err(format!("shows {shows} parameters but has {parameters}")),
+        shows => Ok(shows.filter(|&shows| shows < parameters)),
+    }
+}
+
 /// Returns the reference's arguments list and its name input.
 pub(crate) fn check_signature<'a>(
     def: &BlockDef,

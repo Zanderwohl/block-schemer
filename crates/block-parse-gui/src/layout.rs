@@ -334,6 +334,7 @@ impl Layout<'_> {
             children: Vec::new(),
             seam_below: true,
             switch: None,
+            reach: None,
         }
     }
 
@@ -348,7 +349,8 @@ impl Layout<'_> {
                 .map_or(Shape::Round, |ty| ty.shape),
         };
         let parts = extent.map_or(&def.parts[..], |extent| def.shown_parts(extent.shown));
-        let rows = self.rows(block, def, parts);
+        let mut rows = self.rows(block, def, parts);
+        rows[0].extend(extent.and_then(|extent| self.reach_marker(extent)));
         let height_of = |row: &[Item]| {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
             (inner + 6.0).max(REPORTER_HEIGHT)
@@ -599,7 +601,6 @@ impl Layout<'_> {
         items
     }
 
-    /// A list's empty slot, at `len`.
     fn append(&self, list: &ListDef, len: usize) -> Item {
         let width = self.measure.text_width(&append_text(&list.hint), Font::Literal) + 16.0;
         let ty = self.language.ty(&list.ty);
@@ -702,6 +703,7 @@ struct Laid {
     children: Vec<Laid>,
     seam_below: bool,
     switch: Option<Rect>,
+    reach: Option<Rect>,
 }
 
 struct LaidSlot {
@@ -737,6 +739,11 @@ enum Item {
         width: f32,
         faint: bool,
     },
+    /// A callable block's marker: which ways its right end can go.
+    Reach {
+        text: String,
+        width: f32,
+    },
     Slot {
         slot: Slot,
         ty: String,
@@ -754,7 +761,7 @@ enum Item {
 impl Item {
     fn size(&self) -> Vec2 {
         match self {
-            Self::Label { width, .. } => vec2(*width, LABEL_SIZE),
+            Self::Label { width, .. } | Self::Reach { width, .. } => vec2(*width, LABEL_SIZE),
             Self::Slot { size, grip: Some(shape), .. } => {
                 *size + vec2(chip_inset(*shape, size.y) + HANDLE_GAP + HANDLE_WIDTH + CHIP_PADDING, 2.0 * CHIP_PADDING)
             }
@@ -778,6 +785,7 @@ impl Laid {
             children: Vec::new(),
             seam_below: false,
             switch: None,
+            reach: None,
         }
     }
 
@@ -833,6 +841,15 @@ impl Laid {
                 Item::Switch => {
                     self.switch = Some(Rect::from_min_size(pos2(x, center - size.y / 2.0), size));
                     x += size.x;
+                }
+                Item::Reach { text, width } => {
+                    self.reach = Some(Rect::from_min_size(pos2(x, center - size.y / 2.0), size));
+                    self.labels.push(PlacedLabel {
+                        at: pos2(x, center),
+                        text,
+                        faint: true,
+                    });
+                    x += width;
                 }
             }
         }
@@ -918,6 +935,7 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
         hit,
         switch: laid.switch.map(|rect| rect.translate(offset)),
         switch_covered: false,
+        reach: laid.reach.map(|rect| rect.translate(offset)),
         depth,
     });
 
@@ -1267,6 +1285,10 @@ mod tests {
         }
     }
 
+    fn labels(scene: &Scene, id: BlockId) -> Vec<&str> {
+        placed(scene, id).labels.iter().map(|label| label.text.as_str()).collect()
+    }
+
     #[test]
     fn a_named_block_is_square_and_shows_only_its_name() {
         let language = callable();
@@ -1274,18 +1296,26 @@ mod tests {
         let full = scene_of(&language, &program);
         assert_eq!(shape(&full, ids[0]), Shape::Round);
         assert_eq!(placed(&full, ids[0]).slots.len(), 3);
+        assert_eq!(labels(&full, ids[0]), ["fold", "⏴|"], "it can only show fewer");
 
         program.find_mut(ids[0]).unwrap().reach = Some(Reach::Call(1));
         let partial = scene_of(&language, &program);
         assert_eq!(placed(&partial, ids[0]).slots.len(), 1);
         assert_eq!(shape(&partial, ids[0]), Shape::Round);
+        assert_eq!(labels(&partial, ids[0]), ["fold", "⏴|⏵"]);
 
         program.find_mut(ids[0]).unwrap().reach = Some(Reach::Name);
         let named = scene_of(&language, &program);
         let fold = placed(&named, ids[0]);
         assert!(fold.slots.is_empty());
-        assert_eq!(fold.labels.iter().map(|label| label.text.as_str()).collect::<Vec<_>>(), ["fold"]);
+        assert_eq!(labels(&named, ids[0]), ["fold", "|⏵"]);
         assert_eq!(shape(&named, ids[0]), Shape::Square);
+        assert!(fold.reach.is_some_and(|marker| fold.rect.contains_rect(marker)));
+
+        let filled = program.find_mut(ids[0]).unwrap();
+        filled.reach = None;
+        filled.inputs.get_mut("xs").unwrap().literal = Some("1".into());
+        assert_eq!(labels(&scene_of(&language, &program), ids[0]), ["fold"], "nowhere to go, no marker");
     }
 
     #[test]

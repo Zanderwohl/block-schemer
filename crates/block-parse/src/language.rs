@@ -37,9 +37,8 @@ pub struct LanguageConfig {
     /// `None` offers no filter: every block shows.
     #[serde(default)]
     pub checked_tags: Option<Vec<String>>,
-    /// Reporters whose spec starts with a label may be named instead of
-    /// called, or called with fewer of their parameters, unless they say
-    /// `callable: false`. See `documentation/07-calls.md`.
+    /// Every reporter whose spec starts with a label is callable unless it
+    /// says `callable: false` (`documentation/07-calls.md`).
     #[serde(default)]
     pub callable: bool,
     /// A call may give fewer arguments than its procedure has parameters,
@@ -138,6 +137,10 @@ pub struct BlockConfig {
     /// Overrides the language's `callable` for this block.
     #[serde(default)]
     pub callable: Option<bool>,
+    /// How many of a callable block's parameters a fresh one shows; all of
+    /// them otherwise.
+    #[serde(default)]
+    pub shows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -329,6 +332,8 @@ pub struct BlockDef {
     pub layout: BlockLayout,
     pub scope: Option<ScopeConfig>,
     pub callable: Option<Callable>,
+    /// Fewer parameters than it has, which a fresh block shows.
+    pub shows: Option<usize>,
 }
 
 
@@ -517,7 +522,6 @@ impl BlockDef {
             .and_then(|scope| scope.reference.as_deref())
     }
 
-    /// The signature of the procedure whose name the input `name` declares.
     pub fn signature_for(&self, name: &str) -> Option<&SignatureConfig> {
         self.scope.as_ref()?.signature.as_ref().filter(|signature| signature.name == name)
     }
@@ -573,7 +577,6 @@ impl Language {
         &self.validators
     }
 
-    /// A call may give more or fewer arguments than there are parameters.
     pub fn curried(&self) -> bool {
         self.curried
     }
@@ -825,6 +828,11 @@ impl LanguageConfig {
                     None
                 });
 
+            let shows = calls::shows(config.shows, callable.as_ref(), &parts).unwrap_or_else(|message| {
+                problem(at, message);
+                None
+            });
+
             for name in config.hints.keys() {
                 if !parts.iter().any(|part| match part {
                     Part::Input(input) => &input.name == name,
@@ -849,6 +857,7 @@ impl LanguageConfig {
                 layout: config.layout,
                 scope: config.scope,
                 callable,
+                shows,
             });
         }
 

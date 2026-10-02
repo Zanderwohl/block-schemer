@@ -524,8 +524,7 @@ impl<'a> Builder<'a> {
     }
 }
 
-/// Why a call shows the wrong number of parameters, if it does. A hidden
-/// list that may be empty is no fault.
+/// A hidden list that may be empty is no fault.
 fn arity_fault(block: &Block, def: &BlockDef, node: &Node, extent: Extent, arity: Option<usize>) -> Option<String> {
     match def.callable.as_ref()? {
         Callable::Parts => {
@@ -1129,6 +1128,24 @@ mod tests {
             assert_eq!(loaded.find(bare_id).unwrap().reach, Some(Reach::Name));
             assert_eq!(loaded.find(called_id).unwrap().reach, None, "only in by_name slots");
             assert_eq!(loaded.version, crate::program::FORMAT_VERSION, "so it is not named again");
+        }
+
+        #[test]
+        fn a_fresh_block_shows_as_many_parameters_as_its_language_says() {
+            let text = CALLS.replace(r#"spec: "member {x:value} {compare:procedure*}")"#, r#"spec: "member {x:value} {compare:procedure*}", shows: 1)"#);
+            let language = Language::from_ron(&text, &Validators::new()).unwrap();
+            let mut program = Program::new(&language);
+            let member = block(&mut program, &language, "member");
+            assert_eq!(member.reach, Some(Reach::Call(1)));
+            let id = on_canvas(&mut program, member);
+            assert!(matches!(expression(&language, &program, id), Stmt::Node(node) if node.list("compare").is_none()));
+            assert_eq!(block(&mut program, &language, "fold").reach, None, "all, unless it says");
+
+            let all = text.replace("shows: 1", "shows: 2");
+            assert_eq!(Language::from_ron(&all, &Validators::new()).unwrap().block("member").unwrap().shows, None);
+            assert!(problems(&text.replace("shows: 1", "shows: 3"))[0].contains("has 2"));
+            let syntax = CALLS.replace(r#"spec: "quote {x:value}", callable: false"#, r#"spec: "quote {x:value}", callable: false, shows: 0"#);
+            assert!(problems(&syntax)[0].contains("only a callable block"));
         }
 
         #[test]

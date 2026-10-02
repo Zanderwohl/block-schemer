@@ -3,7 +3,7 @@
 use block_parse::language::{Extent, ListDef};
 use block_parse::program::{Block, Reach};
 
-use super::{Item, Layout};
+use super::{Font, Item, Layout};
 
 /// A block with a scope, as references to it are drawn.
 #[derive(Debug, Clone, PartialEq)]
@@ -14,8 +14,18 @@ pub struct Declarer {
 }
 
 impl Layout<'_> {
-    /// The width of a callable `block` at each reach it may take, narrowest
-    /// first. Fewer than two leave nothing to drag.
+    /// ⏴ and ⏵ are in egui's default fonts; ◀ and ▶ are not.
+    pub(super) fn reach_marker(&self, extent: Extent) -> Option<Item> {
+        let stops = extent.stops();
+        let at = stops.iter().position(|&reach| reach == extent.reach()).filter(|_| stops.len() > 1)?;
+        let fewer = if at > 0 { "⏴" } else { "" };
+        let more = if at + 1 < stops.len() { "⏵" } else { "" };
+        let text = format!("{fewer}|{more}");
+        let width = self.measure.text_width(&text, Font::Faint);
+        Some(Item::Reach { text, width })
+    }
+
+    /// Narrowest first. Fewer than two leave nothing to drag.
     pub fn stops(&self, block: &Block) -> Vec<(Option<Reach>, f32)> {
         let Some(extent) = self.extent(block) else { return Vec::new() };
         let mut at = block.clone();
@@ -29,7 +39,6 @@ impl Layout<'_> {
             .collect()
     }
 
-    /// The parameter names of the procedure a reference names.
     fn parameters(&self, block: &Block) -> Option<&[String]> {
         let declaration = block.refers.as_ref()?;
         let declarer = self.declarers.get(&declaration.block)?;
@@ -42,7 +51,6 @@ impl Layout<'_> {
         self.language.block(&block.opcode)?.extent(block, arity)
     }
 
-    /// A procedure reference's arguments, hinted with its parameters' names.
     /// Only one that is no reference can grow.
     pub(super) fn arguments(&self, block: &Block, list: &ListDef, extent: Extent) -> Vec<Item> {
         if extent.named {

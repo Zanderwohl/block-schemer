@@ -49,7 +49,8 @@ cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.pn
   Syntax blocks (`if`, `lambda`, …) are not callable. A `define … taking`'s
   name drags out a `procedure_call`, an argument slot per parameter; a call
   showing fewer is an arity problem, as Scheme does not curry
-  (`documentation/07-calls.md`).
+  (`documentation/07-calls.md`). Input and output procedures start with
+  their optional `port` hidden (`shows`).
 - `form`: generated code as a tree of atoms and lists, printed on one line
   to run or laid out to read. Forms that fit stay on one line; `define`,
   `lambda`, `let` and the like keep their first argument on the head's line
