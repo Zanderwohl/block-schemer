@@ -44,8 +44,8 @@ struct Terminal {
 struct TerminalState {
     running: Option<Ticket>,
     output: Vec<(Ticket, String)>,
-    /// Entered and not yet read, each with how many jobs had been sent, as
-    /// a line is only for those; an empty one ends input.
+    /// With how many jobs had been sent, as only those may read it. An empty
+    /// line ends input.
     input: VecDeque<(u64, String)>,
     waiting: bool,
     stopped: bool,

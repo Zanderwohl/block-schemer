@@ -709,9 +709,8 @@ impl App {
         self.editor.options.side_collapsed = false;
     }
 
-    /// The console the runner has just written to, if any. One that has
-    /// started waiting for input comes forward here, bubble or not, as a
-    /// program waiting where no one can see it looks hung.
+    /// The console the runner has just written to, if any. One that starts
+    /// waiting comes forward here, even past a bubble: a hidden wait looks hung.
     fn sync_tabs(&mut self) -> Option<TabId> {
         let fresh = self.runner.as_ref().map(|runner| runner.overlay().tabs).unwrap_or_default();
         let old = |id: &TabId| self.overlay.tabs.iter().find(|old| old.id == *id);

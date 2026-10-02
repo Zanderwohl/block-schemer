@@ -24,7 +24,7 @@ pub struct Job {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// Written to the console by the job as it ran.
+    /// What the job wrote, as it ran.
     Output(Ticket, String),
     /// The written form of the job's last value, empty for none, or why it
     /// failed. Every ticket gets exactly one, after all its output.

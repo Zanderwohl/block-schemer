@@ -41,7 +41,7 @@ pub struct SchemerRunner<D> {
     latest: Option<Ticket>,
     answers: HashMap<BlockId, String>,
     console: String,
-    /// A run is waiting for a line from the console.
+    /// As last polled, so `poll` reports a change.
     waiting: bool,
     /// Lines the runner wrote while runs were going, each to follow a run's
     /// answer.

@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn peeking_asks_for_no_more_than_the_character_it_peeks() {
-        /// Like a person who has typed one line so far.
+        /// One line entered; asking for a second is an error.
         struct OneLine(Mutex<bool>);
         impl Console for OneLine {
             fn write(&self, _: &str) {}
