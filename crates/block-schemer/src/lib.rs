@@ -1,7 +1,7 @@
 //! Block Schemer: Scheme programs built from blocks.
 //!
 //! The editor builds an AST; [`codegen`] turns it into Scheme text, refusing
-//! anything the language does not offer, and a [`Scheme`] runs it. Steel runs
+//! a script with problems, and a [`Scheme`] runs it. Steel runs
 //! it for now; another interpreter only needs to implement [`Scheme`].
 
 pub mod codegen;

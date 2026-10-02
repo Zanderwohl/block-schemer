@@ -150,9 +150,10 @@ impl Layout<'_> {
         }
     }
 
-    pub fn palette(&self) -> Palette {
+    /// Every block, or only those with a tag in `checked`.
+    pub fn palette(&self, checked: Option<&[String]>) -> Palette {
         let mut templates = Program::default();
-        let groups = self.groups(&mut templates);
+        let groups = self.groups(&mut templates, checked);
 
         let mut scene = Scene::empty();
         let mut entries = Vec::new();
@@ -193,10 +194,11 @@ impl Layout<'_> {
         }
     }
 
-    /// Every block in the language, a column per category, uncategorized last.
-    pub fn grid(&self) -> Program {
+    /// Every block in the language, or only those with a tag in `checked`,
+    /// a column per category, uncategorized last.
+    pub fn grid(&self, checked: Option<&[String]>) -> Program {
         let mut program = Program::new(self.language);
-        let groups = self.groups(&mut program);
+        let groups = self.groups(&mut program, checked);
         let mut x = GRID_GAP;
         for (_, members) in groups {
             if members.is_empty() {
@@ -219,14 +221,15 @@ impl Layout<'_> {
     }
 
     /// Ids come from `program`. Uncategorized blocks are last, under `None`.
-    fn groups(&self, program: &mut Program) -> Vec<(Option<&str>, Vec<Block>)> {
+    fn groups(&self, program: &mut Program, checked: Option<&[String]>) -> Vec<(Option<&str>, Vec<Block>)> {
         let categories = self.language.categories();
         let mut groups: Vec<(Option<&str>, Vec<Block>)> = categories
             .iter()
             .map(|category| (Some(category.name.as_str()), Vec::new()))
             .chain([(None, Vec::new())])
             .collect();
-        for def in self.language.blocks() {
+        let shown = |def: &&BlockDef| checked.is_none_or(|checked| def.tags.iter().any(|tag| checked.contains(tag)));
+        for def in self.language.blocks().iter().filter(shown) {
             if let Some(block) = program.instantiate(self.language, &def.opcode) {
                 groups[def.category.unwrap_or(categories.len())].1.push(block);
             }
@@ -1294,7 +1297,7 @@ mod tests {
             validate: false,
             lifted: None,
         }
-        .palette();
+        .palette(None);
 
         assert_eq!(palette.entries.len(), language.blocks().len());
         assert_eq!(palette.headings[0].text, "Events");
@@ -1317,6 +1320,49 @@ mod tests {
     }
 
     #[test]
+    fn a_filtered_palette_shows_only_blocks_with_a_checked_tag() {
+        let language = Language::from_ron(
+            include_str!("../../../examples/languages/strict_tiny.ron"),
+            &Validators::new(),
+        )
+        .unwrap();
+        let swatches = Swatches::resolve(&language, &SwatchRecipe::default());
+        let layout = Layout {
+            language: &language,
+            measure: &Fixed,
+            swatches: &swatches,
+            editing: None,
+            validate: false,
+            lifted: None,
+        };
+        let checked = ["arithmetic".to_owned(), "loop".to_owned()];
+        let palette = layout.palette(Some(&checked));
+        let mut expected: Vec<&str> = language
+            .blocks()
+            .iter()
+            .filter(|def| def.tags.iter().any(|tag| checked.contains(tag)))
+            .map(|def| def.opcode.as_str())
+            .collect();
+        let mut shown: Vec<&str> = palette.entries.iter().map(|entry| entry.opcode.as_str()).collect();
+        expected.sort();
+        shown.sort();
+        assert_eq!(shown, expected);
+        assert!(shown.len() < language.blocks().len() && shown.contains(&"add"));
+
+        assert!(language.blocks().iter().any(|def| def.tags.is_empty()));
+        assert!(layout.palette(Some(&[])).entries.is_empty(), "untagged blocks too are hidden");
+
+        let mut gridded: Vec<String> = layout
+            .grid(Some(&checked))
+            .stacks
+            .iter()
+            .map(|stack| stack.blocks[0].opcode.clone())
+            .collect();
+        gridded.sort();
+        assert_eq!(gridded, expected, "the grid filters as the palette does");
+    }
+
+    #[test]
     fn grid_puts_each_category_in_a_column_as_wide_as_its_widest_block() {
         // An uncategorized `print` needs a last column; the emptied Output none.
         let language = Language::from_ron(
@@ -1333,7 +1379,7 @@ mod tests {
             validate: false,
             lifted: None,
         };
-        let program = layout.grid();
+        let program = layout.grid(None);
         let scene = layout.program(&program);
         assert_eq!(program.stacks.len(), language.blocks().len());
 

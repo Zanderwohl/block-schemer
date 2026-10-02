@@ -7,6 +7,7 @@ pub mod bubble;
 pub mod color;
 pub mod dropdown;
 pub mod editor;
+mod filter;
 pub mod interact;
 pub mod layout;
 pub mod paint;

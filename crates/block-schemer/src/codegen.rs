@@ -11,10 +11,13 @@ use crate::form::Form;
 
 const PROCEDURE: &str = "procedure";
 
-const SYNTAX: [&str; 12] = [
+pub(crate) const SYNTAX: [&str; 12] = [
     "program", "define", "define_procedure", "variable", "quote", "string", "call", "lambda", "if", "let", "binding",
     "begin",
 ];
+
+/// Blocks whose opcode is taken by another, by the Scheme name they call.
+const RENAMED: [(&str, &str); 1] = [("string_chars", "string")];
 
 /// Where `display` writes, so the runner can show it. Code generated for
 /// reading names it only when asked to show this harness.
@@ -87,10 +90,11 @@ impl Generator<'_> {
             }
             "lambda" => wrap([vec![atom("lambda"), wrap(many("formals")?)], many("body")?].concat()),
             "let" => wrap([vec![atom("let"), wrap(many("bindings")?)], many("body")?].concat()),
-            "display" if self.harness => wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)]),
-            "display" => wrap(vec![atom("display"), one("obj")?]),
+            "display" if self.harness && node.list("port").is_none_or(<[Expr]>::is_empty) => {
+                wrap(vec![atom("display"), one("obj")?, atom(OUTPUT_PORT)])
+            }
             opcode => {
-                let mut parts = vec![atom(opcode)];
+                let mut parts = vec![atom(scheme_name(opcode))];
                 for part in &def.parts {
                     match part {
                         Part::Input(input) => parts.push(one(&input.name)?),
@@ -165,8 +169,12 @@ impl Generator<'_> {
         let bare = !SYNTAX.contains(&node.opcode.as_str())
             && def.inputs().all(|input| node.arg(&input.name).is_none_or(blank))
             && def.lists().all(|list| node.list(&list.name).is_none_or(<[Expr]>::is_empty));
-        bare.then(|| Form::atom(&node.opcode))
+        bare.then(|| Form::atom(scheme_name(&node.opcode)))
     }
+}
+
+pub(crate) fn scheme_name(opcode: &str) -> &str {
+    RENAMED.iter().find(|(id, _)| *id == opcode).map_or(opcode, |(_, name)| name)
 }
 
 fn literal(value: &Value, ty: Option<&str>) -> Result<Form, String> {
@@ -324,6 +332,29 @@ mod tests {
         assert_eq!(flat(&b.language, &run, false), Ok("(display a)".into()));
         assert_eq!(pretty(&b.language, &run, 80, false), Ok("(display a)".into()));
         assert_eq!(pretty(&b.language, &run, 80, true), Ok(format!("(display a {OUTPUT_PORT})")));
+    }
+
+    #[test]
+    fn renamed_blocks_call_their_scheme_name() {
+        let mut b = Builder::new();
+        let mut chars = b.block("string_chars");
+        set(&mut chars, item("char"), text("#\\a"));
+        assert_eq!(b.code(chars), Ok("(string #\\a)".into()));
+
+        let mut map = b.block("string-map");
+        let by_name = b.block("string_chars");
+        set(&mut map, Slot::input("proc"), plug(by_name));
+        set(&mut map, item("strings"), text("s"));
+        assert_eq!(b.code(map), Ok("(string-map string s)".into()));
+    }
+
+    #[test]
+    fn display_to_a_port_keeps_it() {
+        let mut b = Builder::new();
+        let mut display = b.block("display");
+        set(&mut display, Slot::input("obj"), text("a"));
+        set(&mut display, item("port"), text("p"));
+        assert_eq!(b.code(display), Ok("(display a p)".into()));
     }
 
     #[test]

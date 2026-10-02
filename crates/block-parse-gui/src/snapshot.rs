@@ -34,9 +34,10 @@ pub fn program(
     render(language, overlay, theme, scale, |layout| layout.program(program))
 }
 
-/// Every block in the language, laid out by [`Layout::grid`].
-pub fn grid(language: &Language, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
-    render(language, &Overlay::default(), theme, scale, |layout| layout.program(&layout.grid()))
+/// Every block in the language, or only those with a tag in `tags`, laid
+/// out by [`Layout::grid`].
+pub fn grid(language: &Language, tags: Option<&[String]>, theme: &Theme, scale: f32) -> Result<RgbaImage, String> {
+    render(language, &Overlay::default(), theme, scale, |layout| layout.program(&layout.grid(tags)))
 }
 
 /// Text is measured by the harness's own fonts, so the scene is laid out
@@ -114,7 +115,7 @@ mod tests {
         )
         .unwrap();
         let theme = Theme::default();
-        let image = grid(&language, &theme, 1.0).unwrap();
+        let image = grid(&language, None, &theme, 1.0).unwrap();
 
         let ctx = egui::Context::default();
         // Loads the fonts the harness measures with.
@@ -129,7 +130,7 @@ mod tests {
             validate: true,
             lifted: None,
         };
-        let size = layout.program(&layout.grid()).bounds.size() + vec2(2.0, 2.0) * MARGIN;
+        let size = layout.program(&layout.grid(None)).bounds.size() + vec2(2.0, 2.0) * MARGIN;
         assert_eq!((image.width(), image.height()), (size.x.round() as u32, size.y.round() as u32));
         let corner = image.get_pixel(0, 0).0;
         assert_eq!(corner, theme.canvas.to_array());
@@ -177,8 +178,8 @@ mod tests {
         )
         .unwrap();
         let theme = Theme::default();
-        assert!(grid(&language, &theme, 0.0).is_err());
-        assert!(grid(&language, &theme, f32::NAN).is_err());
-        assert!(grid(&language, &theme, 100.0).unwrap_err().contains("lower the scale"));
+        assert!(grid(&language, None, &theme, 0.0).is_err());
+        assert!(grid(&language, None, &theme, f32::NAN).is_err());
+        assert!(grid(&language, None, &theme, 100.0).unwrap_err().contains("lower the scale"));
     }
 }

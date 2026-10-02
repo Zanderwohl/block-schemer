@@ -1,7 +1,8 @@
 # Block Schemer
 
-`crates/block-schemer` is a consumer of block-parse: a block editor for a
-small subset of R7RS Scheme whose blocks run when double-clicked. It is the
+`crates/block-schemer` is a consumer of block-parse: a block editor for
+R7RS Scheme's standard procedures and a few of its forms, whose blocks run
+when double-clicked. It is the
 template for a host: a language file, validators, a `Runner`, and a `main`
 that hands them to `block_parse_gui::app::run`.
 
@@ -17,11 +18,18 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
 - `scheme.ron`: the language, embedded with `include_str!` so the binary
   needs no files beside it. Programs are `.scmb`. Opcodes are Scheme's own
   names, so most blocks generate `(opcode arguments…)` in spec order.
-  Categories are R7RS's section titles and inputs its argument names
-  (`proc`, `formals`, `z`), except `cons`, whose inputs are `car` and `cdr`.
-  Connecting words that are not Scheme, such as `if`'s `then` and `else`,
-  are faint. `fold` is SRFI 1's, with its names, filed under Pairs and lists;
-  Steel's takes one list.
+  Categories are R7RS's section titles, plus CxR for the 24 three- and
+  four-level `c…r`s, and inputs its argument names (`proc`, `formals`, `z`),
+  except `cons`, whose inputs are `car` and `cdr`. Optional arguments are a
+  list after the required ones, its hint naming them (`start, end…`); a list
+  has no maximum, so too many fail when run. Connecting words that are not
+  Scheme, such as `if`'s `then` and `else`, are faint. `fold` is SRFI 1's,
+  with its names, filed under Pairs and lists; Steel's takes one list.
+  Every block is tagged `basics` if it is among the most used, and with the
+  library it comes from, `char` for `(scheme char)` and so on, or
+  `(srfi 1)`; the palette starts with only `basics` checked.
+  The `string` procedure's block is `string_chars`, as `string` is the
+  string literal's.
 - `literals`: validators for the `datum` type (a number, boolean, character,
   string in quotes or symbol) and the `symbol` type (an identifier). The
   editor shows text they refuse as a problem, and the code generator emits
@@ -30,9 +38,7 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   interpreter. `script`, what runs, refuses a script with any error-level
   problem. `pretty`, for Inspect and never run, writes each missing or
   faulty input as its name in angle brackets (`<test>`), a faulty block as
-  far as it parsed, and leaves out a statement with nothing to recover. Only
-  opcodes in the language reach it, so offering a user fewer blocks, such as
-  a smaller language file for non-admins, limits what they can run. The text
+  far as it parsed, and leaves out a statement with nothing to recover. The text
   of a `string` block is escaped here; control characters other than
   newline, tab and return are refused.
   A `procedure` slot (Call's operator, and `apply`, `map` and `fold`'s
@@ -48,10 +54,18 @@ cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
   a name longer than ten characters.
 - `scheme`: the `Scheme` trait, `run(source) -> Answer { output, value }`,
   and `Steel`, its implementation on Steel's sandboxed engine. Definitions
-  last for the session, as in a REPL. `display` writes to a string port
-  (`__out`), which is why names starting `__` are refused. A prelude evens
-  out where Steel differs from R7RS: its `=` takes exactly two arguments, so
-  `=` is redefined to take any number.
+  last for the session, as in a REPL. Output goes to a string port
+  (`__out`), which is why names starting `__` are refused: it is the
+  current output and error port, so `write`, `newline` and a `display`
+  passed by name reach the console too. The current input port is an empty
+  string port, as reading the app's stdin would block beyond Stop's reach.
+- `prelude.scm`: evens out where Steel differs from R7RS, run into every
+  session after the Steel originals it replaces are kept as
+  `__steel-<name>`. It adds what Steel lacks (`string-map`, `list-copy`,
+  `read-string`, …) and fixes what it gets wrong (`=` and `gcd` with any
+  number of arguments, `member` and `assoc` with a compare procedure, `atan`
+  of two). The Unicode character classes are Rust functions registered on
+  the engine.
 - `runner`: `SchemerRunner`, the `Runner` the editor calls on a double-click.
   The bubble shows what was displayed, then the value, `ok` for no value, or
   the reason it could not run. Its `inspect` gives `codegen::pretty` at 48
@@ -85,9 +99,11 @@ said, to the console.
 
 ## The harness
 
-What runs is not quite what was entered: `display` writes to the `__out`
-port so the console can show it. Code shown to the user, in Inspect and in
-the console's echo, leaves that out, unless the "Schemer Harness" checkbox
+What runs is not quite what was entered: `display` with no port is given
+the `__out` port the console shows. Every session's current output port is
+`__out` too, so leaving it out would change nothing; the harness only shows
+where output goes. Code shown to the user, in Inspect and in the console's
+echo, leaves that out, unless the "Schemer Harness" checkbox
 at the left of the actions bar, a `Toggle` the runner offers, is on. It is
 off at launch and not saved. Flipping it regenerates open inspections; lines
 already in the console stay as they were written.
@@ -106,7 +122,40 @@ from Steel does not say which definition it came from.
 | `define_procedure` | `(define (variable formals…) body…)` |
 | `lambda` | `(lambda (formals…) body…)` |
 | `let` | `(let (bindings…) body…)` |
-| `display` | `(display obj __out)`, shown as `(display obj)` unless the harness is |
+| `display` | `(display obj __out)` given no port, shown as `(display obj)` unless the harness is |
+| `string_chars` | `(string char…)` |
+
+## The library
+
+Every procedure in R7RS's standard libraries (its appendix A) has a block,
+except:
+
+- `(scheme file)`, `(scheme load)` and `(scheme process-context)`: the
+  sandbox has no file system, and `exit` would end the editor.
+- `(scheme eval)` and `(scheme repl)`'s environments, which a WASM Scheme
+  need not offer.
+- `set-car!`, `set-cdr!`, `list-set!`, `string-set!`, `string-fill!` and
+  `string-copy!`: Steel's pairs and strings cannot be changed.
+- Syntax: only the forms in the table above are blocks so far.
+
+Where the prelude can only come close:
+
+- Exceptions keep their own handler stack, so `raise-continuable` returns
+  the handler's value and an error inside a handler goes to the handlers
+  outside it. A handler returning from `raise` or `error` ends the run,
+  past every handler, where R7RS raises an error the outer handlers could
+  catch. Steel's own errors, such as `(car '())`, have unwound before the
+  handler sees them, so its handler must escape, as with `call/cc`.
+  `file-error?` and `read-error?` are always false.
+- A parameter is not `procedure?`, and called with a value it sets itself.
+  Its converter applies only to the initial value, there being no
+  `parameterize`.
+- Promises come only from `make-promise`, so every one is already forced.
+- `char-ready?` and `u8-ready?` are always true, every port being in
+  memory. `digit-value` knows only ASCII digits, and `char-numeric?` takes
+  any numeric character, not only decimal digits.
+- `write-shared` and `write-simple` are `write`: without mutable pairs
+  there are no cycles to label.
 
 ## Dispatch
 
@@ -136,6 +185,14 @@ answer becomes a bubble; an earlier one still answering goes to the
 console alone.
 
 ## Known gaps
+
+- Steel's `apply` loses its last fixed argument when its list is a tail of
+  a list held elsewhere: `(apply list 'x (cdr l))` gives `l`. It is im-lists'
+  `cons` growing a list whose `cdr` only moved its offset. The prelude
+  avoids it; programs can still meet it.
+- The rest of R7RS's syntax: `cond`, `case`, `and`, `or`, `when`, `unless`,
+  `let*`, `letrec`, named `let`, `do`, `set!`, `delay`, `guard`,
+  `parameterize`, quasiquote, `define-record-type` and the rest.
 
 - Steel will be replaced by a Scheme that runs in WASM, for a web version
   with no file system and a smaller library. Only `Scheme` needs a new

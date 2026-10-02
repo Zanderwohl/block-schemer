@@ -21,7 +21,9 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
     faded hint, or the block's `hints` text for it, and no validation error
     until there is text to check; a list's empty slot shows it
     with `…`. A `Slot` addresses an input, or a list item by index; the
-    index one past the last item appends.
+    index one past the last item appends. A block's `tags` are free text;
+    `checked_tags` names those whose blocks the palette shows at first;
+    without it the palette has no filter.
     `file.extension` names the language's program files (RON inside,
     whatever the extension) so consumers can bind file types. No types are
     built in. A reporter fits a slot on an exact type match, or when the
@@ -67,7 +69,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   canvas and, right of it, the side panel, which starts collapsed. Dragging a
   panel's edge sets `EditorOptions::palette_width` or `side_width`, and a
   button half its width inside the canvas collapses or restores it at that
-  width (`palette_collapsed`, `side_collapsed`). A run dropped over the side
+  width (`palette_collapsed`, `side_collapsed`). For a language with
+  `checked_tags`, checkboxes in two columns above the palette's blocks
+  filter them: All, off at first, shows every block, untagged ones
+  included; otherwise a block shows when any of its tags is checked
+  (`palette_all`, `palette_tags`, `None` until the user ticks one, meaning
+  the language's `checked_tags`). A run dropped over the side
   panel goes back where it came from. The side panel shows the host's tabs in
   the editor's order (`tab_order`, `active_tab`): new tabs open after the
   active one, dragging a tab reorders it, and a closed active tab hands over
@@ -92,9 +99,12 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   Feature `snapshot` (off by default) renders programs to images offscreen
   through egui_kittest's wgpu renderer; with it, `--command snapshot` (`cargo
   snapshot -l <language> <out.png>`) writes `Layout::grid`, every block in a
-  column per category, instead of opening the window.
-- `crates/block-schemer` — Block Schemer, a consumer: an R7RS subset whose
-  blocks run in Steel when double-clicked. Play, or double-clicking the one
+  column per category, or with `--tags="a,b"` only blocks with one of those
+  tags, instead of opening the window.
+- `crates/block-schemer` — Block Schemer, a consumer: R7RS's standard
+  procedures (short of files, process, eval and mutating pairs and strings)
+  and a few of its forms, whose blocks run in Steel when double-clicked;
+  tagged `basics` for the most used and with their R7RS library. Play, or double-clicking the one
   `program` block, runs the canvas as one file in a fresh session: every
   `define` stack in reading order, then the program, into a Console tab
   after `> block-schemer <file>` (`untitled.scmb` until saved), the command
@@ -105,12 +115,14 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
   `__out` port that carries `display` to the console (`cargo schemer
   [program.scmb]`,
   `documentation/05-block-schemer.md`). Its language is embedded; its
-  `codegen` is the layer that refuses anything the language does not offer
+  `codegen` turns its blocks into Scheme, refusing a script with problems,
   and escapes strings before Scheme sees them, and writes a procedure
   block with nothing filled in by name in a square `procedure` slot
   (`call`'s operator, `fold`, `map`, `apply`); Inspect shows the same code
   pretty-printed, with `<name>` for each missing or faulty input. Steel sits
-  behind the `Scheme` trait so a WASM Scheme can replace it. Every run goes
+  behind the `Scheme` trait so a WASM Scheme can replace it; `prelude.scm`
+  evens out where Steel differs from R7RS, and every port without one
+  given is the console's. Every run goes
   through a `dispatch::Dispatch`, which spawns, tracks and kills the workers
   that run Scheme off the UI thread: `dispatch::native` is one thread owning
   the session, replaced if it dies; Stop interrupts the run, drops the queue
@@ -186,7 +198,8 @@ block editor in `~/rust/jellycell/src/coder/`, which is one hard-coded case.
 To check a drawing change without opening a window, render every block of a
 language and look at the image:
 `cargo snapshot -l examples/languages/tiny.ron <scratch>/tiny.png`
-(`--scale` sets pixels per canvas unit, default 2). For a particular program,
+(`--scale` sets pixels per canvas unit, default 2; `--tags="a,b"` keeps
+only blocks with one of those tags). For a particular program,
 call `block_parse_gui::snapshot::program`.
 
 ## Deferred
@@ -201,6 +214,11 @@ call `block_parse_gui::snapshot::program`.
 - A cap on undo history; each step holds a whole copy of the stacks.
 - A cap on a console's output, which grows for the session and is cloned
   on each `Runner::overlay` call and laid out every frame.
+- Block Schemer's prelude keeps every closed or bytevector port it sees,
+  for `input-port-open?` and `binary-port?`, until the session resets.
+- The palette's fitted width follows the widest block the filter shows, so
+  ticking a tag can move the canvas when `palette_width` is unset; the
+  filter's labels are also measured every frame.
 - Tabs past the strip's width: they shrink to `MIN_TAB_WIDTH`, then are
   clipped and cannot be reached until others close. A scrolling strip or a
   menu of hidden tabs would fix it.
@@ -228,6 +246,8 @@ call `block_parse_gui::snapshot::program`.
 - `dispatch::native` replaces a dead worker inside `poll`, on the UI
   thread: building Steel's prelude blocks a frame, and a `make` that panics
   takes the UI down with it.
+- Block Schemer: the rest of R7RS's syntax (`cond`, `and`, `let*`, `do`,
+  `guard`, …), and a maximum for a list of optional arguments.
 - Block Schemer: opening `.scm` files as blocks, auto-formatted; a web build
   once a WASM Scheme replaces Steel, with a Web Worker `Dispatch`. A native
   run stuck outside Steel's safepoints cannot be interrupted; its worker

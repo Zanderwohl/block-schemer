@@ -31,6 +31,10 @@ pub struct LanguageConfig {
     pub categories: Vec<CategoryConfig>,
     /// Palette order within categories.
     pub blocks: Vec<BlockConfig>,
+    /// Tags whose blocks the palette shows at first, each on some block.
+    /// `None` offers no filter: every block shows.
+    #[serde(default)]
+    pub checked_tags: Option<Vec<String>>,
 }
 
 /// The extension of this language's program files. Only a name for consumers
@@ -213,6 +217,8 @@ pub struct Language {
     categories: Vec<Category>,
     blocks: Vec<BlockDef>,
     by_opcode: HashMap<String, usize>,
+    tags: Vec<String>,
+    checked_tags: Option<Vec<String>>,
     /// Every `Custom` literal is resolved here, or the language fails to compile.
     validators: Validators,
 }
@@ -431,6 +437,17 @@ impl Language {
     /// Palette order.
     pub fn blocks(&self) -> &[BlockDef] {
         &self.blocks
+    }
+
+    /// Every tag a block has, in order of first use.
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    /// The tags whose blocks the palette shows until the user chooses;
+    /// `None` when the language offers no filter.
+    pub fn checked_tags(&self) -> Option<&[String]> {
+        self.checked_tags.as_deref()
     }
 
     pub fn block(&self, opcode: &str) -> Option<&BlockDef> {
@@ -699,6 +716,16 @@ impl LanguageConfig {
             });
         }
 
+        let mut tags: Vec<String> = Vec::new();
+        for tag in blocks.iter().flat_map(|block| &block.tags) {
+            if !tags.contains(tag) {
+                tags.push(tag.clone());
+            }
+        }
+        for tag in self.checked_tags.iter().flatten().filter(|tag| !tags.contains(tag)) {
+            problem(None, format!("checked tag `{tag}` is on no block"));
+        }
+
         if !problems.is_empty() {
             return Err(LanguageError::Invalid(problems));
         }
@@ -715,6 +742,8 @@ impl LanguageConfig {
             categories,
             blocks,
             by_opcode,
+            tags,
+            checked_tags: self.checked_tags,
             validators: validators.clone(),
         })
     }
@@ -781,6 +810,21 @@ mod tests {
             (id: "add", name: "Add", kind: Reporter("number"), spec: "{a:number=1} + {b:number}"),
         ],
     )"#;
+
+    #[test]
+    fn tags_are_listed_in_first_use_and_checked_only_if_given() {
+        let tagged = MINIMAL
+            .replace(r#"spec: "go")"#, r#"spec: "go", tags: ["b", "a"])"#)
+            .replace(r#"spec: "if {c:bool} [then]")"#, r#"spec: "if {c:bool} [then]", tags: ["a", "c"])"#);
+        let language = compile(&tagged).unwrap();
+        assert_eq!(language.tags(), ["b", "a", "c"]);
+        assert_eq!(language.checked_tags(), None);
+
+        let checked = tagged.replace("blocks: [", r#"checked_tags: ["c"], blocks: ["#);
+        assert_eq!(compile(&checked).unwrap().checked_tags(), Some(&["c".to_owned()][..]));
+        let unknown = tagged.replace("blocks: [", r#"checked_tags: ["c", "nope"], blocks: ["#);
+        assert_eq!(compile(&unknown).unwrap_err(), ["checked tag `nope` is on no block"]);
+    }
 
     #[test]
     fn defaults_fall_back_to_the_literal_kinds_blank() {
