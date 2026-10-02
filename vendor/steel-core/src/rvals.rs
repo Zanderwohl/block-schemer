@@ -1935,6 +1935,14 @@ impl SteelVal {
         })
     }
 
+    pub fn new_dyn_reader_port(port: impl std::io::Read + Send + Sync + 'static) -> SteelVal {
+        SteelVal::PortV(SteelPort {
+            port: Gc::new_lock(SteelPortRepr::DynReader(crate::values::port::Peekable::new(
+                std::io::BufReader::new(Box::new(port)),
+            ))),
+        })
+    }
+
     pub fn anonymous_boxed_function(
         function: alloc::sync::Arc<
             dyn Fn(&[SteelVal]) -> crate::rvals::Result<SteelVal> + Send + Sync + 'static,

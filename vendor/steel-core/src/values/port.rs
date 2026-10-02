@@ -87,6 +87,12 @@ impl<T> Peekable<T> {
             idx: 0,
         }
     }
+
+    fn take_peeked(&mut self) -> Vec<u8> {
+        let peeked = self.peek[..self.idx].to_vec();
+        self.idx = 0;
+        peeked
+    }
 }
 
 impl<R: Read> Peekable<R> {
@@ -117,10 +123,16 @@ impl<R: Read> Peekable<R> {
     }
 
     fn peek_char(&mut self) -> Result<MaybeBlocking<Option<char>>> {
-        match read_full(&mut self.inner, &mut self.peek[self.idx..])? {
-            MaybeBlocking::Nonblocking(n) => self.idx += n,
-            MaybeBlocking::WouldBlock => return Ok(MaybeBlocking::WouldBlock),
-        };
+        // A byte at a time until a whole character: an interactive reader may
+        // have nothing after it yet.
+        while self.idx < self.peek.len() && !holds_char(&self.peek[..self.idx]) {
+            match read_full(&mut self.inner, &mut self.peek[self.idx..self.idx + 1])? {
+                MaybeBlocking::Nonblocking(0) => break,
+                MaybeBlocking::Nonblocking(n) => self.idx += n,
+                MaybeBlocking::WouldBlock if self.idx == 0 => return Ok(MaybeBlocking::WouldBlock),
+                MaybeBlocking::WouldBlock => break,
+            }
+        }
 
         if self.idx == 0 {
             return Ok(MaybeBlocking::Nonblocking(None));
@@ -189,6 +201,13 @@ impl<R: Read> Peekable<R> {
         };
 
         Ok(MaybeBlocking::Nonblocking(amt))
+    }
+}
+
+fn holds_char(bytes: &[u8]) -> bool {
+    match core::str::from_utf8(bytes) {
+        Ok(s) => !s.is_empty(),
+        Err(err) => err.valid_up_to() > 0 || err.error_len().is_some(),
     }
 }
 
@@ -332,19 +351,27 @@ impl SteelPort {
     }
 }
 
+// What a peek took from the reader comes first. A peeked newline ends a line
+// without reading on, which would wait on an interactive reader.
 macro_rules! port_read_str_fn {
     ($br: expr, $fn: ident) => {{
-        let mut result = String::new();
-        let size = $br.$fn(&mut result)?;
-        Ok((size, result))
+        let peeked = $br.take_peeked();
+        let mut result = String::from_utf8_lossy(&peeked).into_owned();
+        let size = if stringify!($fn) == "read_line" && peeked.ends_with(b"\n") {
+            0
+        } else {
+            $br.inner.$fn(&mut result)?
+        };
+        Ok((peeked.len() + size, result))
     }};
 }
 
 macro_rules! port_read_vec_fn {
     ($br: expr, $fn: ident) => {{
-        let mut result = Vec::new();
-        let size = $br.$fn(&mut result)?;
-        Ok((size, result))
+        let mut result = $br.take_peeked();
+        let peeked = result.len();
+        let size = $br.inner.$fn(&mut result)?;
+        Ok((peeked + size, result))
     }};
 }
 
@@ -375,12 +402,12 @@ impl SteelPortRepr {
 
     pub fn read_line(&mut self) -> Result<(usize, String)> {
         match self {
-            SteelPortRepr::FileInput(_, br) => port_read_str_fn!(br.inner, read_line),
-            SteelPortRepr::StdInput(br) => port_read_str_fn!(br.inner, read_line),
-            SteelPortRepr::StringInput(s) => port_read_str_fn!(s.inner, read_line),
-            SteelPortRepr::ChildStdOutput(br) => port_read_str_fn!(br.inner, read_line),
-            SteelPortRepr::ChildStdError(br) => port_read_str_fn!(br.inner, read_line),
-            SteelPortRepr::DynReader(br) => port_read_str_fn!(br.inner, read_line),
+            SteelPortRepr::FileInput(_, br) => port_read_str_fn!(br, read_line),
+            SteelPortRepr::StdInput(br) => port_read_str_fn!(br, read_line),
+            SteelPortRepr::StringInput(s) => port_read_str_fn!(s, read_line),
+            SteelPortRepr::ChildStdOutput(br) => port_read_str_fn!(br, read_line),
+            SteelPortRepr::ChildStdError(br) => port_read_str_fn!(br, read_line),
+            SteelPortRepr::DynReader(br) => port_read_str_fn!(br, read_line),
             // FIXME: fix this and the functions below
             _ => stop!(ContractViolation => "expected input-port?, found {}", self),
         }
@@ -400,24 +427,24 @@ impl SteelPortRepr {
 
     pub fn read_all_str(&mut self) -> Result<(usize, String)> {
         match self {
-            SteelPortRepr::FileInput(_, br) => port_read_str_fn!(br.inner, read_to_string),
-            SteelPortRepr::StdInput(br) => port_read_str_fn!(br.inner, read_to_string),
-            SteelPortRepr::StringInput(s) => port_read_str_fn!(s.inner, read_to_string),
-            SteelPortRepr::ChildStdOutput(br) => port_read_str_fn!(br.inner, read_to_string),
-            SteelPortRepr::ChildStdError(br) => port_read_str_fn!(br.inner, read_to_string),
-            SteelPortRepr::DynReader(br) => port_read_str_fn!(br.inner, read_to_string),
+            SteelPortRepr::FileInput(_, br) => port_read_str_fn!(br, read_to_string),
+            SteelPortRepr::StdInput(br) => port_read_str_fn!(br, read_to_string),
+            SteelPortRepr::StringInput(s) => port_read_str_fn!(s, read_to_string),
+            SteelPortRepr::ChildStdOutput(br) => port_read_str_fn!(br, read_to_string),
+            SteelPortRepr::ChildStdError(br) => port_read_str_fn!(br, read_to_string),
+            SteelPortRepr::DynReader(br) => port_read_str_fn!(br, read_to_string),
             _ => stop!(ContractViolation => "expected input-port?, found {}", self),
         }
     }
 
     pub fn read_all_bytes(&mut self) -> Result<(usize, Vec<u8>)> {
         match self {
-            SteelPortRepr::FileInput(_, br) => port_read_vec_fn!(br.inner, read_to_end),
-            SteelPortRepr::StdInput(br) => port_read_vec_fn!(br.inner, read_to_end),
-            SteelPortRepr::StringInput(s) => port_read_vec_fn!(s.inner, read_to_end),
-            SteelPortRepr::ChildStdOutput(br) => port_read_vec_fn!(br.inner, read_to_end),
-            SteelPortRepr::ChildStdError(br) => port_read_vec_fn!(br.inner, read_to_end),
-            SteelPortRepr::DynReader(br) => port_read_vec_fn!(br.inner, read_to_end),
+            SteelPortRepr::FileInput(_, br) => port_read_vec_fn!(br, read_to_end),
+            SteelPortRepr::StdInput(br) => port_read_vec_fn!(br, read_to_end),
+            SteelPortRepr::StringInput(s) => port_read_vec_fn!(s, read_to_end),
+            SteelPortRepr::ChildStdOutput(br) => port_read_vec_fn!(br, read_to_end),
+            SteelPortRepr::ChildStdError(br) => port_read_vec_fn!(br, read_to_end),
+            SteelPortRepr::DynReader(br) => port_read_vec_fn!(br, read_to_end),
             _ => stop!(ContractViolation => "expected input-port?, found {}", self),
         }
     }
