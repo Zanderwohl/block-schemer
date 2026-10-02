@@ -35,7 +35,7 @@ You can run an example with `cargo schemer crates/block-schemer/examples/sum-of-
 
 1. Set up for development (above)
 2. Install cargo-bundle `cargo install cargo-bundle`
-3. Bundle from the crate's directory, so the icon is found: `cd crates/block-schemer && cargo bundle --release`
+3. Bundle `cargo bundle -p block-schemer --release`.
    1. It is compiled to `target/release/bundle/osx/Block\ Schemer.app`.
 
 ## Credit and Attribution
