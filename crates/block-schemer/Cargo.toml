@@ -4,6 +4,10 @@ description = "Block Schemer: Scheme from blocks"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# `block-schemer --snapshot <program.scmb> <out.png>`, which renders offscreen.
+snapshot = ["block-parse-gui/snapshot"]
+
 [dependencies]
 block-parse.workspace = true
 block-parse-gui = { path = "../block-parse-gui", features = ["app"] }
@@ -18,7 +22,7 @@ winresource = "0.1"
 name = "Block Schemer"
 identifier = "io.github.zanderwohl.block-schemer"
 icon = ["crates/block-schemer/assets/icons/block-schemer.iconset/*.png"]
-version = "0.1.0"
+version = "0.1.1"
 copyright = "© 2026 Alexander Lowry"
 category = "public.app-category.developer-tools"
 short_description = "Scheme editor with visual blocks"

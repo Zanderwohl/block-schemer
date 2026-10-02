@@ -60,6 +60,9 @@ pub struct TypeConfig {
     /// values typed only at run time, such as a variable getter's.
     #[serde(default)]
     pub fits: TypeSet,
+    /// Reporters in this type's slots take its shape instead of their own.
+    #[serde(default)]
+    pub reshape: bool,
 }
 
 /// One side of type compatibility. A reporter fits a slot when the types are
@@ -115,6 +118,32 @@ pub struct BlockConfig {
     /// under its category in the palette.
     #[serde(default)]
     pub color: Option<CategoryColor>,
+    /// Names this block declares and where they may be used. See
+    /// `documentation/06-scopes.md`.
+    #[serde(default)]
+    pub scope: Option<ScopeConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ScopeConfig {
+    /// Inputs and lists whose literals are names this block declares. One
+    /// holding a block declares what that block's `declares` do, when that
+    /// block has no `over` or `global` of its own.
+    pub declares: Vec<String>,
+    /// Inputs, lists and branches where the names may be used. Empty, with
+    /// no `global`, hands them to the block this one is plugged into, as a
+    /// `let`'s bindings.
+    #[serde(default)]
+    pub over: Vec<String>,
+    /// Of `declares`, those whose names may be used anywhere in the
+    /// program, as a top-level definition's.
+    #[serde(default)]
+    pub global: Vec<String>,
+    /// The reporter dragged out of a declaring literal. It has one input,
+    /// of the declaring slots' type, which shows the name and is not
+    /// editable.
+    #[serde(default)]
+    pub reference: Option<String>,
 }
 
 const COLOR_RANGE: &str = "hue 0..360, chroma 0..=0.37, lightness 0..=1";
@@ -236,6 +265,7 @@ pub struct TypeDef {
     pub literal: LiteralKind,
     pub accepts: TypeSet,
     pub fits: TypeSet,
+    pub reshape: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +294,7 @@ pub struct BlockDef {
     /// Overrides the category's color.
     pub color: Option<CategoryColor>,
     pub layout: BlockLayout,
+    pub scope: Option<ScopeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -407,6 +438,46 @@ impl BlockDef {
     pub fn has_branch(&self, name: &str) -> bool {
         self.branches().any(|branch| branch == name)
     }
+
+    pub fn declares(&self, name: &str) -> bool {
+        self.scope.as_ref().is_some_and(|scope| scope.declares.iter().any(|n| n == name))
+    }
+
+    pub fn is_global(&self, name: &str) -> bool {
+        self.scope.as_ref().is_some_and(|scope| scope.global.iter().any(|n| n == name))
+    }
+
+    /// Its names belong to the scope of the block it is plugged into.
+    pub fn hands_on(&self) -> bool {
+        self.scope.as_ref().is_some_and(|scope| scope.over.is_empty() && scope.global.is_empty())
+    }
+
+    /// What a reference shows for a declaring `slot` left blank: "Unnamed
+    /// parameter 2", from the slot's hint.
+    pub fn unnamed(&self, slot: &crate::program::Slot) -> String {
+        match slot.item {
+            Some(index) => {
+                let hint = self.list(&slot.input).map_or(slot.input.as_str(), |list| &list.hint);
+                format!("Unnamed {hint} {}", index + 1)
+            }
+            None => {
+                let hint = self.input(&slot.input).map_or(slot.input.as_str(), |input| &input.hint);
+                format!("Unnamed {hint}")
+            }
+        }
+    }
+
+    pub fn scopes_over(&self, name: &str) -> bool {
+        self.scope.as_ref().is_some_and(|scope| scope.over.iter().any(|n| n == name))
+    }
+
+    /// The opcode of the reference to a name declared in `name`.
+    pub fn reference_for(&self, name: &str) -> Option<&str> {
+        self.scope
+            .as_ref()
+            .filter(|_| self.declares(name))
+            .and_then(|scope| scope.reference.as_deref())
+    }
 }
 
 impl Language {
@@ -481,6 +552,11 @@ impl Language {
     }
 }
 
+/// Not filled in yet: no name to declare or text to check.
+pub fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
 /// RON as language and program files are read: `Some` may be left implicit.
 pub(crate) fn ron_options() -> ron::Options {
     ron::Options::default().with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
@@ -544,6 +620,7 @@ impl LanguageConfig {
                     literal: config.literal.clone(),
                     accepts: config.accepts.clone(),
                     fits: config.fits.clone(),
+                    reshape: config.reshape,
                 },
             );
         }
@@ -713,7 +790,57 @@ impl LanguageConfig {
                 switch: config.switch,
                 color: config.color,
                 layout: config.layout,
+                scope: config.scope,
             });
+        }
+
+        for def in &blocks {
+            let at = Some(def.opcode.as_str());
+            let Some(scope) = &def.scope else { continue };
+            let reference = scope.reference.as_ref().map(|opcode| {
+                let input = by_opcode
+                    .get(opcode)
+                    .map(|&index| &blocks[index])
+                    .filter(|target| target.kind.output().is_some() && target.lists().next().is_none())
+                    .and_then(|target| match target.inputs().collect::<Vec<_>>()[..] {
+                        [only] => Some(only),
+                        _ => None,
+                    });
+                if input.is_none() {
+                    problem(at, format!("reference `{opcode}` must be a reporter with one input and no list"));
+                }
+                input
+            });
+            for name in &scope.declares {
+                let ty = def
+                    .input(name)
+                    .map(|input| &input.ty)
+                    .or_else(|| def.list(name).map(|list| &list.ty));
+                let Some(ty) = ty else {
+                    problem(at, format!("declares `{name}`, which is no input or list"));
+                    continue;
+                };
+                let named = types.get(ty).is_some_and(|ty| ty.literal != LiteralKind::None);
+                match reference {
+                    None if named => problem(at, format!("`{name}` declares names but the scope has no reference")),
+                    Some(Some(input)) if named && input.ty != *ty => problem(
+                        at,
+                        format!("`{name}` is {ty}, but the reference's input is {}", input.ty),
+                    ),
+                    _ => {}
+                }
+                if scope.over.contains(name) {
+                    problem(at, format!("`{name}` both declares and is in scope"));
+                }
+            }
+            for name in scope.global.iter().filter(|name| !scope.declares.contains(name)) {
+                problem(at, format!("global `{name}` is not declared"));
+            }
+            for name in &scope.over {
+                if def.input(name).is_none() && def.list(name).is_none() && !def.has_branch(name) {
+                    problem(at, format!("scope over `{name}`, which is no input, list or branch"));
+                }
+            }
         }
 
         let mut tags: Vec<String> = Vec::new();

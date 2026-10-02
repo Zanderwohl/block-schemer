@@ -1,6 +1,8 @@
 //! Program to [`Scene`]. Pure given a [`Measure`], so tests use a fixed-width
 //! fake. Drawing, hit-testing and snapping all read the one scene.
 
+use std::collections::HashMap;
+
 use block_parse::edit::Target;
 use block_parse::language::{BlockDef, BlockKind, BlockLayout, ListDef, LiteralKind, Part, Shape};
 use block_parse::program::{Block, BlockId, Input, Program, Slot, Stack};
@@ -29,6 +31,10 @@ pub const SWITCH_SIZE: f32 = 16.0;
 pub const BODY_INDENT: f32 = 16.0;
 pub const APPEND_WIDTH: f32 = 30.0;
 pub const MAX_END: f32 = 40.0;
+pub const HANDLE_WIDTH: f32 = 12.0;
+const HANDLE_GAP: f32 = 2.0;
+/// Inside a chip, around the declaring literal and its handle.
+pub const CHIP_PADDING: f32 = 3.0;
 const PALETTE_MARGIN: f32 = 14.0;
 const PALETTE_GAP: f32 = 10.0;
 const PALETTE_HEADING: f32 = 28.0;
@@ -38,7 +44,7 @@ mod scene;
 
 use scene::mark_covered;
 pub use scene::{
-    Form, PlacedBlock, PlacedLabel, PlacedSlot, Scene, Seam, Section, SlotContent, StackForm, StackHead,
+    Form, Grip, PlacedBlock, PlacedLabel, PlacedSlot, Scene, Seam, Section, SlotContent, StackForm, StackHead,
 };
 
 pub fn append_text(hint: &str) -> String {
@@ -57,10 +63,7 @@ pub enum Font {
     Literal,
 }
 
-/// Not filled in yet: shown as its hint and not checked.
-pub fn is_blank(text: &str) -> bool {
-    text.trim().is_empty()
-}
+pub use block_parse::language::is_blank;
 
 /// Typed as text, rather than ticked, chosen or not typed at all.
 pub fn is_typed(kind: &LiteralKind) -> bool {
@@ -109,9 +112,24 @@ pub struct Layout<'a> {
     /// The head of a run in hand, which [`program`](Self::program) lays out
     /// as if already detached.
     pub lifted: Option<BlockId>,
+    /// From [`declarers`](Self::declarers): a reference, in hand too, takes
+    /// its declaring block's color and blank-name text. Empty draws
+    /// references in their own color.
+    pub declarers: HashMap<BlockId, String>,
 }
 
 impl Layout<'_> {
+    /// The opcode of each block with a scope in `program`.
+    pub fn declarers(language: &Language, program: &Program) -> HashMap<BlockId, String> {
+        let mut declarers = HashMap::new();
+        program.each_block(|block| {
+            if language.block(&block.opcode).is_some_and(|def| def.scope.is_some()) {
+                declarers.insert(block.id, block.opcode.clone());
+            }
+        });
+        declarers
+    }
+
     pub fn program(&self, program: &Program) -> Scene {
         let mut scene = Scene::empty();
         for stack in &program.stacks {
@@ -255,22 +273,35 @@ impl Layout<'_> {
     }
 
     fn block(&self, block: &Block) -> Laid {
+        self.shaped(block, None)
+    }
+
+    /// `shape` overrides a reporter's own, as a `reshape` slot asks.
+    fn shaped(&self, block: &Block, shape: Option<Shape>) -> Laid {
         let Some(def) = self.language.block(&block.opcode) else {
             return self.unknown(block);
         };
-        let swatch = self
-            .swatches
-            .blocks
-            .get(&def.opcode)
-            .or_else(|| def.category.and_then(|index| self.swatches.categories.get(index)))
-            .copied()
-            .unwrap_or(self.swatches.uncategorized);
+        let swatch = self.swatch(self.declarer(block).unwrap_or(def));
         match &def.kind {
-            BlockKind::Reporter(_) => self.reporter(block, def, swatch),
+            BlockKind::Reporter(_) => self.reporter(block, def, swatch, shape),
             BlockKind::Hat | BlockKind::Statement | BlockKind::Cap | BlockKind::HatCap => {
                 self.stack_block(block, def, swatch)
             }
         }
+    }
+
+    fn swatch(&self, def: &BlockDef) -> Swatch {
+        self.swatches
+            .blocks
+            .get(&def.opcode)
+            .or_else(|| def.category.and_then(|index| self.swatches.categories.get(index)))
+            .copied()
+            .unwrap_or(self.swatches.uncategorized)
+    }
+
+    fn declarer(&self, block: &Block) -> Option<&BlockDef> {
+        let declaration = block.refers.as_ref()?;
+        self.language.block(self.declarers.get(&declaration.block)?)
     }
 
     /// An opcode the language lacks: drawn so it can be seen and deleted
@@ -304,12 +335,13 @@ impl Layout<'_> {
         }
     }
 
-    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch) -> Laid {
-        let shape = def
-            .kind
-            .output()
-            .and_then(|ty| self.language.ty(ty))
-            .map_or(Shape::Round, |ty| ty.shape);
+    fn reporter(&self, block: &Block, def: &BlockDef, swatch: Swatch, shape: Option<Shape>) -> Laid {
+        let shape = shape.unwrap_or_else(|| {
+            def.kind
+                .output()
+                .and_then(|ty| self.language.ty(ty))
+                .map_or(Shape::Round, |ty| ty.shape)
+        });
         let rows = self.rows(block, def, &def.parts);
         let height_of = |row: &[Item]| {
             let inner = row.iter().map(|item| item.size().y).fold(0.0, f32::max);
@@ -511,6 +543,21 @@ impl Layout<'_> {
 
     fn item(&self, block: &Block, part: &Part) -> Option<Item> {
         match part {
+            // The name, fixed: a reference is edited through its declaration.
+            Part::Input(input) if let Some(declaration) = &block.refers => {
+                let text = block
+                    .inputs
+                    .get(&input.name)
+                    .and_then(|stored| stored.literal.clone())
+                    .filter(|text| !is_blank(text))
+                    .or_else(|| self.declarer(block).map(|def| def.unnamed(&declaration.slot)))
+                    .unwrap_or_default();
+                Some(Item::Label {
+                    width: self.measure.text_width(&text, Font::Label),
+                    text,
+                    faint: false,
+                })
+            }
             Part::Label(label) => Some(Item::Label {
                 width: self.measure.text_width(&label.text, if label.faint { Font::Faint } else { Font::Label }),
                 text: label.text.clone(),
@@ -547,6 +594,7 @@ impl Layout<'_> {
             content: LaidContent::Append {
                 kind: ty.map_or(LiteralKind::None, |ty| ty.literal.clone()),
             },
+            grip: None,
         });
         items
     }
@@ -566,7 +614,7 @@ impl Layout<'_> {
             .and_then(|stored| stored.block.as_deref())
             .filter(|inner| Some(inner.id) != self.lifted);
         if let Some(inner) = plugged {
-            let laid = self.block(inner);
+            let laid = self.shaped(inner, ty.filter(|ty| ty.reshape).map(|ty| ty.shape));
             return Item::Slot {
                 slot,
                 ty: ty_name.to_owned(),
@@ -574,6 +622,7 @@ impl Layout<'_> {
                 shape,
                 size: laid.size,
                 content: LaidContent::Plugged(Box::new(laid)),
+                grip: None,
             };
         }
 
@@ -591,6 +640,13 @@ impl Layout<'_> {
             (_, Shape::Round) => (text_width + 16.0).max(30.0),
             (_, Shape::Square) => (text_width + 12.0).max(24.0),
         };
+        let grip = self
+            .language
+            .block(&block.opcode)
+            .and_then(|def| def.reference_for(name))
+            .and_then(|opcode| self.language.block(opcode)?.kind.output())
+            .filter(|_| kind != LiteralKind::None && block.refers.is_none())
+            .map(|ty| self.language.ty(ty).map_or(Shape::Round, |ty| ty.shape));
         let content = if kind == LiteralKind::None {
             LaidContent::Empty
         } else {
@@ -609,6 +665,7 @@ impl Layout<'_> {
             shape,
             size: vec2(width, SLOT_HEIGHT),
             content,
+            grip,
         }
     }
 }
@@ -637,6 +694,7 @@ struct LaidSlot {
     rect: Rect,
     shape: Shape,
     content: LaidContent,
+    grip: Option<Grip>,
 }
 
 enum LaidContent {
@@ -667,8 +725,11 @@ enum Item {
         ty: String,
         hint: String,
         shape: Shape,
+        /// Of the slot alone, without its handle.
         size: Vec2,
         content: LaidContent,
+        /// The shape of the reference it drags out.
+        grip: Option<Shape>,
     },
     Switch,
 }
@@ -677,6 +738,9 @@ impl Item {
     fn size(&self) -> Vec2 {
         match self {
             Self::Label { width, .. } => vec2(*width, LABEL_SIZE),
+            Self::Slot { size, grip: Some(shape), .. } => {
+                *size + vec2(chip_inset(*shape, size.y) + HANDLE_GAP + HANDLE_WIDTH + CHIP_PADDING, 2.0 * CHIP_PADDING)
+            }
             Self::Slot { size, .. } => *size,
             Self::Switch => Vec2::splat(SWITCH_SIZE),
         }
@@ -725,15 +789,27 @@ impl Laid {
                     hint,
                     shape,
                     content,
-                    ..
+                    size: own,
+                    grip,
                 } => {
+                    let left = x + grip.map_or(0.0, |shape| chip_inset(shape, own.y));
+                    let rect = Rect::from_min_size(pos2(left, center - own.y / 2.0), own);
+                    let grip = grip.map(|shape| Grip {
+                        handle: Rect::from_min_size(
+                            pos2(rect.max.x + HANDLE_GAP, center - own.y / 2.0),
+                            vec2(HANDLE_WIDTH, own.y),
+                        ),
+                        chip: Rect::from_center_size(pos2(x + size.x / 2.0, center), size),
+                        shape,
+                    });
                     self.slots.push(LaidSlot {
                         slot,
                         hint,
                         ty,
-                        rect: Rect::from_min_size(pos2(x, center - size.y / 2.0), size),
+                        rect,
                         shape,
                         content,
+                        grip,
                     });
                     x += size.x;
                 }
@@ -744,6 +820,17 @@ impl Laid {
             }
         }
         x
+    }
+}
+
+/// Room left of the field inside its chip, so the field's corners stay
+/// inside the chip's ends.
+fn chip_inset(shape: Shape, field: f32) -> f32 {
+    let end = field + 2.0 * CHIP_PADDING;
+    match shape {
+        Shape::Round => end * 0.4,
+        Shape::Hexagon => end * 0.5,
+        Shape::Square => CHIP_PADDING,
     }
 }
 
@@ -845,6 +932,11 @@ fn place(laid: &Laid, origin: Pos2, depth: u16, scene: &mut Scene) {
             shape: slot.shape,
             swatch: laid.swatch,
             content,
+            grip: slot.grip.map(|grip| Grip {
+                handle: grip.handle.translate(offset),
+                chip: grip.chip.translate(offset),
+                shape: grip.shape,
+            }),
             covered: false,
         });
         if let LaidContent::Plugged(inner) = &slot.content {
@@ -915,6 +1007,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(program)
     }
@@ -966,6 +1059,7 @@ mod tests {
             editing: None,
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
 
@@ -1037,6 +1131,7 @@ mod tests {
                 editing: None,
                 validate: true,
                 lifted: Some(id),
+                declarers: Default::default(),
             }
             .program(&program);
             assert_eq!(lifted, scene_of(&language, &detached), "{id:?}");
@@ -1077,6 +1172,81 @@ mod tests {
         assert!(placed(&scene, ids[0]).slots.iter().all(|slot| !slot.covered));
     }
 
+    fn scoped() -> Language {
+        Language::from_ron(
+            r#"Language(
+                name: "scoped",
+                file: (extension: "s"),
+                types: { "name": (shape: Square, literal: Text), "value": (literal: Text) },
+                blocks: [
+                    (id: "get", name: "Get", kind: Reporter("value"), spec: "{name:name}"),
+                    (
+                        id: "for", name: "For", spec: "for {each:name} [body]",
+                        scope: (declares: ["each"], over: ["body"], reference: "get"),
+                    ),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_later_stack_covers_a_grip_under_it() {
+        let language = scoped();
+        let (mut program, ids) = with_stack(&language, &["for"]);
+        program.set_literal(ids[0], &Slot::input("each"), "i".into());
+        let scene = scene_of(&language, &program);
+        let grip = placed(&scene, ids[0]).slots[0].grip.expect("a declaring literal has a grip");
+        let handle = grip.handle.center();
+        assert_eq!(scene.grip_at(handle).map(|slot| slot.parent), Some(ids[0]));
+        assert!(scene.grip_at(placed(&scene, ids[0]).slots[0].rect.center()).is_none(), "the field is the field's");
+
+        let top = program.instantiate(&language, "for").unwrap();
+        program.stacks.push(block_parse::Stack {
+            pos: [handle.x - 4.0, handle.y - 4.0],
+            blocks: vec![top],
+        });
+        let scene = scene_of(&language, &program);
+        assert!(placed(&scene, ids[0]).slots[0].covered);
+        assert!(scene.grip_at(handle).is_none());
+    }
+
+    #[test]
+    fn a_reshaping_slot_gives_its_shape_to_the_reporter_in_it() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "shapes",
+                file: (extension: "s"),
+                types: {
+                    "value": (shape: Round, literal: Text),
+                    "procedure": (shape: Square, accepts: All, reshape: true),
+                    "loose": (shape: Square, accepts: All),
+                },
+                blocks: [
+                    (id: "one", name: "One", kind: Reporter("value"), spec: "one"),
+                    (id: "apply", name: "Apply", spec: "apply {f:procedure} {g:loose}"),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let (mut program, ids) = with_stack(&language, &["apply"]);
+        let (f, g) = (program.instantiate(&language, "one").unwrap(), program.instantiate(&language, "one").unwrap());
+        let (f_id, g_id) = (f.id, g.id);
+        let apply = program.find_mut(ids[0]).unwrap();
+        apply.inputs.entry("f".into()).or_default().block = Some(Box::new(f));
+        apply.inputs.entry("g".into()).or_default().block = Some(Box::new(g));
+
+        let scene = scene_of(&language, &program);
+        let shape = |id| match placed(&scene, id).form {
+            Form::Reporter { shape, .. } => shape,
+            Form::Stack(_) => panic!("a reporter"),
+        };
+        assert_eq!(shape(f_id), Shape::Square);
+        assert_eq!(shape(g_id), Shape::Round, "its own shape unless the slot reshapes");
+    }
+
     #[test]
     fn invalid_literals_carry_their_message_unless_focused() {
         let language = tiny();
@@ -1096,6 +1266,7 @@ mod tests {
             editing: Some((ids[0], &Slot::input("condition"))),
             validate: true,
             lifted: None,
+            declarers: Default::default(),
         }
         .program(&program);
         let condition = focused.slots().find(|slot| slot.slot.input == "condition").unwrap();
@@ -1296,6 +1467,7 @@ mod tests {
             editing: None,
             validate: false,
             lifted: None,
+            declarers: Default::default(),
         }
         .palette(None);
 
@@ -1334,6 +1506,7 @@ mod tests {
             editing: None,
             validate: false,
             lifted: None,
+            declarers: Default::default(),
         };
         let checked = ["arithmetic".to_owned(), "loop".to_owned()];
         let palette = layout.palette(Some(&checked));
@@ -1378,6 +1551,7 @@ mod tests {
             editing: None,
             validate: false,
             lifted: None,
+            declarers: Default::default(),
         };
         let program = layout.grid(None);
         let scene = layout.program(&program);

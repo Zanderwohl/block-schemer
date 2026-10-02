@@ -413,8 +413,9 @@ mod tests {
         );
         assert_eq!(run(10).0.as_deref(), Some("hypotenuse squared:\n25"));
         let (bubble, console) = run(16);
-        assert!(bubble.unwrap().contains("before its definition"), "a reporter inside runs alone, outside its `let`");
-        assert!(console.starts_with("> (* a a)\nError: "), "{console}");
+        let refused = "Can't run: `a` is used outside the block that declares it";
+        assert_eq!(bubble.as_deref(), Some(refused), "a reporter inside runs alone, outside its `let`");
+        assert_eq!(console, format!("> (* <z> <z>)\n{refused}\n"));
 
         let shown = |runner: &mut Tested| {
             let console = double_click(runner, &language, &program, 10).1;
@@ -443,6 +444,17 @@ mod tests {
         runner.start(&program, Some(path), &program.ast(&language));
         settle(&mut runner);
         assert_eq!(&runner.console()[before..], "> block-schemer sums.scmb\n14\n");
+    }
+
+    #[test]
+    fn a_defined_procedure_calls_itself_through_a_reference_to_its_name() {
+        let language = crate::language();
+        let program = Program::from_ron(include_str!("../examples/factorial.scmb")).unwrap();
+        assert!(program.ast(&language).is_clean(), "{:#?}", program.ast(&language).problems());
+        let mut runner = runner(&language);
+        let file = runner.inspect(&program, BlockId(20), &program.script_at(&language, BlockId(20)).unwrap()).unwrap();
+        assert!(file.contains("(* n (factorial (- n 1)))"), "{file}");
+        assert_eq!(play(&mut runner, &language, &program), "> block-schemer untitled.scmb\n3628800\n");
     }
 
     #[test]
@@ -517,7 +529,7 @@ mod tests {
             let script = program.script_at(&language, BlockId(id)).unwrap();
             runner.inspect(&program, BlockId(id), &script).unwrap()
         };
-        assert_eq!(inspect(16), "(* a a)");
+        assert_eq!(inspect(16), "(* <z> <z>)", "its references are out of scope alone");
         let file = inspect(20);
         assert!(file.starts_with("(define (sum-of-squares xs)"), "{file}");
         assert!(file.ends_with("\n\n(sum-of-squares (list 1 2 3))"), "{file}");

@@ -4,9 +4,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::edit::Location;
-use crate::language::{Language, Part, ron_options};
+use crate::language::{BlockDef, Language, Part, ron_options};
 
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Deepest nesting allowed, counting a stack's own blocks as depth 1 and each
 /// branch or input as one more. Deeper blocks load as `TooDeep` problems and
@@ -63,6 +63,17 @@ pub struct Block {
     pub lists: BTreeMap<String, Vec<Input>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub branches: BTreeMap<String, Vec<Block>>,
+    /// Makes this a reference to a declared name: its one input mirrors the
+    /// declaration's literal and cannot be edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refers: Option<Declaration>,
+}
+
+/// A literal in a slot a scope `declares`: where a name is introduced.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Declaration {
+    pub block: BlockId,
+    pub slot: Slot,
 }
 
 /// A slot of a block: a single input, or one item of a list. Index `len` of
@@ -153,6 +164,7 @@ impl Program {
                 block.trim_all();
             }
         }
+        program.sync_references();
         Ok(program)
     }
 
@@ -233,6 +245,7 @@ impl Program {
             inputs: BTreeMap::new(),
             lists: BTreeMap::new(),
             branches: BTreeMap::new(),
+            refers: None,
         };
         for part in &def.parts {
             match part {
@@ -252,6 +265,13 @@ impl Program {
             }
         }
         Some(block)
+    }
+
+    /// Every block, parents first.
+    pub fn each_block<'a>(&'a self, mut visit: impl FnMut(&'a Block)) {
+        for stack in &self.stacks {
+            walk(&stack.blocks, &mut visit);
+        }
     }
 
     pub fn find(&self, id: BlockId) -> Option<&Block> {
@@ -283,15 +303,21 @@ impl Program {
             .find_map(|stack| depth_in(&stack.blocks, id, 1))
     }
 
-    /// False if the block is gone or the slot is past a list's empty slot.
-    /// Emptying an item's text makes it a hole, so a field keeps one address
-    /// as its item comes and goes.
+    /// False if the block is gone, is a reference, or the slot is past a
+    /// list's empty slot. Emptying an item's text makes it a hole, so a field
+    /// keeps one address as its item comes and goes. References to the slot
+    /// follow the new text.
     pub fn set_literal(&mut self, block: BlockId, slot: &Slot, text: String) -> bool {
-        let Some(block) = self.find_mut(block) else {
+        let declaration = Declaration {
+            block,
+            slot: slot.clone(),
+        };
+        let Some(block) = self.find_mut(block).filter(|block| block.refers.is_none()) else {
             return false;
         };
         let Some(index) = slot.item else {
-            block.inputs.entry(slot.input.clone()).or_default().literal = Some(text);
+            block.inputs.entry(slot.input.clone()).or_default().literal = Some(text.clone());
+            self.rename(&declaration, &text);
             return true;
         };
         let len = block.lists.get(&slot.input).map_or(0, Vec::len);
@@ -305,13 +331,89 @@ impl Program {
         if index == len {
             items.push(Input::default());
         }
-        items[index].literal = (!text.is_empty()).then_some(text);
+        items[index].literal = (!text.is_empty()).then(|| text.clone());
         block.trim_lists();
+        self.rename(&declaration, &text);
         true
+    }
+
+    /// The literal a declaration names, if it is still there. An item emptied
+    /// out of a list's end has none, though references keep its index.
+    pub fn declared_name(&self, declaration: &Declaration) -> Option<&str> {
+        let input = self.find(declaration.block)?.slot(&declaration.slot)?;
+        input.block.is_none().then_some(input.literal.as_deref()).flatten()
+    }
+
+    fn rename(&mut self, declaration: &Declaration, name: &str) {
+        for stack in &mut self.stacks {
+            walk_mut(&mut stack.blocks, &mut |block| {
+                if block.refers.as_ref() == Some(declaration) {
+                    block.set_reference_name(name);
+                }
+            });
+        }
+    }
+
+    /// Brings every reference's name in line with its declaration, as a file
+    /// edited by hand may not be. A reference keeps its last name while its
+    /// declaring block is gone or a block covers the name.
+    fn sync_references(&mut self) {
+        let mut names = BTreeMap::new();
+        for stack in &self.stacks {
+            walk(&stack.blocks, &mut |block| {
+                if let Some(declaration) = &block.refers {
+                    names.insert(declaration.clone(), None);
+                }
+            });
+        }
+        for (declaration, name) in &mut names {
+            let slot = self.find(declaration.block).map(|block| block.slot(&declaration.slot));
+            if let Some(slot) = slot
+                && slot.is_none_or(|input| input.block.is_none())
+            {
+                *name = Some(self.declared_name(declaration).unwrap_or_default().to_owned());
+            }
+        }
+        for stack in &mut self.stacks {
+            walk_mut(&mut stack.blocks, &mut |block| {
+                if let Some(Some(name)) = block.refers.as_ref().and_then(|declaration| names.get(declaration)) {
+                    block.set_reference_name(name);
+                }
+            });
+        }
     }
 }
 
 impl Block {
+    /// A reference block has one input, which holds the name.
+    pub(crate) fn set_reference_name(&mut self, name: &str) {
+        for input in self.inputs.values_mut() {
+            input.literal = Some(name.to_owned());
+        }
+    }
+
+    /// The blocks whose local names this block's scope covers: itself, and
+    /// those plugged into its declaring slots that hand their names on.
+    pub fn scope_blocks(&self, language: &Language) -> Vec<BlockId> {
+        let mut found = vec![self.id];
+        self.handed_on(language, &mut found);
+        found
+    }
+
+    fn handed_on(&self, language: &Language, found: &mut Vec<BlockId>) {
+        let Some(def) = language.block(&self.opcode) else { return };
+        let singles = self.inputs.iter().map(|(name, input)| (name, std::slice::from_ref(input)));
+        let lists = self.lists.iter().map(|(name, items)| (name, items.as_slice()));
+        for (_, inputs) in singles.chain(lists).filter(|(name, _)| def.declares(name)) {
+            for inner in inputs.iter().filter_map(|input| input.block.as_deref()) {
+                if language.block(&inner.opcode).is_some_and(BlockDef::hands_on) {
+                    found.push(inner.id);
+                    inner.handed_on(language, found);
+                }
+            }
+        }
+    }
+
     pub fn slot(&self, slot: &Slot) -> Option<&Input> {
         match slot.item {
             None => self.inputs.get(&slot.input),
@@ -406,6 +508,19 @@ fn with_deep_stack<T: Send>(work: impl FnOnce() -> T + Send) -> T {
     #[cfg(target_family = "wasm")]
     {
         work()
+    }
+}
+
+pub(crate) fn walk_mut(blocks: &mut [Block], visit: &mut impl FnMut(&mut Block)) {
+    for block in blocks {
+        visit(block);
+        let inputs = block.inputs.values_mut().chain(block.lists.values_mut().flatten());
+        for inner in inputs.filter_map(|input| input.block.as_deref_mut()) {
+            walk_mut(std::slice::from_mut(inner), visit);
+        }
+        for branch in block.branches.values_mut() {
+            walk_mut(branch, visit);
+        }
     }
 }
 

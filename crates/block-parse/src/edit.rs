@@ -1,7 +1,9 @@
 //! Tree operations, addressed by [`BlockId`] because positions go stale.
 
-use crate::language::{BlockKind, Fit, Language};
-use crate::program::{Block, BlockId, MAX_DEPTH, Program, Slot, Stack, find_in};
+use std::collections::HashMap;
+
+use crate::language::{BlockKind, Fit, Language, is_blank};
+use crate::program::{Block, BlockId, Declaration, MAX_DEPTH, Program, Slot, Stack, find_in};
 
 /// Blocks out of the program: a statement and everything below it, or one
 /// reporter.
@@ -284,13 +286,34 @@ impl Program {
     }
 
     /// A copy of a block and, for a statement, everything below it, with
-    /// fresh ids throughout. The program is unchanged.
+    /// fresh ids throughout. References to declarations in the copy name the
+    /// copy's. The program is unchanged.
     pub fn duplicate(&mut self, id: BlockId) -> Option<Fragment> {
         let mut fragment = self.run_at(id)?;
+        let mut renamed = HashMap::new();
         for block in &mut fragment.blocks {
-            self.renumber(block);
+            self.renumber(block, &mut renamed);
         }
+        crate::program::walk_mut(&mut fragment.blocks, &mut |block| {
+            if let Some(declaration) = &mut block.refers
+                && let Some(&copy) = renamed.get(&declaration.block)
+            {
+                declaration.block = copy;
+            }
+        });
         Some(fragment)
+    }
+
+    /// A fresh reference to the name `declaration` gives, out of the
+    /// program. `None` unless the slot declares a name and has one typed.
+    pub fn reference(&mut self, language: &Language, declaration: &Declaration) -> Option<Block> {
+        let owner = self.find(declaration.block)?;
+        let opcode = language.block(&owner.opcode)?.reference_for(&declaration.slot.input)?;
+        let name = self.declared_name(declaration).filter(|name| !is_blank(name))?.to_owned();
+        let mut block = self.instantiate(language, opcode)?;
+        block.refers = Some(declaration.clone());
+        block.set_reference_name(&name);
+        Some(block)
     }
 
     /// A copy of what [`detach`](Self::detach) would take at `id`, ids and all.
@@ -302,16 +325,17 @@ impl Program {
         Some(Fragment { blocks })
     }
 
-    fn renumber(&mut self, block: &mut Block) {
-        block.id = self.fresh_id();
+    fn renumber(&mut self, block: &mut Block, renamed: &mut HashMap<BlockId, BlockId>) {
+        let id = self.fresh_id();
+        renamed.insert(std::mem::replace(&mut block.id, id), id);
         for input in block.inputs.values_mut().chain(block.lists.values_mut().flatten()) {
             if let Some(inner) = input.block.as_deref_mut() {
-                self.renumber(inner);
+                self.renumber(inner, renamed);
             }
         }
         for seq in block.branches.values_mut() {
             for child in seq {
-                self.renumber(child);
+                self.renumber(child, renamed);
             }
         }
     }

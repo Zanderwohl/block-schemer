@@ -26,7 +26,7 @@ pub use host::{
 };
 pub use edit::{Fragment, Location, Target};
 pub use history::History;
-pub use language::{BlockDef, BlockKind, CategoryColor, Fit, Language};
+pub use language::{BlockDef, BlockKind, CategoryColor, Fit, Language, ScopeConfig};
 pub use literal::{LiteralValidator, Validators};
-pub use program::{Block, BlockId, Input, Program, Slot, Stack};
+pub use program::{Block, BlockId, Declaration, Input, Program, Slot, Stack};
 pub use value::Value;

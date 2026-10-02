@@ -1,7 +1,7 @@
 #![enable(implicit_some)]
 Program(
     language: "Block Schemer",
-    version: 2,
+    version: 3,
     stacks: [
         (pos: (24.0, 24.0), blocks: [(id: 1, opcode: "define_procedure",
             inputs: {"variable": (literal: "sum-of-squares")},
@@ -9,16 +9,19 @@ Program(
                 "formals": [(literal: "xs")],
                 "body": [(block: (id: 2, opcode: "fold",
                     inputs: {
-                        "kons": (block: (id: 3, opcode: "variable", inputs: {"variable": (literal: "+")})),
+                        "kons": (block: (id: 3, opcode: "+")),
                         "knil": (literal: "0"),
                         "clist": (block: (id: 4, opcode: "map",
                             inputs: {"proc": (block: (id: 5, opcode: "lambda",
                                 lists: {
                                     "formals": [(literal: "x")],
                                     "body": [(block: (id: 6, opcode: "*",
-                                        lists: {"z": [(literal: "x"), (literal: "x")]}))],
+                                        lists: {"z": [
+                                            (block: (id: 101, opcode: "variable", inputs: {"variable": (literal: "x")}, refers: (block: 5, slot: (input: "formals", item: 0)))),
+                                            (block: (id: 102, opcode: "variable", inputs: {"variable": (literal: "x")}, refers: (block: 5, slot: (input: "formals", item: 0)))),
+                                        ]}))],
                                 }))},
-                            lists: {"lists": [(block: (id: 7, opcode: "variable", inputs: {"variable": (literal: "xs")}))]})),
+                            lists: {"lists": [(block: (id: 7, opcode: "variable", inputs: {"variable": (literal: "xs")}, refers: (block: 1, slot: (input: "formals", item: 0))))]})),
                     }))],
             })]),
         (pos: (24.0, 260.0), blocks: [(id: 10, opcode: "let",
@@ -30,14 +33,20 @@ Program(
                 "body": [
                     (block: (id: 13, opcode: "display", inputs: {"obj": (block: (id: 14, opcode: "string", inputs: {"text": (literal: "hypotenuse squared:")}))})),
                     (block: (id: 15, opcode: "+", lists: {"z": [
-                        (block: (id: 16, opcode: "*", lists: {"z": [(literal: "a"), (literal: "a")]})),
-                        (block: (id: 17, opcode: "*", lists: {"z": [(literal: "b"), (literal: "b")]})),
+                        (block: (id: 16, opcode: "*", lists: {"z": [
+                            (block: (id: 103, opcode: "variable", inputs: {"variable": (literal: "a")}, refers: (block: 11, slot: (input: "variable")))),
+                            (block: (id: 104, opcode: "variable", inputs: {"variable": (literal: "a")}, refers: (block: 11, slot: (input: "variable")))),
+                        ]})),
+                        (block: (id: 17, opcode: "*", lists: {"z": [
+                            (block: (id: 105, opcode: "variable", inputs: {"variable": (literal: "b")}, refers: (block: 12, slot: (input: "variable")))),
+                            (block: (id: 106, opcode: "variable", inputs: {"variable": (literal: "b")}, refers: (block: 12, slot: (input: "variable")))),
+                        ]})),
                     ]})),
                 ],
             })]),
         (pos: (24.0, 470.0), blocks: [(id: 20, opcode: "program",
             inputs: {"main": (block: (id: 21, opcode: "call", inputs: {
-                "operator": (block: (id: 22, opcode: "variable", inputs: {"variable": (literal: "sum-of-squares")})),
+                "operator": (block: (id: 22, opcode: "variable", inputs: {"variable": (literal: "sum-of-squares")}, refers: (block: 1, slot: (input: "variable")))),
             }, lists: {"operands": [(block: (id: 23, opcode: "list", lists: {"obj": [(literal: "1"), (literal: "2"), (literal: "3")]}))]}))})]),
     ],
 )

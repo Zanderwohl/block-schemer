@@ -106,6 +106,7 @@ mod tests {
                 inputs: BTreeMap::new(),
                 lists: BTreeMap::new(),
                 branches: BTreeMap::new(),
+                refers: None,
             }],
         });
         program

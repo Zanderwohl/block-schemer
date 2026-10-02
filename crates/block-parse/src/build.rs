@@ -1,21 +1,18 @@
 //! Program to [`Ast`]. Never fails: each fault becomes a [`Problem`] in the
 //! place it occurs, and parsing carries on around it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{Arg, Ast, Branch, Expr, List, Node, Problem, ProblemCode, Script, Severity, Stmt};
-use crate::language::{BlockDef, BlockKind, Fit, Language, LiteralKind};
-use crate::program::{Block, BlockId, Input, MAX_DEPTH, Program, Slot};
+use crate::language::{BlockDef, BlockKind, Fit, Language, LiteralKind, is_blank};
+use crate::program::{Block, BlockId, Declaration, Input, MAX_DEPTH, Program, Slot};
 use crate::value::Value;
 
 impl Program {
     /// One script per stack. A stack that is a single reporter is a loose
     /// expression, not a problem.
     pub fn ast(&self, language: &Language) -> Ast {
-        let mut builder = Builder {
-            language,
-            seen: HashSet::new(),
-        };
+        let mut builder = Builder::new(language, self);
         Ast {
             scripts: self
                 .stacks
@@ -32,10 +29,7 @@ impl Program {
     /// reporter, even one in a slot.
     pub fn script_at(&self, language: &Language, id: BlockId) -> Option<Script> {
         let run = self.run_at(id)?;
-        let mut builder = Builder {
-            language,
-            seen: HashSet::new(),
-        };
+        let mut builder = Builder::new(language, self);
         Some(Script {
             body: builder.stack(&run.blocks),
         })
@@ -44,10 +38,40 @@ impl Program {
 
 struct Builder<'a> {
     language: &'a Language,
+    program: &'a Program,
     seen: HashSet<BlockId>,
+    /// Blocks whose local names are in scope where the builder is.
+    visible: Vec<BlockId>,
+    /// Every block in the program that has a scope.
+    scopes: HashMap<BlockId, &'a Block>,
 }
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
+    fn new(language: &'a Language, program: &'a Program) -> Self {
+        let mut scopes = HashMap::new();
+        program.each_block(|block| {
+            if language.block(&block.opcode).is_some_and(|def| def.scope.is_some()) {
+                scopes.insert(block.id, block);
+            }
+        });
+        Self {
+            language,
+            program,
+            seen: HashSet::new(),
+            visible: Vec::new(),
+            scopes,
+        }
+    }
+
+    /// Runs `work` with the local names of `blocks` in scope.
+    fn within<T>(&mut self, blocks: &[BlockId], work: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.visible.len();
+        self.visible.extend_from_slice(blocks);
+        let result = work(self);
+        self.visible.truncate(mark);
+        result
+    }
+
     fn stack(&mut self, blocks: &[Block]) -> Vec<Stmt> {
         if let [only] = blocks
             && self.kind(only).is_some_and(|kind| kind.output().is_some())
@@ -127,6 +151,12 @@ impl Builder<'_> {
                 None,
             ));
         }
+        if let Some(declaration) = &block.refers
+            && let Some((code, message)) = self.reference_fault(block, declaration)
+        {
+            self.seen.insert(block.id);
+            return Err(problem(code, message, None));
+        }
         let duplicate = !self.seen.insert(block.id);
         let (node, def) = match self.language.block(&block.opcode) {
             Some(def) => (self.node(block, def, depth), def),
@@ -160,19 +190,26 @@ impl Builder<'_> {
     }
 
     fn node(&mut self, block: &Block, def: &BlockDef, depth: usize) -> Node {
+        let scope_blocks = match &def.scope {
+            Some(scope) if !scope.over.is_empty() => block.scope_blocks(self.language),
+            _ => Vec::new(),
+        };
+        let scoped = |name: &str| if def.scopes_over(name) { scope_blocks.as_slice() } else { &[] };
         let mut args: Vec<Arg> = def
             .inputs()
             .map(|input| Arg {
                 name: input.name.clone(),
-                value: self.value(
-                    block,
-                    def,
-                    Slot::input(input.name.clone()),
-                    &input.ty,
-                    block.inputs.get(&input.name),
-                    input.default.as_deref(),
-                    depth,
-                ),
+                value: self.within(scoped(&input.name), |this| {
+                    this.value(
+                        block,
+                        def,
+                        Slot::input(input.name.clone()),
+                        &input.ty,
+                        block.inputs.get(&input.name),
+                        input.default.as_deref(),
+                        depth,
+                    )
+                }),
             })
             .collect();
         for (name, stored) in &block.inputs {
@@ -186,14 +223,16 @@ impl Builder<'_> {
             .lists()
             .map(|list| {
                 let stored = block.lists.get(&list.name).map(Vec::as_slice).unwrap_or(&[]);
-                let items = stored
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| {
-                        let slot = Slot::item(list.name.clone(), index);
-                        self.value(block, def, slot, &list.ty, Some(item), None, depth)
-                    })
-                    .collect();
+                let items = self.within(scoped(&list.name), |this| {
+                    stored
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| {
+                            let slot = Slot::item(list.name.clone(), index);
+                            this.value(block, def, slot, &list.ty, Some(item), None, depth)
+                        })
+                        .collect()
+                });
                 List {
                     name: list.name.clone(),
                     items,
@@ -219,11 +258,9 @@ impl Builder<'_> {
             .branches()
             .map(|name| Branch {
                 name: name.to_owned(),
-                body: self.sequence(
-                    block.branches.get(name).map_or(&[][..], Vec::as_slice),
-                    depth + 1,
-                    false,
-                ),
+                body: self.within(scoped(name), |this| {
+                    this.sequence(block.branches.get(name).map_or(&[][..], Vec::as_slice), depth + 1, false)
+                }),
             })
             .collect();
         for (name, children) in &block.branches {
@@ -251,7 +288,26 @@ impl Builder<'_> {
             args,
             lists,
             branches,
+            refers: block.refers.clone(),
         }
+    }
+
+    fn reference_fault(&self, block: &Block, declaration: &Declaration) -> Option<(ProblemCode, String)> {
+        let def = self
+            .scopes
+            .get(&declaration.block)
+            .and_then(|owner| self.language.block(&owner.opcode))
+            .filter(|def| def.declares(&declaration.slot.input));
+        let Some(def) = def else {
+            let name = block.inputs.values().find_map(|input| input.literal.as_deref()).unwrap_or_default();
+            return Some((ProblemCode::OutOfScope, format!("`{name}` refers to a declaration that is gone")));
+        };
+        let name = self.program.declared_name(declaration).filter(|name| !is_blank(name));
+        let shown = name.map_or_else(|| def.unnamed(&declaration.slot), |name| format!("`{name}`"));
+        if !def.is_global(&declaration.slot.input) && !self.visible.contains(&declaration.block) {
+            return Some((ProblemCode::OutOfScope, format!("{shown} is used outside the block that declares it")));
+        }
+        name.is_none().then(|| (ProblemCode::Unnamed, format!("{shown} has no name")))
     }
 
     /// What a slot the block does not define held, kept under a warning.
@@ -291,6 +347,7 @@ impl Builder<'_> {
             None => format!("`{}`", slot.input),
         };
         let hole = slot.item.is_some() && stored.is_none_or(Input::is_hole);
+        let declares = def.declares(&slot.input);
         let slot = Some((block.id, slot));
         let problem = |code, message: String, at: Option<BlockId>, recovered: Option<Node>| {
             Expr::Problem(Box::new(Problem {
@@ -337,6 +394,9 @@ impl Builder<'_> {
             .language
             .ty(ty)
             .is_some_and(|ty| ty.literal != LiteralKind::None);
+        if hole && declares {
+            return problem(ProblemCode::Unnamed, format!("{label} of `{}` needs a name", def.name), None, None);
+        }
         if hole {
             return problem(
                 ProblemCode::MissingInput,
@@ -359,6 +419,9 @@ impl Builder<'_> {
             .and_then(|stored| stored.literal.as_deref())
             .or(default)
             .unwrap_or_default();
+        if declares && is_blank(text) {
+            return problem(ProblemCode::Unnamed, format!("{label} of `{}` needs a name", def.name), None, None);
+        }
         match self.language.parse_literal(ty, text) {
             Ok(value) => Expr::Literal(value),
             Err(message) => problem(
@@ -410,6 +473,7 @@ impl Builder<'_> {
             args,
             lists,
             branches,
+            refers: block.refers.clone(),
         }
     }
 
@@ -710,6 +774,7 @@ mod tests {
             )]),
             lists: BTreeMap::new(),
             branches: BTreeMap::from([("then".to_owned(), vec![inner])]),
+            refers: None,
         };
 
         let ast = one_stack(vec![mystery]).ast(&language);

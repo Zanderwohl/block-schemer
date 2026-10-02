@@ -3,10 +3,11 @@
 use block_parse::Language;
 use block_parse::edit::{Fragment, Target};
 use block_parse::language::{Fit, Shape};
-use block_parse::program::{BlockId, Program, Slot};
+use block_parse::program::{BlockId, Declaration, Program, Slot};
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
 use crate::layout::{Run, SNAP_RADIUS, Scene};
+use crate::paint::Transform;
 
 /// Screen pixels the pointer must travel before a press becomes a drag, so a
 /// click never takes a block out of its stack.
@@ -47,6 +48,9 @@ pub enum Pressed {
     Palette { opcode: String, top_left: Pos2 },
     /// `top_left` in canvas units.
     Block { id: BlockId, top_left: Pos2 },
+    /// A declaring slot's grip. `top_left` in canvas units, where the
+    /// reference starts.
+    Handle { declaration: Declaration, top_left: Pos2 },
 }
 
 /// A canvas run stays in the program until dropped, so the program is always
@@ -71,6 +75,8 @@ pub enum DragSource {
     Palette { opcode: String },
     /// Dropping it on the palette deletes it.
     Canvas { head: BlockId },
+    /// Made afresh on drop, like a palette block, if the name is still there.
+    Reference(Declaration),
 }
 
 /// What the snap highlight draws, canvas units.
@@ -167,6 +173,48 @@ pub fn find_snap(
     best.map(|(_, target, mark)| (target, mark))
 }
 
+/// Offsets are taken from the press, so the run does not jump by the
+/// threshold.
+pub fn start_drag(press: Press, language: &Language, program: &mut Program, t: Transform, read_only: bool) -> Gesture {
+    match press.on {
+        Pressed::Palette { opcode, top_left } => {
+            let Some(block) = program.instantiate(language, &opcode) else {
+                return Gesture::Idle;
+            };
+            let grab_offset = (press.at - top_left) / t.zoom;
+            Gesture::Dragging(Drag {
+                fragment: Fragment { blocks: vec![block] },
+                source: DragSource::Palette { opcode },
+                grab_offset,
+                head: t.canvas(press.at) - grab_offset,
+                snap: None,
+            })
+        }
+        Pressed::Handle { declaration, top_left } => match program.reference(language, &declaration) {
+            Some(block) => Gesture::Dragging(Drag {
+                fragment: Fragment { blocks: vec![block] },
+                source: DragSource::Reference(declaration),
+                grab_offset: t.canvas(press.at) - top_left,
+                head: top_left,
+                snap: None,
+            }),
+            None => Gesture::Idle,
+        },
+        // Read-only blocks cannot move, so dragging one pans instead.
+        Pressed::Block { .. } if read_only => Gesture::Panning,
+        Pressed::Block { id, top_left } => match program.run_at(id) {
+            Some(fragment) => Gesture::Dragging(Drag {
+                fragment,
+                source: DragSource::Canvas { head: id },
+                grab_offset: t.canvas(press.at) - top_left,
+                head: top_left,
+                snap: None,
+            }),
+            None => Gesture::Idle,
+        },
+    }
+}
+
 /// A reporter pushed out of a slot lands just below it.
 /// Delete drops the run instead of placing it. A canvas run that no longer
 /// matches the program, as when the host switched programs mid-drag, is left
@@ -180,6 +228,10 @@ pub fn drop_run(language: &Language, program: &mut Program, drag: Drag, delete: 
         },
         _ if delete => return false,
         DragSource::Palette { opcode } => match next.instantiate(language, opcode) {
+            Some(block) => Fragment { blocks: vec![block] },
+            None => return false,
+        },
+        DragSource::Reference(declaration) => match next.reference(language, declaration) {
             Some(block) => Fragment { blocks: vec![block] },
             None => return false,
         },
@@ -203,4 +255,61 @@ pub fn drop_run(language: &Language, program: &mut Program, drag: Drag, delete: 
     }
     *program = next;
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use block_parse::program::Stack;
+    use block_parse::Validators;
+
+    #[test]
+    fn a_reference_whose_name_was_blanked_mid_drag_drops_nothing() {
+        let language = Language::from_ron(
+            r#"Language(
+                name: "scoped",
+                file: (extension: "s"),
+                types: { "name": (literal: Text), "value": (literal: Text) },
+                blocks: [
+                    (id: "get", name: "Get", kind: Reporter("value"), spec: "{name:name}"),
+                    (
+                        id: "fn", name: "Fn", kind: Reporter("value"), spec: "fn {param:name} {body:value}",
+                        scope: (declares: ["param"], over: ["body"], reference: "get"),
+                    ),
+                ],
+            )"#,
+            &Validators::new(),
+        )
+        .unwrap();
+        let mut program = Program::new(&language);
+        let function = program.instantiate(&language, "fn").unwrap();
+        let id = function.id;
+        program.stacks.push(Stack {
+            pos: [0.0, 0.0],
+            blocks: vec![function],
+        });
+        program.set_literal(id, &Slot::input("param"), "x".into());
+        let declaration = Declaration {
+            block: id,
+            slot: Slot::input("param"),
+        };
+        let held = Drag {
+            fragment: Fragment {
+                blocks: vec![program.clone().reference(&language, &declaration).unwrap()],
+            },
+            source: DragSource::Reference(declaration),
+            grab_offset: Vec2::ZERO,
+            head: pos2(0.0, 200.0),
+            snap: None,
+        };
+
+        let mut named = program.clone();
+        assert!(drop_run(&language, &mut named, held.clone(), false));
+        assert_eq!(named.stacks.len(), 2, "dropped free");
+
+        program.set_literal(id, &Slot::input("param"), String::new());
+        let before = program.to_ron();
+        assert!(!drop_run(&language, &mut program, held, false));
+        assert_eq!(program.to_ron(), before);
+    }
 }

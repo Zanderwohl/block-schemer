@@ -9,6 +9,7 @@ that hands them to `block_parse_gui::app::run`.
 ```sh
 cargo schemer                                              # a new program
 cargo schemer crates/block-schemer/examples/sum-of-squares.scmb
+cargo schemer-snapshot crates/block-schemer/examples/factorial.scmb factorial.png  # an image, no window
 ```
 
 ![Runs answered by Steel](images/04-schemer-run.png)
@@ -156,6 +157,13 @@ from Steel does not say which definition it came from.
 | `let` | `(let (bindings…) body…)` |
 | `display` | `(display obj __out)` given no port, shown as `(display obj)` unless the harness is |
 | `string_chars` | `(string char…)` |
+
+`define_procedure`'s formals, `lambda`'s and the variables of `let`'s
+bindings are scopes over their bodies; the names `define` and
+`define_procedure` give are global. A grip beside each name drags out a
+`variable` block in the declaring block's color that follows the name when it
+is renamed and is a problem outside its scope (`06-scopes.md`). A `variable`
+from the palette is still typed by hand.
 
 ## The library
 
